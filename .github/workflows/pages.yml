@@ -29,6 +29,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Enable GitHub Pages for Actions deployments
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Build static website and include the current installer
         run: python3 scripts/build-pages.py _site
       - name: Upload website
