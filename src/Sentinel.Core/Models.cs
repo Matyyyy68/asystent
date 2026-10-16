@@ -1,0 +1,26 @@
+namespace Sentinel.Core;
+public enum RiskLevel { Information, Low, Moderate, High, Critical }
+public enum EventStatus { New, Reviewed, FalsePositive }
+// Never persist page text, credentials or screenshots in this model.
+public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel Risk,
+    string Category, string Application, string Explanation, string Recommendation, EventStatus Status);
+public sealed record AppSettings(int RetentionDays = 30, bool Notifications = true, bool Paused = true,
+    int MinimumIntervalSeconds = 10,
+    string ExcludedApplications = "1password;bitwarden;keepass;keepassxc;credentialuibroker;logonui",
+    string ExcludedWindowTitles = "",
+    bool ExcludeBrowsers = false,
+    bool ExcludeMessaging = false,
+    bool CollectStaticText = true,
+    bool MonitorForegroundChanges = false);
+public interface IEventRepository
+{
+    Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);
+    Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default);
+    Task SetStatusAsync(long id, EventStatus status, CancellationToken cancellationToken = default);
+    Task DeleteHistoryAsync(CancellationToken cancellationToken = default);
+}
+public interface ISettingsRepository
+{
+    Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default);
+    Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default);
+}

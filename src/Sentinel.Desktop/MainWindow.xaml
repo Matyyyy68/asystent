@@ -1,0 +1,57 @@
+<Window x:Class="Sentinel.Desktop.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Sentinel AI" Width="1180" Height="850" MinWidth="850" MinHeight="600" Background="#F1F5F9" Foreground="#172033">
+<Grid Margin="24">
+ <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+ <StackPanel><TextBlock Text="Sentinel AI" FontSize="30" FontWeight="Bold"/><TextBlock Text="Lokalny asystent bezpieczeństwa · Reguły i UI Automation / Etap 2"/>
+  <Border Background="#FFF1CE" Padding="12" Margin="4,8"><DockPanel><Button DockPanel.Dock="Right" Content="{Binding Monitoring.PauseLabel}" Command="{Binding Monitoring.TogglePause}"/><TextBlock Text="{Binding Monitoring.ProtectionStatus}" TextWrapping="Wrap" VerticalAlignment="Center"/></DockPanel></Border>
+  <TextBlock Text="Analiza lokalna · Brak AI i reputacji online · Brak nagrywania ekranu i klawiatury"/>
+ </StackPanel>
+ <TabControl Grid.Row="1" Margin="4,12">
+  <TabItem Header="Analiza">
+   <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel DataContext="{Binding Monitoring}" Margin="12">
+    <TextBlock Text="Sprawdź aktywne okno" FontSize="20" FontWeight="SemiBold"/>
+    <TextBlock Text="Przycisk daje 3 sekundy na przełączenie okna. Czytamy wyłącznie dostępne statyczne etykiety UI Automation; nie odczytujemy wartości pól formularzy." TextWrapping="Wrap"/>
+    <Button Content="Analizuj aktywne okno za 3 sekundy" Command="{Binding Capture}" HorizontalAlignment="Left"/>
+    <TextBlock Text="Lub przeanalizuj ręcznie wklejoną treść" FontSize="18" FontWeight="SemiBold" Margin="4,18,4,4"/>
+    <TextBlock Text="Nie wklejaj haseł ani tokenów. Dane są analizowane lokalnie, usuwane z formularza po analizie i nie trafiają do historii." TextWrapping="Wrap"/>
+    <TextBox Text="{Binding ManualText, UpdateSourceTrigger=PropertyChanged}" MaxLength="16000" IsUndoEnabled="False" AcceptsReturn="True" TextWrapping="Wrap" Height="100" VerticalScrollBarVisibility="Auto" Margin="4"/>
+    <TextBlock Text="Rzeczywisty adres docelowy (opcjonalny, podany przez Ciebie — nie ustalony automatycznie)" TextWrapping="Wrap"/>
+    <TextBox Text="{Binding ManualUrl, UpdateSourceTrigger=PropertyChanged}" MaxLength="4096" IsUndoEnabled="False" Margin="4"/>
+    <TextBlock Text="Widoczny tekst adresu linku (opcjonalny, do porównania z celem)"/>
+    <TextBox Text="{Binding DisplayedUrl, UpdateSourceTrigger=PropertyChanged}" MaxLength="4096" IsUndoEnabled="False" Margin="4"/>
+    <Button Content="Analizuj ręcznie podane dane" Command="{Binding AnalyzeManual}" HorizontalAlignment="Left"/>
+    <Border Background="{Binding AlertBackground}" Padding="12" Margin="4,12" AutomationProperties.LiveSetting="Assertive"><TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontWeight="SemiBold"/></Border>
+    <TextBox Text="{Binding Details, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="White" Padding="12" MinHeight="160"/>
+   </StackPanel></ScrollViewer>
+  </TabItem>
+  <TabItem Header="Historia">
+   <Grid Margin="12"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel Orientation="Horizontal"><TextBlock Text="Historia lokalna · do 500 ostatnich zdarzeń" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding Events.Count, StringFormat=Liczba wyświetlonych: {0}}" VerticalAlignment="Center" Margin="16,4"/></StackPanel>
+    <DataGrid Grid.Row="1" ItemsSource="{Binding Events}" SelectedItem="{Binding SelectedEvent}" IsReadOnly="True" AutoGenerateColumns="False" CanUserAddRows="False" Margin="0,8"><DataGrid.Columns>
+     <DataGridTextColumn Header="Czas" Binding="{Binding Timestamp}"/><DataGridTextColumn Header="Ryzyko" Binding="{Binding Risk, Converter={StaticResource EnumLabel}}"/><DataGridTextColumn Header="Kategoria" Binding="{Binding Category, Converter={StaticResource EnumLabel}}"/><DataGridTextColumn Header="Aplikacja" Binding="{Binding Application}"/>
+     <DataGridTextColumn Header="Uzasadnienie i ograniczenia" Binding="{Binding Explanation}" Width="*"/><DataGridTextColumn Header="Zalecenie" Binding="{Binding Recommendation}" Width="*"/><DataGridTextColumn Header="Status" Binding="{Binding Status, Converter={StaticResource EnumLabel}}"/>
+    </DataGrid.Columns></DataGrid>
+    <WrapPanel Grid.Row="2"><Button Content="Odśwież" Command="{Binding Refresh}"/><Button Content="Test powiadomienia" Command="{Binding TestNotification}"/><Button Content="Fałszywy alarm" Command="{Binding FalsePositive}"/><Button Content="Eksport" Command="{Binding Export}"/><Button Content="Usuń historię…" Command="{Binding Clear}"/></WrapPanel>
+   </Grid>
+  </TabItem>
+  <TabItem Header="Ustawienia i prywatność">
+   <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="12">
+    <TextBlock Text="Lokalne dane" FontSize="20" FontWeight="SemiBold"/><TextBlock Text="{Binding DataPath}" TextWrapping="Wrap"/>
+    <WrapPanel><TextBlock Text="Retencja (1–365 dni):" VerticalAlignment="Center"/><TextBox Text="{Binding RetentionDays, UpdateSourceTrigger=PropertyChanged}" Width="65" Margin="6" VerticalContentAlignment="Center"/><CheckBox Content="Powiadomienia w aplikacji" IsChecked="{Binding Notifications}" Margin="12" VerticalAlignment="Center"/><Button Content="Kopia bazy" Command="{Binding Backup}"/></WrapPanel>
+    <StackPanel DataContext="{Binding Monitoring}">
+     <TextBlock Text="Zbieranie kontekstu — po zapisaniu ustawień" FontSize="18" FontWeight="SemiBold" Margin="4,18,4,4"/>
+     <TextBlock Text="Odstęp między odczytami (3–300 sekund):"/><TextBox Text="{Binding MinimumIntervalSeconds, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" Margin="4"/>
+     <CheckBox Content="Analizuj przy zmianie aktywnego okna (tylko gdy zbieranie jest włączone)" IsChecked="{Binding MonitorForegroundChanges}" Margin="4,10"/>
+     <CheckBox Content="Czytaj statyczne etykiety UI Automation" IsChecked="{Binding CollectStaticText}" Margin="4,10"/>
+     <CheckBox Content="Wyklucz znane przeglądarki" IsChecked="{Binding ExcludeBrowsers}" Margin="4,10"/>
+     <CheckBox Content="Wyklucz znane komunikatory i klientów poczty" IsChecked="{Binding ExcludeMessaging}" Margin="4,10"/>
+     <TextBlock Text="Wykluczone procesy (nazwy oddzielone średnikiem):"/><TextBox Text="{Binding ExcludedApplications, UpdateSourceTrigger=PropertyChanged}" MaxLength="2000" Margin="4"/>
+     <TextBlock Text="Wykluczone fragmenty tytułów okien (oddzielone średnikiem):"/><TextBox Text="{Binding ExcludedWindowTitles, UpdateSourceTrigger=PropertyChanged}" MaxLength="2000" Margin="4"/>
+     <TextBlock Text="Wykluczenia kategorii opierają się na nazwach znanych procesów, nie na niezawodnym rozpoznaniu treści. Dodaj własne procesy i tytuły. UI Automation może udostępniać poufne statyczne etykiety; maskowanie jest heurystyczne. Brak zrzutów, keyloggera, odczytu pól edycyjnych i żądań do analizowanych adresów." TextWrapping="Wrap" Margin="4,12"/>
+    </StackPanel>
+    <Button Content="Zapisz ustawienia" Command="{Binding Save}" HorizontalAlignment="Left"/>
+   </StackPanel></ScrollViewer>
+  </TabItem>
+  <TabItem Header="AI i baza wiedzy"><TextBlock Margin="20" TextWrapping="Wrap" Text="AI i import dokumentów nie są jeszcze zaimplementowane. Analiza używa lokalnych reguł i lokalnej Public Suffix List. Nie pobieramy modeli i nie łączymy się z serwerami."/></TabItem>
+ </TabControl>
+ <Border Grid.Row="2" Background="#DBEAFE" Padding="12" Margin="4" AutomationProperties.LiveSetting="Polite"><TextBlock Text="{Binding Message}" TextWrapping="Wrap"/></Border>
+</Grid></Window>

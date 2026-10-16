@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Version>0.2.0</Version>
+    <Product>Sentinel AI</Product>
+    <Title>Sentinel AI</Title>
+    <Description>Lokalny asystent bezpieczeństwa</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Sentinel.Core/Sentinel.Core.csproj"/>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
+  </ItemGroup>
+</Project>
