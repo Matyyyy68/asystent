@@ -117,10 +117,15 @@ function tableCell(value, sub = null) {
   if (sub) cell.append(node("span", "cell-sub", sub));
   return cell;
 }
-function pagedTable(container, rows, columns, getSearchText, emptyTitle = "Brak danych", emptyDescription = "Gdy pojawią się dane, zobaczysz je tutaj.") {
+function pagedTable(container, rows, columns, getSearchText, emptyTitle = "Brak danych", emptyDescription = "Gdy pojawią się dane, zobaczysz je tutaj.", filters = []) {
   container.replaceChildren();
   const tools = node("div", "table-tools"); const search = node("input");
   search.type = "search"; search.placeholder = "Szukaj…"; search.setAttribute("aria-label", "Szukaj w tabeli"); tools.append(search); container.append(tools);
+  const filterControls = filters.map(filter => {
+    const select = node("select"); select.setAttribute("aria-label", filter.label);
+    for (const [value, label] of filter.options) { const option = node("option", "", label); option.value = value; select.append(option); }
+    select.addEventListener("change", () => { page = 0; draw(); }); tools.append(select); return { filter, select };
+  });
   const wrap = node("div", "table-wrap"); const table = node("table"); const thead = node("thead"); const header = node("tr");
   let sortKey = ""; let sortDirection = 1;
   for (const column of columns) {
@@ -140,7 +145,7 @@ function pagedTable(container, rows, columns, getSearchText, emptyTitle = "Brak 
   const next = actionButton("Następna", () => { page++; draw(); }); pager.append(previous, counter, next); container.append(pager);
   function draw() {
     const needle = search.value.trim().toLocaleLowerCase("pl");
-    const filtered = rows.filter(row => !needle || getSearchText(row).toLocaleLowerCase("pl").includes(needle));
+    const filtered = rows.filter(row => (!needle || getSearchText(row).toLocaleLowerCase("pl").includes(needle)) && filterControls.every(({filter,select}) => select.value === "all" || String(filter.getValue(row)) === select.value));
     if (sortKey) filtered.sort((a, b) => String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? ""), "pl", { numeric: true, sensitivity: "base" }) * sortDirection);
     const pages = Math.max(1, Math.ceil(filtered.length / pageSize)); page = Math.min(page, pages - 1); tbody.replaceChildren();
     for (const row of filtered.slice(page * pageSize, (page + 1) * pageSize)) {
@@ -223,7 +228,7 @@ async function renderDevices() {
     { title: "Błąd", render: d => tableCell(d.lastError || "—") },
     { title: "Działania", render: d => { const cell = node("td"); cell.append(actionButton("Szczegóły", () => showDeviceDetails(d, groups))); if (!d.revoked && canSecurity()) cell.append(actionButton("Odłącz", () => revokeDevice(d))); return cell; } }
   ];
-  pagedTable(tableHost, devices, columns, d => `${d.name} ${d.id} ${d.group} ${d.clientVersion} ${d.lastError || ""}`, "Nie zarejestrowano urządzeń", "Utwórz zaproszenie w sekcji Grupy urządzeń.");
+  pagedTable(tableHost, devices, columns, d => `${d.name} ${d.id} ${d.group} ${d.clientVersion} ${d.lastError || ""}`, "Nie zarejestrowano urządzeń", "Utwórz zaproszenie w sekcji Grupy urządzeń.", [{ label: "Filtruj według stanu połączenia", options: [["all","Wszystkie stany"],["online","Online"],["offline","Offline"],["revoked","Unieważnione"]], getValue: d => d.revoked ? "revoked" : d.isOnline ? "online" : "offline" }]);
 }
 async function showDeviceDetails(device, groups) {
   const detail = node("section", "card"); const modal = node("dialog"); modal.className = "details-dialog";
@@ -251,7 +256,7 @@ async function renderGroups() {
   view.replaceChildren(pageHeading("Grupy urządzeń", "Grupy przypisują urządzenia i stanowią warstwę dziedziczenia polityk."));
   const row = node("div", "grid two-col"); const listCard = node("section", "card"); listCard.append(node("h2", "", "Zarządzane grupy"));
   const tableHost = node("div"); listCard.append(tableHost);
-  pagedTable(tableHost, groups, [{ title: "Nazwa", key: "name" }, { title: "Utworzono", render: g => tableCell(new Date(g.createdAt).toLocaleDateString("pl-PL")) }, { title: "Wersja polityki", key: "policyVersion" }, { title: "Działania", render: g => { const td = node("td"); td.append(actionButton("Polityka", () => { selectedScope = "group"; selectedTarget = g.id; void showSection("policies"); })); return td; } }], g => `${g.name} ${g.id}`, "Brak grup", "Utwórz grupę, aby przypisywać do niej urządzenia.");
+  pagedTable(tableHost, groups, [{ title: "Nazwa", key: "name" }, { title: "Utworzono", render: g => tableCell(new Date(g.createdAt).toLocaleDateString("pl-PL")) }, { title: "Wersja polityki", key: "policyVersion" }, { title: "Działania", render: g => { const td = node("td"); td.append(actionButton("Polityka", () => { selectedScope = "group"; selectedTarget = g.id; void showSection("policies"); })); return td; } }], g => `${g.name} ${g.id}`, "Brak grup", "Utwórz grupę, aby przypisywać do niej urządzenia.", [{ label: "Filtruj według wersji polityki", options: [["all","Wszystkie grupy"],["0","Wersja 0"],["changed","Zmienione polityki"]], getValue: g => Number(g.policyVersion) === 0 ? "0" : "changed" }]);
   row.append(listCard);
   if (canSecurity()) {
     const actions = node("div", "grid"); const createCard = node("form", "card"); createCard.append(node("h2", "", "Nowa grupa")); const name = inputField("Nazwa grupy", "name", "text", 80); const save = node("button", "button primary", "Utwórz grupę"); save.type = "submit"; createCard.append(name.label, name.input, save);
@@ -279,7 +284,10 @@ async function renderEvents() {
     { title: "Kategoria", key: "category" }, { title: "Ryzyko", render: e => tableCell(statusBadge(`${e.riskLevel}/4`, e.riskLevel >= 3 ? "danger" : e.riskLevel >= 2 ? "warning" : "info")) },
     { title: "Reguła", key: "ruleCode" }, { title: "Status", render: e => tableCell(statusBadge(e.status, e.status === "open" ? "warning" : e.status === "false_positive" ? "danger" : "success")) },
     { title: "Oznacz", render: e => { const td = node("td"); if (canSecurity() && e.status !== "false_positive") td.append(actionButton("Fałszywy alarm", async () => { await setEventStatus(e, "false_positive"); })); if (canSecurity() && e.status !== "resolved") td.append(actionButton("Rozwiązane", async () => { await setEventStatus(e, "resolved"); })); return td; } }
-  ], e => `${e.deviceId} ${e.category} ${e.ruleCode} ${e.status}`, "Brak zdarzeń", "Serwer nie otrzymał jeszcze metadanych zdarzeń.");
+  ], e => `${e.deviceId} ${e.category} ${e.ruleCode} ${e.status}`, "Brak zdarzeń", "Serwer nie otrzymał jeszcze metadanych zdarzeń.", [
+    { label: "Filtruj według statusu", options: [["all","Wszystkie statusy"],["open","Otwarte"],["resolved","Rozwiązane"],["false_positive","Fałszywe alarmy"]], getValue: e => e.status },
+    { label: "Filtruj według poziomu ryzyka", options: [["all","Każde ryzyko"],["4","Krytyczne"],["3","Wysokie"],["2","Średnie"],["1","Niskie"],["0","Informacyjne"]], getValue: e => e.riskLevel }
+  ]);
 }
 async function setEventStatus(event, status) {
   try { await request(`/events/${encodeURIComponent(event.deviceId)}/${encodeURIComponent(event.eventId)}/status`, { method: "PUT", body: JSON.stringify({ status }) }); toast("Zmieniono status zdarzenia."); await renderEvents(); }
@@ -340,7 +348,10 @@ async function renderUsers() {
     }
     return td;
   } }];
-  pagedTable(host, users, columns, u => `${u.username} ${u.role} ${u.disabled}`);
+  pagedTable(host, users, columns, u => `${u.username} ${u.role} ${u.disabled}`, "Brak kont administratorów", "Utwórz konto administratora, aby przyznać dostęp.", [
+    { label: "Filtruj według roli", options: [["all","Wszystkie role"],["SystemAdministrator","Administrator systemu"],["SecurityAdministrator","Administrator bezpieczeństwa"],["Operator","Operator"],["ReadOnly","Odczyt"]], getValue: u => u.role },
+    { label: "Filtruj według stanu konta", options: [["all","Wszystkie konta"],["active","Aktywne"],["disabled","Wyłączone"]], getValue: u => u.disabled ? "disabled" : "active" }
+  ]);
   if (canSystem()) {
     const form = node("form", "card"); form.append(node("h2", "", "Dodaj administratora")); const username = inputField("Nazwa użytkownika", "username", "text", 64); username.input.minLength = 3;
     const password = inputField("Hasło tymczasowe (14–128 znaków)", "password", "password", 128); password.input.minLength = 14;
@@ -352,7 +363,8 @@ async function renderUsers() {
 async function renderAudit() {
   const entries = await request("/audit?limit=500"); view.replaceChildren(pageHeading("Dziennik audytowy", "Operacje administratorów i zmiany stanu. Sekrety oraz treści zdarzeń nie są zapisywane."));
   const card = node("section", "card"); const host = node("div"); card.append(host); view.append(card);
-  pagedTable(host, entries, [{ title: "Czas", render: e => tableCell(new Date(e.timestamp).toLocaleString("pl-PL")) }, { title: "Wykonawca", key: "actorUsername" }, { title: "Operacja", key: "action" }, { title: "Cel", key: "targetId" }], e => `${e.actorUsername || ""} ${e.action} ${e.targetId || ""}`, "Dziennik jest pusty", "Zdarzenia administracyjne pojawią się po wykonaniu operacji.");
+  const actions = [...new Set(entries.map(e => e.action).filter(Boolean))].sort((a,b) => a.localeCompare(b,"pl"));
+  pagedTable(host, entries, [{ title: "Czas", render: e => tableCell(new Date(e.timestamp).toLocaleString("pl-PL")) }, { title: "Wykonawca", key: "actorUsername" }, { title: "Operacja", key: "action" }, { title: "Cel", key: "targetId" }], e => `${e.actorUsername || ""} ${e.action} ${e.targetId || ""}`, "Dziennik jest pusty", "Zdarzenia administracyjne pojawią się po wykonaniu operacji.", [{ label: "Filtruj według operacji", options: [["all","Wszystkie operacje"], ...actions.map(action => [action,action])], getValue: e => e.action }]);
 }
 
 $("#login-form").addEventListener("submit", async event => {
