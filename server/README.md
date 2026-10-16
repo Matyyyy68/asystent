@@ -2,7 +2,7 @@
 
 Wersja API i aplikacji jest wspólna z klientem i pochodzi z `eng/ProductVersion.props`; endpoint `/readyz` zwraca wersję uruchomionego serwera.
 
-Serwer jest odrębnym projektem w `server/`; istniejący klient WPF i jego reguły pozostają bez zmian. Wymagany jest .NET SDK 10.0.402.
+Serwer jest odrębnym projektem w `server/`; istniejący klient WPF i jego reguły pozostają bez zmian. Wymagany jest .NET SDK 10.0.402. API może działać jako usługa Windows przez `Microsoft.Extensions.Hosting.WindowsServices` 10.0.13.
 
 Panel `/admin/` ma centralną bazę FTS5 i konfigurację/test lokalnego Ollama na loopback serwera. Zainstalowane modele są wykrywane z API Ollama; instalator nie pobiera modeli. Administrator systemu może wykonać syntetyczny test. Analiza agentów wymaga jednocześnie polityki `includeContext=true`, providera `ollama` i potwierdzenia w żądaniu; surowy kontekst nie jest utrwalany na serwerze. Bez skonfigurowanego modelu serwer zwraca analizę regułową.
 
@@ -15,9 +15,17 @@ $env:Sentinel__DataDirectory = "$env:ProgramData\SentinelAI\Server"
 dotnet run --project server/src/Sentinel.Server.Api/Sentinel.Server.Api.csproj
 ```
 
-Bez zmiennych konfiguracyjnych API nasłuchuje wyłącznie na `http://127.0.0.1:5080`. Katalog danych domyślnie znajduje się w `%ProgramData%\SentinelAI\Server` na Windows i `/var/lib/sentinel-ai/server` na Linux. Konto procesu musi mieć prawo zapisu do tego katalogu. Lokalny serwer nie ma jeszcze instalatora ani usługi Windows.
+Bez zmiennych konfiguracyjnych API nasłuchuje wyłącznie na `http://127.0.0.1:5080`. Katalog danych domyślnie znajduje się w `%ProgramData%\SentinelAI\Server` na Windows i `/var/lib/sentinel-ai/server` na Linux. Konto procesu musi mieć prawo zapisu do tego katalogu. Host integruje Windows Service Control Manager; `server/scripts/install-windows-service.ps1` tworzy usługę działającą jako wirtualne konto `NT SERVICE\SentinelAI.Server`, ogranicza ACL danych, ustawia automatyczny start i odzyskiwanie po awarii, tworzy pierwsze konto w interaktywnym terminalu i sprawdza `/readyz`. Domyślnie usługa nasłuchuje wyłącznie na loopback HTTP; skrypt nie otwiera zapory. Dla pakietu self-contained Windows x64 użyj `server/scripts/package-windows.ps1`. Pakiet ZIP i skrypty administracyjne nie zastępują jeszcze graficznego instalatora MSI/EXE.
 
-Przy pierwszym uruchomieniu ustaw `Sentinel__BootstrapAdminUsername` (3–64 znaki ASCII: litery, cyfry, `.`, `_`, `@`, `-`) i `Sentinel__BootstrapAdminPassword` (14–128 znaków). Pierwszy administrator dostaje rolę `SystemAdministrator`; kolejne starty nie zmieniają ani nie resetują konta. Po pierwszym uruchomieniu usuń hasło ze stałego środowiska/kontenera/usługi. Proces usuwa je ze swojego środowiska po udanym bootstrapie. Jeśli zmienne bootstrapu są niepoprawne, serwer nie uruchomi się. Nie ma domyślnego hasła.
+Po rozpakowaniu pakietu Windows uruchom PowerShell jako administrator w katalogu pakietu:
+
+```powershell
+.\install-windows-service.ps1 -ProgramDirectory $PWD.Path
+```
+
+Skrypt poprosi w terminalu o nazwę i hasło pierwszego administratora; hasło jest maskowane. Usunięcie usługi zachowujące dane: `.emove-windows-service.ps1`. Usunięcie danych wymaga osobnego `-DeleteData` i dodatkowego wpisania `DELETE`.
+
+Przy pierwszym uruchomieniu możesz ustawić `Sentinel__BootstrapAdminUsername` (3–64 znaki ASCII: litery, cyfry, `.`, `_`, `@`, `-`) i `Sentinel__BootstrapAdminPassword` (14–128 znaków), albo uruchomić `Sentinel.Server.Api.exe --bootstrap-admin` w interaktywnym terminalu. Tryb terminalowy maskuje hasło i odrzuca przekierowane wejście/wyjście, aby sekret nie trafił do argumentów ani potoków. Pierwszy administrator dostaje rolę `SystemAdministrator`; kolejne starty nie zmieniają ani nie resetują konta. Po bootstrapie usuń sekrety ze stałego środowiska. Nie ma domyślnego hasła.
 
 Logowanie: `POST /api/v1/admin/auth/login` z `{ "username": "…", "password": "…" }`; odpowiedź zawiera token bearer ważny 12 godzin. Hasła są haszowane PBKDF2-HMAC-SHA256 z osobną losową solą. Logowanie ma limit 5 prób na 15 minut z jednego adresu IP. `PUT /api/v1/admin/auth/password` wymaga bieżącego i nowego hasła; unieważnia wszystkie sesje tego konta. `POST /api/v1/admin/auth/logout` unieważnia bieżącą sesję. Tokeny są przechowywane w bazie tylko jako SHA-256.
 
@@ -51,7 +59,7 @@ Panel działa pod `http://127.0.0.1:5080/admin/` i jest hostowany przez ten sam 
 
 Klient Enterprise ma lokalną trwałą kolejkę, paruje się zaproszeniem, chroni poświadczenie DPAPI i umożliwia ręczne wysłanie heartbeat oraz ograniczonych metadanych. Nie ma jeszcze automatycznej synchronizacji z retry/backoff ani egzekwowania pobranej polityki. Surowego kontekstu użytkownika nie przyjmuje się przez endpoint zdarzeń. Heartbeat przyjmuje wyłącznie jeden z kodów błędu `local_store`, `sync_failed`, `configuration_invalid`, `client_update`; nie przechowuje dowolnych komunikatów, które mogłyby zawierać dane prywatne. Domyślna retencja zdarzeń wynosi 90 dni i można ją ustawić przez `Sentinel:EventRetentionDays` (30–3650 dni); czyszczenie działa cyklicznie i przy przyjęciu zdarzeń. Limit rejestracji wynosi 20 prób/minutę/adres IP. Odpowiedzi API zawierają `X-Correlation-ID`; żądania są ograniczone do 64 KiB.
 
-Do dostępu spoza loopback ustaw HTTPS w Kestrel (`ASPNETCORE_URLS=https://<adres>:<port>` i chroniona konfiguracja certyfikatu Kestrel). Serwer przerwie start, gdy otrzyma zewnętrzny adres HTTP. Certyfikat CA musi zostać zaufany przez klientów; aplikacja nie pomija weryfikacji certyfikatów. Kreator konfiguracji TLS, firewall i test połączenia zostaną dodane w etapie instalatora.
+Do dostępu spoza loopback ustaw HTTPS w Kestrel (`ASPNETCORE_URLS=https://<adres>:<port>` i chroniona konfiguracja certyfikatu Kestrel). Serwer przerwie start, gdy otrzyma zewnętrzny adres HTTP. Certyfikat CA musi zostać zaufany przez klientów; aplikacja nie pomija weryfikacji certyfikatów. Pakiet nie ma jeszcze graficznego kreatora TLS/firewall ani EXE/MSI dla Windows Server.
 
 ## Kompilacja i testy
 

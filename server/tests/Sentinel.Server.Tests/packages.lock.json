@@ -145,8 +145,8 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "Sentinel.Core": "[0.3.0, )",
-          "Sentinel.Server.Core": "[0.3.0, )"
+          "Sentinel.Core": "[0.7.0, )",
+          "Sentinel.Server.Core": "[0.7.0, )"
         }
       }
     },

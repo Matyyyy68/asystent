@@ -9,11 +9,18 @@ using Sentinel.Server.Infrastructure;
 using Sentinel.Core.Knowledge;
 using Sentinel.Core.Analysis;
 
+if (args.Length == 1 && args[0] == "--bootstrap-admin")
+{
+    await BootstrapAdministratorAsync();
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
     WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
 });
+builder.Host.UseWindowsService(options => options.ServiceName = "Sentinel AI Server");
 var configuredUrls = builder.Configuration["urls"] ?? builder.Configuration["ASPNETCORE_URLS"];
 if (string.IsNullOrWhiteSpace(configuredUrls))
     builder.WebHost.UseUrls("http://127.0.0.1:5080");
@@ -480,6 +487,47 @@ authenticatedAgents.MapPost("/events", async (SubmitEventsBody? body, HttpContex
 app.Run();
 
 static string RandomToken(int bytes) => Convert.ToBase64String(RandomNumberGenerator.GetBytes(bytes)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+static async Task BootstrapAdministratorAsync()
+{
+    if (Console.IsInputRedirected)
+        throw new InvalidOperationException("Bootstrap wymaga interaktywnego terminala, aby hasło nie trafiło do argumentów ani potoków.");
+    var defaultDataDirectory = OperatingSystem.IsWindows()
+        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SentinelAI", "Server")
+        : Path.Combine("/var/lib", "sentinel-ai", "server");
+    var dataDirectory = Environment.GetEnvironmentVariable("Sentinel__DataDirectory") ?? defaultDataDirectory;
+    var databasePath = Path.GetFullPath(Path.Combine(dataDirectory, "sentinel-server.db"));
+    Console.Write("Nazwa pierwszego administratora: ");
+    var username = Console.ReadLine()?.Trim() ?? "";
+    if (!IsValidUsername(username)) throw new ArgumentException("Nazwa musi mieć 3–64 znaki: litery ASCII, cyfry, kropka, podkreślenie, @ lub myślnik.");
+    var password = ReadHiddenPassword("Hasło (14–128 znaków): ");
+    try
+    {
+        if (!AdminPasswordHasher.IsValid(password)) throw new ArgumentException("Hasło musi mieć 14–128 znaków i nie może zawierać znaków sterujących.");
+        var confirmation = ReadHiddenPassword("Powtórz hasło: ");
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(password), Encoding.UTF8.GetBytes(confirmation)))
+            throw new ArgumentException("Wpisane hasła różnią się.");
+        var repository = new SqliteServerStore(databasePath);
+        await repository.InitializeAsync();
+        var created = await repository.TryBootstrapAdminAsync(NormalizeUsername(username), new AdminPasswordHasher().Hash(password), DateTimeOffset.UtcNow);
+        if (!created) throw new InvalidOperationException("Konto administratora już istnieje. Bootstrap nie zmienia istniejących kont.");
+        Console.WriteLine("Utworzono pierwsze konto administratora. Hasło nie zostało zapisane w pliku konfiguracyjnym.");
+    }
+    finally { password = string.Empty; }
+}
+
+static string ReadHiddenPassword(string prompt)
+{
+    Console.Write(prompt);
+    var value = new StringBuilder();
+    while (true)
+    {
+        var key = Console.ReadKey(intercept: true);
+        if (key.Key == ConsoleKey.Enter) { Console.WriteLine(); break; }
+        if (key.Key == ConsoleKey.Backspace) { if (value.Length > 0) value.Length--; continue; }
+        if (!char.IsControl(key.KeyChar) && value.Length < 128) value.Append(key.KeyChar);
+    }
+    return value.ToString();
+}
 static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 static bool IsValidUsername(string? username) => username is { Length: >= 3 and <= 64 } && username.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '@' or '-');
 static string NormalizeUsername(string username) => username.Trim().ToLowerInvariant();
