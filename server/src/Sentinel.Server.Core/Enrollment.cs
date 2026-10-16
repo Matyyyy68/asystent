@@ -1,10 +1,10 @@
 namespace Sentinel.Server.Core;
 
-public sealed record InvitationRequest(string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations);
-public sealed record Invitation(string Id, string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, int RegistrationCount, bool Revoked);
+public sealed record InvitationRequest(string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, bool RequiresApproval = false);
+public sealed record Invitation(string Id, string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, int RegistrationCount, bool Revoked, bool RequiresApproval = false);
 public sealed record EnrollmentRequest(string InvitationCode, string DeviceName, string ClientVersion, string DeviceToken);
 public sealed record EnrollmentResult(string DeviceId, string DeviceToken, string Group, DateTimeOffset RegisteredAt);
-public sealed record Device(string Id, string Name, string Group, string ClientVersion, DateTimeOffset RegisteredAt, DateTimeOffset? LastSeenAt, bool Revoked, string? LastError);
+public sealed record Device(string Id, string Name, string Group, string ClientVersion, DateTimeOffset RegisteredAt, DateTimeOffset? LastSeenAt, bool Revoked, string? LastError, bool Approved = true);
 public enum AdminRole { SystemAdministrator, SecurityAdministrator, Operator, ReadOnly }
 public sealed record AdminIdentity(string Id, string Username, AdminRole Role, string SessionId);
 public sealed record AdminCredential(string Id, string Username, string PasswordHash, AdminRole Role, bool Disabled);
@@ -55,6 +55,7 @@ public interface IServerStore
     Task<Device?> AuthenticateDeviceAsync(string tokenHash, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Device>> ListDevicesAsync(CancellationToken cancellationToken = default);
     Task<bool> RevokeDeviceAsync(string id, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
+    Task<bool> SetDeviceApprovalAsync(string id, bool approved, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default);
     Task<EventBatchResult> IngestEventsAsync(string deviceId, IReadOnlyList<SecurityEventInput> events, DateTimeOffset receivedAt, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecurityEvent>> ListEventsAsync(int limit, string? deviceId = null, CancellationToken cancellationToken = default);

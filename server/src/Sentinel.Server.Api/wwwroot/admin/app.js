@@ -326,19 +326,30 @@ async function renderDevices() {
   const tableHost = node("section", "card"); view.append(tableHost);
   const columns = [
     { title: "Urządzenie", render: d => tableCell(d.name, d.id) }, { title: "Grupa", key: "group" }, { title: "Klient", key: "clientVersion" },
-    { title: "Połączenie", render: d => tableCell(statusBadge(d.revoked ? "Unieważnione" : d.isOnline ? "Online" : "Offline", d.revoked ? "danger" : d.isOnline ? "success" : "warning")) },
+    { title: "Połączenie", render: d => tableCell(statusBadge(d.revoked ? "Unieważnione / odrzucone" : !d.approved ? "Oczekuje na akceptację" : d.isOnline ? "Online" : "Offline", d.revoked ? "danger" : !d.approved ? "warning" : d.isOnline ? "success" : "warning")) },
     { title: "Ostatni sygnał", render: d => tableCell(d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString("pl-PL") : "Brak") },
     { title: "Błąd", render: d => tableCell(d.lastError || "—") },
-    { title: "Działania", render: d => { const cell = node("td"); cell.append(actionButton("Szczegóły", () => showDeviceDetails(d, groups))); if (!d.revoked && canSecurity()) cell.append(actionButton("Odłącz", () => revokeDevice(d))); return cell; } }
+    { title: "Działania", render: d => { const cell = node("td"); cell.append(actionButton("Szczegóły", () => showDeviceDetails(d, groups))); if (!d.revoked && canSecurity() && !d.approved) { cell.append(actionButton("Zatwierdź", () => setDeviceApproval(d, true))); cell.append(actionButton("Odrzuć", () => setDeviceApproval(d, false))); } else if (!d.revoked && canSecurity()) cell.append(actionButton("Odłącz", () => revokeDevice(d))); return cell; } }
   ];
-  pagedTable(tableHost, devices, columns, d => `${d.name} ${d.id} ${d.group} ${d.clientVersion} ${d.lastError || ""}`, "Nie zarejestrowano urządzeń", "Utwórz zaproszenie w sekcji Grupy urządzeń.", [{ label: "Filtruj według stanu połączenia", options: [["all","Wszystkie stany"],["online","Online"],["offline","Offline"],["revoked","Unieważnione"]], getValue: d => d.revoked ? "revoked" : d.isOnline ? "online" : "offline" }]);
+  pagedTable(tableHost, devices, columns, d => `${d.name} ${d.id} ${d.group} ${d.clientVersion} ${d.lastError || ""}`, "Nie zarejestrowano urządzeń", "Utwórz zaproszenie w sekcji Grupy urządzeń.", [{ label: "Filtruj według stanu połączenia", options: [["all","Wszystkie stany"],["online","Online"],["offline","Offline"],["pending","Oczekuje na akceptację"],["revoked","Unieważnione / odrzucone"]], getValue: d => d.revoked ? "revoked" : !d.approved ? "pending" : d.isOnline ? "online" : "offline" }]);
+}
+async function setDeviceApproval(device, approved) {
+  const message = approved ? `Zatwierdzić urządzenie „${device.name}”?` : `Odrzucić urządzenie „${device.name}” i unieważnić jego poświadczenie?`;
+  if (!window.confirm(message)) return;
+  try { await request(`/devices/${encodeURIComponent(device.id)}/approval`, { method: "PUT", body: JSON.stringify({ approved }) }); toast(approved ? "Urządzenie zatwierdzone." : "Urządzenie odrzucone i unieważnione."); await renderDevices(); }
+  catch (error) { toast(error.message, "error"); }
 }
 async function showDeviceDetails(device, groups) {
   const detail = node("section", "card"); const modal = node("dialog"); modal.className = "details-dialog";
   modal.append(pageHeading(device.name, device.id));
   const fields = node("div", "grid two-col");
-  for (const [name, value] of [["Grupa", device.group], ["Wersja klienta", device.clientVersion], ["Zarejestrowano", new Date(device.registeredAt).toLocaleString("pl-PL")], ["Ostatnia komunikacja", device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString("pl-PL") : "Brak"], ["Stan", device.revoked ? "Unieważnione" : device.isOnline ? "Online" : "Offline"], ["Ostatni błąd", device.lastError || "Brak"]]) { const card = node("div", "notice"); card.append(node("span", "muted small", name), node("div", "cell-main", value)); fields.append(card); }
+  for (const [name, value] of [["Grupa", device.group], ["Wersja klienta", device.clientVersion], ["Zarejestrowano", new Date(device.registeredAt).toLocaleString("pl-PL")], ["Ostatnia komunikacja", device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString("pl-PL") : "Brak"], ["Stan", device.revoked ? "Unieważnione / odrzucone" : !device.approved ? "Oczekuje na akceptację" : device.isOnline ? "Online" : "Offline"], ["Ostatni błąd", device.lastError || "Brak"]]) { const card = node("div", "notice"); card.append(node("span", "muted small", name), node("div", "cell-main", value)); fields.append(card); }
   modal.append(fields);
+  if (canSecurity() && !device.revoked && !device.approved) {
+    const approvals = node("section", "card"); approvals.append(node("h3", "", "Wymagana akceptacja administratora"));
+    approvals.append(actionButton("Zatwierdź urządzenie", async () => { await setDeviceApproval(device, true); modal.close(); }, "primary"));
+    approvals.append(actionButton("Odrzuć urządzenie", async () => { await setDeviceApproval(device, false); modal.close(); }, "danger")); modal.append(approvals);
+  }
   if (canSecurity() && !device.revoked) {
     const assign = node("form", "card"); assign.append(node("h3", "", "Przypisz do grupy"));
     const select = node("select"); select.required = true; for (const group of groups) { const option = node("option", "", group.name); option.value = group.id; if (group.name === device.group) option.selected = true; select.append(option); }
@@ -366,9 +377,10 @@ async function renderGroups() {
     createCard.addEventListener("submit", async e => { e.preventDefault(); try { await request("/groups", { method: "POST", body: JSON.stringify({ name: name.input.value.trim() }) }); toast("Utworzono grupę."); await renderGroups(); } catch (error) { toast(error.message, "error"); } }); actions.append(createCard);
     const inviteCard = node("form", "card"); inviteCard.append(node("h2", "", "Zaproszenie do rejestracji")); const group = inputField("Grupa", "group", "select"); for (const item of groups) { const opt = node("option", "", item.name); opt.value = item.name; group.input.append(opt); }
     const days = inputField("Ważność (dni)", "days", "number", 30); days.input.min = "1"; days.input.value = "7"; const max = inputField("Maksymalna liczba rejestracji", "maximumRegistrations", "number", 1000); max.input.min = "1"; max.input.value = "1";
-    const submit = node("button", "button primary", "Utwórz kod"); submit.type = "submit"; inviteCard.append(group.label, group.input, days.label, days.input, max.label, max.input, submit);
+    const approvalLabel = node("label", "field-label", "Wymagaj ręcznej akceptacji administratora"); const approval = node("input"); approval.type = "checkbox"; approvalLabel.prepend(approval);
+    const submit = node("button", "button primary", "Utwórz kod"); submit.type = "submit"; inviteCard.append(group.label, group.input, days.label, days.input, max.label, max.input, approvalLabel, submit);
     const output = node("div"); inviteCard.append(output);
-    inviteCard.addEventListener("submit", async e => { e.preventDefault(); try { const expiry = new Date(Date.now() + Number(days.input.value) * 86400000).toISOString(); const result = await request("/invitations", { method: "POST", body: JSON.stringify({ group: group.input.value, expiresAt: expiry, maximumRegistrations: Number(max.input.value) }) }); output.replaceChildren(node("p", "notice success", "Kod jest widoczny tylko teraz. Skopiuj go do bezpiecznego procesu wdrożeniowego."), node("div", "code-box", result.registrationCode)); toast("Utworzono zaproszenie. Kod nie zostanie ponownie wyświetlony."); } catch (error) { toast(error.message, "error"); } });
+    inviteCard.addEventListener("submit", async e => { e.preventDefault(); try { const expiry = new Date(Date.now() + Number(days.input.value) * 86400000).toISOString(); const result = await request("/invitations", { method: "POST", body: JSON.stringify({ group: group.input.value, expiresAt: expiry, maximumRegistrations: Number(max.input.value), requiresApproval: approval.checked }) }); output.replaceChildren(node("p", "notice success", result.requiresApproval ? "Kod utworzy urządzenie oczekujące na akceptację administratora. Kod jest widoczny tylko teraz." : "Kod jest widoczny tylko teraz. Skopiuj go do bezpiecznego procesu wdrożeniowego."), node("div", "code-box", result.registrationCode)); toast("Utworzono zaproszenie. Kod nie zostanie ponownie wyświetlony."); } catch (error) { toast(error.message, "error"); } });
     actions.append(inviteCard); row.append(actions);
   }
   view.append(row);

@@ -21,6 +21,9 @@ public sealed class EnrollmentTests : IDisposable
     private Task<Invitation> CreateInviteAsync(string code, int maximum = 1, DateTimeOffset? expires = null) =>
         _store.CreateInvitationAsync(new("Testowe", expires ?? DateTimeOffset.UtcNow.AddHours(1), maximum), Hash(code), "test-admin", DateTimeOffset.UtcNow);
 
+    private Task<Invitation> CreateApprovalInviteAsync(string code) =>
+        _store.CreateInvitationAsync(new("Testowe", DateTimeOffset.UtcNow.AddHours(1), 1, true), Hash(code), "test-admin", DateTimeOffset.UtcNow);
+
     [Fact]
     public async Task EnrollmentReturnsUniqueDeviceCredentialAndHeartbeatUpdatesPresence()
     {
@@ -92,6 +95,49 @@ public sealed class EnrollmentTests : IDisposable
         Assert.True(await _store.RevokeDeviceAsync(device.DeviceId, "test-admin", DateTimeOffset.UtcNow));
         Assert.Null(await _store.AuthenticateDeviceAsync(Hash("secret"), DateTimeOffset.UtcNow));
         Assert.True(Assert.Single(await _store.ListDevicesAsync()).Revoked);
+    }
+
+    [Fact]
+    public async Task ManualApprovalBlocksAgentAuthenticationUntilApprovedAndRejectInvalidatesCredential()
+    {
+        await CreateApprovalInviteAsync("approval-code");
+        var pending = await _store.EnrollAsync(new("approval-code", "PC-pending", "1", "pending-secret"), Hash("approval-code"), Hash("pending-secret"), DateTimeOffset.UtcNow);
+        Assert.NotNull(pending);
+        Assert.False(Assert.Single(await _store.ListDevicesAsync()).Approved);
+        Assert.Null(await _store.AuthenticateDeviceAsync(Hash("pending-secret"), DateTimeOffset.UtcNow));
+        Assert.True(await _store.SetDeviceApprovalAsync(pending.DeviceId, true, "test-admin", DateTimeOffset.UtcNow));
+        Assert.NotNull(await _store.AuthenticateDeviceAsync(Hash("pending-secret"), DateTimeOffset.UtcNow));
+
+        await CreateApprovalInviteAsync("rejection-code");
+        var rejected = await _store.EnrollAsync(new("rejection-code", "PC-rejected", "1", "rejected-secret"), Hash("rejection-code"), Hash("rejected-secret"), DateTimeOffset.UtcNow);
+        Assert.NotNull(rejected);
+        Assert.True(await _store.SetDeviceApprovalAsync(rejected.DeviceId, false, "test-admin", DateTimeOffset.UtcNow));
+        Assert.Null(await _store.AuthenticateDeviceAsync(Hash("rejected-secret"), DateTimeOffset.UtcNow));
+        Assert.False(await _store.SetDeviceApprovalAsync(rejected.DeviceId, true, "test-admin", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task ExistingSchemaFiveDatabaseGetsApprovedDefaultsDuringMigration()
+    {
+        var path = Path.Combine(_directory, "legacy.db");
+        await using (var legacy = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+        {
+            await legacy.OpenAsync();
+            await using var setup = legacy.CreateCommand();
+            setup.CommandText = """
+                CREATE TABLE invitations(id TEXT PRIMARY KEY,code_hash TEXT NOT NULL UNIQUE,device_group TEXT NOT NULL,expires_at TEXT NOT NULL,max_registrations INTEGER NOT NULL,registration_count INTEGER NOT NULL DEFAULT 0,revoked INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE devices(id TEXT PRIMARY KEY,token_hash TEXT NOT NULL UNIQUE,name TEXT NOT NULL,device_group TEXT NOT NULL,client_version TEXT NOT NULL,registered_at TEXT NOT NULL,last_seen_at TEXT NULL,revoked INTEGER NOT NULL DEFAULT 0,last_error TEXT NULL);
+                INSERT INTO devices(id,token_hash,name,device_group,client_version,registered_at) VALUES('legacy-device','legacy-hash','PC-old','Legacy','0.4.0','2026-01-01T00:00:00Z');
+                PRAGMA user_version=5;
+                """;
+            await setup.ExecuteNonQueryAsync();
+        }
+        var migrated = new SqliteServerStore(path);
+        await migrated.InitializeAsync();
+        var device = Assert.Single(await migrated.ListDevicesAsync());
+        Assert.True(device.Approved);
+        await migrated.InitializeAsync();
+        Assert.True(Assert.Single(await migrated.ListDevicesAsync()).Approved);
     }
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);

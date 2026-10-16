@@ -156,6 +156,7 @@ try:
     expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)).isoformat()
     invitation = request("/api/v1/admin/invitations", "POST", {
         "group": "Testowe", "expiresAt": expiry, "maximumRegistrations": 1,
+        "requiresApproval": True,
     }, system_session, 201)
     request("/api/v1/admin/invitations", "POST", {
         "group": "Testowe", "expiresAt": expiry, "maximumRegistrations": 1,
@@ -163,6 +164,10 @@ try:
     device = request("/api/v1/agents/enroll", "POST", {
         "invitationCode": invitation["registrationCode"], "deviceName": "TEST-01", "clientVersion": product_version,
     }, expected=201)
+    assert request("/api/v1/admin/devices", token=system_session)[0]["approved"] is False
+    request("/api/v1/agents/me", token=device["deviceToken"], expected=401)
+    request(f"/api/v1/admin/devices/{device['deviceId']}/approval", "PUT", {"approved": True}, operator_session, 403)
+    request(f"/api/v1/admin/devices/{device['deviceId']}/approval", "PUT", {"approved": True}, system_session, 204)
     assert request("/api/v1/agents/me", token=device["deviceToken"])["id"] == device["deviceId"]
     agent_configuration = request("/api/v1/agents/configuration", token=device["deviceToken"])
     assert agent_configuration["effective"]["analysisMode"] == "server"

@@ -32,18 +32,20 @@ public sealed class SqliteServerStore : IServerStore
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
-        if (version > 5) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
+        if (version > 6) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
         command.Parameters.Clear();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS invitations(
               id TEXT PRIMARY KEY, code_hash TEXT NOT NULL UNIQUE, device_group TEXT NOT NULL,
               expires_at TEXT NOT NULL, max_registrations INTEGER NOT NULL CHECK(max_registrations BETWEEN 1 AND 1000),
-              registration_count INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)));
+              registration_count INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)),
+              requires_approval INTEGER NOT NULL DEFAULT 0 CHECK(requires_approval IN (0,1)));
             CREATE TABLE IF NOT EXISTS devices(
               id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, name TEXT NOT NULL, device_group TEXT NOT NULL,
               client_version TEXT NOT NULL, registered_at TEXT NOT NULL, last_seen_at TEXT NULL,
-              revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), last_error TEXT NULL);
+              revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), last_error TEXT NULL,
+              approved INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1)));
             CREATE INDEX IF NOT EXISTS ix_devices_last_seen ON devices(last_seen_at);
             CREATE TABLE IF NOT EXISTS administrators(
               id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,
@@ -80,9 +82,22 @@ public sealed class SqliteServerStore : IServerStore
               SELECT lower(hex(randomblob(16))),device_group,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM invitations WHERE length(device_group)>0;
             INSERT OR IGNORE INTO device_groups(id,name,created_at)
               SELECT lower(hex(randomblob(16))),device_group,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM devices WHERE length(device_group)>0;
-            PRAGMA user_version=5;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
+        await EnsureColumnAsync(connection, "invitations", "requires_approval", "INTEGER NOT NULL DEFAULT 0 CHECK(requires_approval IN (0,1))", cancellationToken);
+        await EnsureColumnAsync(connection, "devices", "approved", "INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1))", cancellationToken);
+        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=6";
+        await setVersion.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task EnsureColumnAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken ct)
+    {
+        await using var inspect = connection.CreateCommand(); inspect.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await inspect.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return;
+        await reader.CloseAsync();
+        await using var alter = connection.CreateCommand(); alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {definition}";
+        await alter.ExecuteNonQueryAsync(ct);
     }
 
     public async Task CreateBackupAsync(string destinationPath, CancellationToken cancellationToken = default)
@@ -540,15 +555,16 @@ public sealed class SqliteServerStore : IServerStore
 
     public async Task<Invitation> CreateInvitationAsync(InvitationRequest request, string codeHash, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        var result = new Invitation(Guid.NewGuid().ToString("N"), request.Group, request.ExpiresAt.ToUniversalTime(), request.MaximumRegistrations, 0, false);
+        var result = new Invitation(Guid.NewGuid().ToString("N"), request.Group, request.ExpiresAt.ToUniversalTime(), request.MaximumRegistrations, 0, false, request.RequiresApproval);
         await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
             await using var command = connection.CreateCommand(); command.Transaction = (SqliteTransaction)transaction;
-            command.CommandText = "INSERT INTO invitations(id,code_hash,device_group,expires_at,max_registrations) VALUES($id,$hash,$group,$expires,$max)";
+            command.CommandText = "INSERT INTO invitations(id,code_hash,device_group,expires_at,max_registrations,requires_approval) VALUES($id,$hash,$group,$expires,$max,$approval)";
             command.Parameters.AddWithValue("$id", result.Id); command.Parameters.AddWithValue("$hash", codeHash);
             command.Parameters.AddWithValue("$group", result.Group); command.Parameters.AddWithValue("$expires", result.ExpiresAt.ToString("O"));
-            command.Parameters.AddWithValue("$max", result.MaximumRegistrations); await command.ExecuteNonQueryAsync(cancellationToken);
+            command.Parameters.AddWithValue("$max", result.MaximumRegistrations); command.Parameters.AddWithValue("$approval", result.RequiresApproval);
+            await command.ExecuteNonQueryAsync(cancellationToken);
             await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "invitation.created", result.Id, cancellationToken);
             await transaction.CommitAsync(cancellationToken); return result;
         }
@@ -576,12 +592,12 @@ public sealed class SqliteServerStore : IServerStore
         try
         {
             await using var invitationCommand = connection.CreateCommand(); invitationCommand.Transaction = (SqliteTransaction)transaction;
-            invitationCommand.CommandText = "SELECT id,device_group,expires_at,max_registrations,registration_count FROM invitations WHERE code_hash=$hash AND revoked=0";
+            invitationCommand.CommandText = "SELECT id,device_group,expires_at,max_registrations,registration_count,requires_approval FROM invitations WHERE code_hash=$hash AND revoked=0";
             invitationCommand.Parameters.AddWithValue("$hash", codeHash);
             await using var reader = await invitationCommand.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken)) { await transaction.RollbackAsync(cancellationToken); return null; }
             var invitationId = reader.GetString(0); var group = reader.GetString(1); var expires = DateTimeOffset.Parse(reader.GetString(2));
-            var maximum = reader.GetInt32(3); var count = reader.GetInt32(4); await reader.CloseAsync();
+            var maximum = reader.GetInt32(3); var count = reader.GetInt32(4); var approved = reader.GetInt32(5) == 0; await reader.CloseAsync();
             if (expires <= now || count >= maximum) { await transaction.RollbackAsync(cancellationToken); return null; }
             var device = new EnrollmentResult(Guid.NewGuid().ToString("N"), request.DeviceToken, group, now);
             await using var updateInvitation = connection.CreateCommand(); updateInvitation.Transaction = (SqliteTransaction)transaction;
@@ -589,10 +605,11 @@ public sealed class SqliteServerStore : IServerStore
             updateInvitation.Parameters.AddWithValue("$id", invitationId); updateInvitation.Parameters.AddWithValue("$now", now.ToString("O"));
             if (await updateInvitation.ExecuteNonQueryAsync(cancellationToken) != 1) { await transaction.RollbackAsync(cancellationToken); return null; }
             await using var insertDevice = connection.CreateCommand(); insertDevice.Transaction = (SqliteTransaction)transaction;
-            insertDevice.CommandText = "INSERT INTO devices(id,token_hash,name,device_group,client_version,registered_at,last_seen_at) VALUES($id,$token,$name,$group,$version,$now,$now)";
+            insertDevice.CommandText = "INSERT INTO devices(id,token_hash,name,device_group,client_version,registered_at,last_seen_at,approved) VALUES($id,$token,$name,$group,$version,$now,$now,$approved)";
             insertDevice.Parameters.AddWithValue("$id", device.DeviceId); insertDevice.Parameters.AddWithValue("$token", deviceTokenHash);
             insertDevice.Parameters.AddWithValue("$name", request.DeviceName); insertDevice.Parameters.AddWithValue("$group", group);
             insertDevice.Parameters.AddWithValue("$version", request.ClientVersion); insertDevice.Parameters.AddWithValue("$now", now.ToString("O"));
+            insertDevice.Parameters.AddWithValue("$approved", approved);
             await insertDevice.ExecuteNonQueryAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); return device;
         }
         catch { await transaction.RollbackAsync(cancellationToken); throw; }
@@ -601,7 +618,7 @@ public sealed class SqliteServerStore : IServerStore
     public async Task<Device?> AuthenticateDeviceAsync(string tokenHash, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error FROM devices WHERE token_hash=$hash AND revoked=0";
+        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved FROM devices WHERE token_hash=$hash AND revoked=0 AND approved=1";
         command.Parameters.AddWithValue("$hash", tokenHash);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
@@ -611,7 +628,7 @@ public sealed class SqliteServerStore : IServerStore
     public async Task<IReadOnlyList<Device>> ListDevicesAsync(CancellationToken cancellationToken = default)
     {
         var items = new List<Device>(); await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error FROM devices ORDER BY name COLLATE NOCASE";
+        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved FROM devices ORDER BY name COLLATE NOCASE";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) items.Add(ReadDevice(reader)); return items;
     }
@@ -626,6 +643,24 @@ public sealed class SqliteServerStore : IServerStore
             command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$invalidated", Guid.NewGuid().ToString("N"));
             if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) { await transaction.RollbackAsync(cancellationToken); return false; }
             await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "device.revoked", id, cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<bool> SetDeviceApprovalAsync(string id, bool approved, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using var command = connection.CreateCommand(); command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = approved
+                ? "UPDATE devices SET approved=1 WHERE id=$id AND revoked=0 AND approved=0"
+                : "UPDATE devices SET revoked=1,token_hash=$invalidated WHERE id=$id AND revoked=0 AND approved=0";
+            command.Parameters.AddWithValue("$id", id);
+            if (!approved) command.Parameters.AddWithValue("$invalidated", Guid.NewGuid().ToString("N"));
+            if (await command.ExecuteNonQueryAsync(cancellationToken) != 1) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, approved ? "device.approved" : "device.rejected", id, cancellationToken);
             await transaction.CommitAsync(cancellationToken); return true;
         }
         catch { await transaction.RollbackAsync(cancellationToken); throw; }
@@ -728,5 +763,5 @@ public sealed class SqliteServerStore : IServerStore
 
     private static Device ReadDevice(SqliteDataReader reader) => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
         DateTimeOffset.Parse(reader.GetString(4)), reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)), reader.GetInt32(6) != 0,
-        reader.IsDBNull(7) ? null : reader.GetString(7));
+        reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetInt32(8) != 0);
 }

@@ -230,8 +230,8 @@ allAdmins.MapGet("/devices", async (IServerStore repository, CancellationToken c
 {
     var now = DateTimeOffset.UtcNow; var items = await repository.ListDevicesAsync(ct);
     return Results.Ok(items.Select(device => new { device.Id, device.Name, device.Group, device.ClientVersion,
-        device.RegisteredAt, device.LastSeenAt, isOnline = device.LastSeenAt is { } seen && now - seen <= TimeSpan.FromMinutes(2),
-        device.Revoked, device.LastError }));
+        device.RegisteredAt, device.LastSeenAt, isOnline = device.Approved && !device.Revoked && device.LastSeenAt is { } seen && now - seen <= TimeSpan.FromMinutes(2),
+        device.Revoked, device.Approved, device.LastError }));
 });
 allAdmins.MapGet("/groups", async (IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ListGroupsAsync(ct)));
 allAdmins.MapGet("/events", async (int? limit, string? deviceId, IServerStore repository, CancellationToken ct) =>
@@ -348,9 +348,9 @@ securityAdmins.MapPost("/invitations", async (CreateInvitationBody body, HttpCon
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["group"] = ["Wybierz istniejącą grupę urządzeń."] });
     var code = RandomToken(24);
     var administrator = (AdminIdentity)context.Items["admin"]!;
-    var invitation = await repository.CreateInvitationAsync(new(body.Group.Trim(), body.ExpiresAt, body.MaximumRegistrations), HashToken(code), administrator.Username, now, ct);
+    var invitation = await repository.CreateInvitationAsync(new(body.Group.Trim(), body.ExpiresAt, body.MaximumRegistrations, body.RequiresApproval), HashToken(code), administrator.Username, now, ct);
     return Results.Json(new { invitation.Id, invitation.Group,
-        invitation.ExpiresAt, invitation.MaximumRegistrations, registrationCode = code }, statusCode: StatusCodes.Status201Created);
+        invitation.ExpiresAt, invitation.MaximumRegistrations, invitation.RequiresApproval, registrationCode = code }, statusCode: StatusCodes.Status201Created);
 });
 securityAdmins.MapDelete("/invitations/{id}", async (string id, HttpContext context, IServerStore repository, CancellationToken ct) =>
 {
@@ -361,6 +361,12 @@ securityAdmins.MapDelete("/devices/{id}", async (string id, HttpContext context,
 {
     var administrator = (AdminIdentity)context.Items["admin"]!;
     return await repository.RevokeDeviceAsync(id, administrator.Username, DateTimeOffset.UtcNow, ct) ? Results.NoContent() : Results.NotFound();
+});
+securityAdmins.MapPut("/devices/{id}/approval", async (string id, SetDeviceApprovalBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    var administrator = (AdminIdentity)context.Items["admin"]!;
+    return await repository.SetDeviceApprovalAsync(id, body.Approved, administrator.Username, DateTimeOffset.UtcNow, ct)
+        ? Results.NoContent() : Results.NotFound();
 });
 securityAdmins.MapGet("/audit", async (int? limit, IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ReadAuditAsync(limit ?? 100, ct)));
 securityAdmins.MapPut("/events/{deviceId}/{eventId}/status", async (string deviceId, string eventId, SetEventStatusBody body,
@@ -563,7 +569,7 @@ static Func<EndpointFilterInvocationContext, EndpointFilterDelegate, ValueTask<o
     return await next(context);
 };
 
-sealed record CreateInvitationBody(string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations);
+sealed record CreateInvitationBody(string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, bool RequiresApproval = false);
 sealed record EnrollmentBody(string InvitationCode, string DeviceName, string ClientVersion);
 sealed record HeartbeatBody(string? LastError);
 sealed record AdminLoginBody(string Username, string Password);
@@ -573,6 +579,7 @@ sealed record SetRoleBody(string Role);
 sealed record ChangePasswordBody(string CurrentPassword, string NewPassword);
 sealed record CreateGroupBody(string Name);
 sealed record SetDeviceGroupBody(string GroupId);
+sealed record SetDeviceApprovalBody(bool Approved);
 sealed record PolicyWriteBody(PolicyDocument? Policy, long ExpectedVersion, bool ConfirmedSensitiveChange = false);
 sealed record SubmitEventsBody(IReadOnlyList<SecurityEventInput>? Events);
 sealed record SetEventStatusBody(string Status);
