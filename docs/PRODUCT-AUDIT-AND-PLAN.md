@@ -10,7 +10,7 @@ Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.
 | `Sentinel.Desktop` | WPF x64 dla Windows 10/11; tray, ręczna analiza i opcjonalna analiza przy zmianie aktywnego okna. Nie jest filtrem sieciowym, antywirusem ani monitoringiem ekranowym. |
 | LocalStore / wiedza lokalna | Historia i ustawienia pozostają w `sentinel.db`; osobny `knowledge.db` ma wersjonowane FTS5, import TXT/MD/DOCX, fragmentację, wyszukiwanie testowe, usuwanie i kopię. To lokalne wyszukiwanie pełnotekstowe, bez embeddingów. |
 | Server API | ASP.NET Core + SQLite, HTTPS poza loopback, bootstrap administratora, sesje/role/audyt, zaproszenia i tożsamości urządzeń, heartbeat, grupy/polityki, ograniczone zdarzenia, centralne FTS5 i loopback Ollama z endpointem analizy wymagającym zgody. Hostuje panel admin. |
-| Installer | NSIS x64, samodzielna instalacja per-user Windows 10/11, runtime w paczce, mutex, hash payloadu, wybór profilu User/EnterpriseClient i re-install. Odinstalowanie pyta o usunięcie znanych plików bazy. Nie instaluje Enterprise Server ani usługi. |
+| Installer | NSIS x64 dla klienta User/EnterpriseClient oraz administratora Windows Server. Klient: instalacja per-user, runtime, mutex, manifest i zachowanie danych. Serwer: self-contained x64, usługa Windows z bootstrapem konta i kontrolą `/readyz`; brak wizardu TLS/LAN i testów na rzeczywistym Windows Server. |
 
 ## Braki wykryte w kodzie
 
@@ -19,7 +19,7 @@ Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.
 - Klient Enterprise paruje się przez HTTPS, przechowuje token w DPAPI, pobiera wersjonowaną politykę, synchronizuje minimalne metadane w tle z retry/backoff/jitter i stosuje interwał analizy, wykluczenia aplikacji oraz poziom powiadomień. Tryb serwerowy nie wysyła treści bez jawnej zgody. Nadal brakuje automatycznej analizy serwerowej, wyboru kategorii zdarzeń oraz centralnego statusu zgodności.
 - Przywracanie serwerowej bazy działa jako narzędzie offline `scripts/restore-server-backup.py`: wymaga jawnych flag potwierdzenia zatrzymania i podmiany, waliduje schemat/integralność, robi kopię aktualnej bazy, a następnie podmienia plik atomowo. Operator musi zatrzymać proces serwera przed wywołaniem.
 - API przyjmuje politykę i metadane, a analizę kontekstu wyłącznie po jawnym potwierdzeniu agenta i zezwoleniu polityki. Nie ma ręcznej akceptacji, rotacji poświadczeń, przywracania kopii, raportowania wersji zgodności ani API diagnostyki hosta.
-- API integruje Windows Service Control Manager; skrypt wdrożeniowy tworzy usługę na wirtualnym koncie serwisowym, ACL katalogu danych, restart po awarii i interaktywny bootstrap administratora. Brakuje graficznego instalatora Enterprise Server, kreatora TLS/firewall i natywnego testu usługi na Windows Server.
+- API integruje Windows Service Control Manager; instalator tworzy usługę na wirtualnym koncie serwisowym, ACL katalogu danych, restart po awarii i interaktywny bootstrap administratora. Brakuje kreatora TLS/firewall, natywnego testu usługi na Windows Server i bezpiecznej konfiguracji dostępu z LAN.
 - Instalator ma strony MUI NSIS ze zmienioną paletą/tekstem i wyborem profilu; nie jest aplikacją WPF. Instalacja Enterprise Server/usługi i jej bootstrap są nadal niedostępne.
 - Sprzęt jest odczytywany lokalnie przez standardowe API/registry; adaptery raportują nazwę, ale nie VRAM/backend/sterownik. NPU jest jawnie unknown. Nie skanujemy plików, skrzynek, cookies ani historii przeglądarki. Inne programy ochronne są wykrywane heurystycznie wyłącznie z rejestru uninstall i lista nie jest pełna.
 - Nie istnieje tryb/priorytet, który mógłby bezpiecznie zmienić poziom modelowej analizy. Obecne rekomendowanie wybiera wyłącznie zaimplementowaną analizę lokalną i nie wymyśla profilu modelu.
@@ -36,6 +36,6 @@ Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.
 2. **Następne:** PDF, lokalny runtime wbudowany lub katalog kompatybilności modeli, wiarygodne wymagania pamięci oraz wyszukiwanie semantyczne/embeddingi.
 3. **Częściowo wdrożone:** parowanie Enterprise przez HTTPS, token DPAPI, pobieranie i egzekwowanie ograniczonej polityki, lokalna kolejka oraz synchronizacja metadanych i heartbeat w tle z retry/backoff/jitter. **Następne:** jawna zgoda na analizę serwerową z UI agenta, kategorie zdarzeń, diagnostyka i rotacja.
 4. **Częściowo wdrożone:** serwerowy loopback Ollama, centralne FTS5, limity czasu, test modelu, analiza agenta z bramką zgody i tworzenie/przywracanie kopii bazy. **Następne:** limity współbieżności, PDF/embeddingi, rotacja i wersje/zgodność.
-5. **Częściowo wdrożone:** API jako Windows Service oraz samodzielny pakiet ZIP/skrypty instalacji i usuwania. **Następne:** graficzny instalator Windows Server, kreator TLS/firewall, aktualizacja/rollback wersji oraz natywne scenariusze Windows Server.
+5. **Częściowo wdrożone:** graficzny instalator Windows Server, API jako Windows Service, self-contained pakiet oraz kopie/odtwarzanie. **Następne:** kreator TLS/firewall, aktualizacja/rollback wersji oraz natywne scenariusze Windows Server.
 
 Etapów 2–5 nie oznaczamy jako dostarczonych, dopóki nie ma rzeczywistych komponentów, testów scenariuszy oraz binariów, które je zawierają.

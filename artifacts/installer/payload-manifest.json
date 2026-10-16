@@ -202,22 +202,22 @@
   {
     "path": "Sentinel.Core.dll",
     "size": 523264,
-    "sha256": "b64dcb2707138e1689e353b164552d4700934c04f246433ec65b72b1e88c0585"
+    "sha256": "f6111f2b13e599619470f5eebfde67e79abba2178c4aabbc62430b9d18b16888"
   },
   {
     "path": "Sentinel.Desktop.deps.json",
     "size": 41782,
-    "sha256": "48c2acf69b4e75da4139323d86bb37ec4fb599597d2da361889d2d26c5a5a317"
+    "sha256": "f51da6958e671ac7d7739d4002751c145a87b8a03936ac63c11411fcc36b149c"
   },
   {
     "path": "Sentinel.Desktop.dll",
     "size": 134144,
-    "sha256": "0b5fde8497ef03b20161bd047bda46b52fdfd4c35f7077edca2d144b0bd41b26"
+    "sha256": "156b3d84212ccb9507b657beaf19ee5a8d52f2c63a358ad313062fa9989dbc53"
   },
   {
     "path": "Sentinel.Desktop.exe",
     "size": 162816,
-    "sha256": "5d39596d63f444da590dc4beecd70fc99ee8059cdf44b7a3d923d9a437d55585"
+    "sha256": "206687d263d96d085f3b26467c326f42ef77fda4d698ab2e47d14b9eab28ebd2"
   },
   {
     "path": "Sentinel.Desktop.runtimeconfig.json",

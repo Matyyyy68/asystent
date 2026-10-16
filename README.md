@@ -4,7 +4,7 @@ Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. *
 
 ## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.7.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle i egzekwuje wybrane ograniczenia polityki; treść kontekstu nie jest wysyłana automatycznie. Dla serwera dostępny jest self-contained pakiet Windows x64 i skrypt instalujący go jako usługę; graficzny instalator Windows Server pozostaje do wykonania. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
+Plik: `artifacts/installer/SentinelAI-0.8.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle i egzekwuje wybrane ograniczenia polityki; treść kontekstu nie jest wysyłana automatycznie. Dla serwera dostępny jest graficzny instalator Windows Server oraz self-contained pakiet ZIP. Serwer domyślnie nasłuchuje tylko na loopback; kreator TLS/firewall dla dostępu LAN pozostaje do wykonania. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.

@@ -12,6 +12,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Publikowanie serwera nie powiodło się.' }
     Copy-Item (Join-Path $PSScriptRoot 'install-windows-service.ps1') $stage
     Copy-Item (Join-Path $PSScriptRoot 'remove-windows-service.ps1') $stage
+    Copy-Item (Join-Path $PSScriptRoot 'expand-package.ps1') $stage
     Copy-Item (Join-Path $root 'docs\SERVER-BACKUP-RESTORE.md') (Join-Path $stage 'BACKUP-RESTORE.md')
     Copy-Item (Join-Path $root 'server\README.md') (Join-Path $stage 'README.md')
     New-Item -ItemType Directory -Force -Path $destination | Out-Null
