@@ -2,6 +2,8 @@
 
 Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.
 
+Uzupełnienie stanu klienta po wydaniu 0.13.0: pierwszy przepływ Edge/Chrome przez rozszerzenie MV3, host Native Messaging, lokalne heurystyki URL, lokalne zdarzenia i status kontaktu opisano w [BROWSER-INTEGRATION.md](BROWSER-INTEGRATION.md). Integracja nie ma jeszcze feedu reputacji, gwarantowanej blokady ani dystrybucji sklepowej; nie oznacza to ukończenia docelowej ochrony przeglądania.
+
 ## Co działa
 
 | Obszar | Stan i granica |

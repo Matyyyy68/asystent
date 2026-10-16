@@ -138,6 +138,10 @@ Function .onInstSuccess
  ${Else}
   WriteRegStr HKCU "Software\SentinelAI" "ProductVariant" "EnterpriseClient"
  ${EndIf}
+ ExecWait '"$INSTDIR\app\BrowserHost\Sentinel.UrlHost.exe" --register' $0
+ ${If} $0 != 0
+  MessageBox MB_OK|MB_ICONEXCLAMATION "Nie udało się zarejestrować lokalnego połączenia z przeglądarką. Sentinel AI działa dalej; szczegóły znajdziesz w Pomocy." /SD IDOK
+ ${EndIf}
 FunctionEnd
 Function LaunchApplication
  Call UnlockApplication
@@ -239,6 +243,11 @@ FunctionEnd
 
 Section "Uninstall"
  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SentinelAI"
+ ExecWait '"$INSTDIR\app\BrowserHost\Sentinel.UrlHost.exe" --unregister' $0
+ DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck"
+ DeleteRegKey HKCU "Software\Microsoft\Edge\NativeMessagingHosts\com.sentinelai.urlcheck"
+ Delete "$INSTDIR\app\BrowserHost\com.sentinelai.urlcheck.json"
+ Delete "$INSTDIR\app\BrowserHost\com.sentinelai.urlcheck.json.new"
  ; Only delete files listed when the package was built. Never recursively remove
  ; the application root: a user might have placed private files or data there.
  !include "${REMOVE_MANIFEST}"

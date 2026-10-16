@@ -24,6 +24,7 @@ def main():
     parser.add_argument('--dotnet', default='dotnet')
     parser.add_argument('--makensis', default='makensis')
     args = parser.parse_args()
+    run(['python3', ROOT / 'scripts/check-browser-extension.py'])
     version = ET.parse(ROOT / 'eng/ProductVersion.props').findtext('./PropertyGroup/VersionPrefix')
     if not version or not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise ValueError('Expected a numeric three-part application version')
@@ -38,11 +39,16 @@ def main():
     run([args.dotnet, 'build', 'Sentinel.sln', '-c', 'Release', '--no-restore', '--disable-build-servers', '-m:1', '-nr:false'])
     run([args.dotnet, 'test', 'tests/Sentinel.Tests/Sentinel.Tests.csproj', '-c', 'Release', '--no-build', '--no-restore', '--disable-build-servers', '-m:1', '-nr:false'])
     run([args.dotnet, 'publish', 'src/Sentinel.Desktop/Sentinel.Desktop.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=false', '-p:RestoreLockedMode=true', '--disable-build-servers', '-m:1', '-nr:false', '-o', payload])
+    browser_host = build / 'browser-host'
+    run([args.dotnet, 'publish', 'src/Sentinel.UrlHost/Sentinel.UrlHost.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=true', '-p:IncludeNativeLibrariesForSelfExtract=true', '-p:RestoreLockedMode=true', '--disable-build-servers', '-m:1', '-nr:false', '-o', browser_host])
+    shutil.copytree(browser_host, payload / 'BrowserHost')
+    shutil.copytree(ROOT / 'browser-extension', payload / 'BrowserExtension')
     for pdb in payload.rglob('*.pdb'):
         pdb.unlink()
     shutil.copy2(ROOT / 'installer/Pomoc.html', payload)
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', payload)
-    for name in ['Sentinel.Desktop.exe', 'Sentinel.Desktop.dll', 'Sentinel.Core.dll', 'coreclr.dll', 'e_sqlite3.dll']:
+    for name in ['Sentinel.Desktop.exe', 'Sentinel.Desktop.dll', 'Sentinel.Core.dll', 'coreclr.dll', 'e_sqlite3.dll',
+                 'BrowserHost/Sentinel.UrlHost.exe', 'BrowserExtension/manifest.json', 'BrowserExtension/background.js']:
         if not (payload / name).is_file():
             raise RuntimeError(f'Missing required application file: {name}')
     runtime = json.loads((payload / 'Sentinel.Desktop.runtimeconfig.json').read_text())

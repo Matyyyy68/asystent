@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Sentinel.UrlHost</AssemblyName>
+    <RootNamespace>Sentinel.UrlHost</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Sentinel.Core/Sentinel.Core.csproj"
+                      GlobalPropertiesToRemove="PublishSingleFile;SelfContained;IncludeNativeLibrariesForSelfExtract" />
+    <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="10.0.13" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

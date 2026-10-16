@@ -120,8 +120,16 @@ public partial class App : System.Windows.Application
                     PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await server.WaitForConnectionAsync(cancellationToken);
                 var signal = new byte[1];
-                if (await server.ReadAsync(signal, cancellationToken) == 1 && signal[0] == 1)
+                if (await server.ReadAsync(signal, cancellationToken) != 1) continue;
+                if (signal[0] == 1)
                     _ = Dispatcher.BeginInvoke(new Action(() => tray?.ShowWindow()));
+                else if (signal[0] == 2)
+                    _ = Dispatcher.BeginInvoke(new Action(async () =>
+                    {
+                        if (services?.GetService<MainViewModel>() is { } model) await model.RefreshFromBrowserAsync();
+                    }));
+                else if (signal[0] == 3)
+                    _ = Dispatcher.BeginInvoke(new Action(() => services?.GetService<MainViewModel>()?.RefreshBrowserIntegrationStatus()));
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }

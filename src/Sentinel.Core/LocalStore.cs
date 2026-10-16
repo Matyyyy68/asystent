@@ -96,7 +96,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         Validate(settings); await using var c = await Open(cancellationToken);
         await Execute(c, "INSERT INTO settings VALUES(1,$j) ON CONFLICT(id) DO UPDATE SET json=$j", cancellationToken, ("$j", JsonSerializer.Serialize(settings)));
     }
-    public async Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default)
+    public Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: true, cancellationToken);
+    /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
+    public Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: false, cancellationToken);
+    private async Task<long> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise, CancellationToken cancellationToken)
     {
         if (!Enum.IsDefined(item.Risk) || !Enum.IsDefined(item.Status)) throw new ArgumentException("Nieprawidłowe zdarzenie.");
         foreach (var text in new[] {item.Category,item.Application,item.Explanation,item.Recommendation})
@@ -106,7 +109,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             ("$t", item.Timestamp.ToUniversalTime().ToString("O")), ("$r", (int)item.Risk), ("$c", item.Category), ("$a", item.Application),
             ("$e", item.Explanation), ("$n", item.Recommendation), ("$s", (int)item.Status));
         using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT last_insert_rowid()"; var id = (long)(await cmd.ExecuteScalarAsync(cancellationToken))!;
-        if (item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
+        if (enqueueEnterprise && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
         {
             var category = item.Category.ToLowerInvariant() switch
             {

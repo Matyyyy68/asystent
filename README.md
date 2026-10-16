@@ -1,10 +1,10 @@
 # Sentinel AI
 
-Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. **Dostarczone: fundament i zasadnicza implementacja analizy lokalnej.** Opcjonalny lokalny provider Ollama oraz prywatna baza FTS5 dla TXT/Markdown/DOCX są dostępne; serwer ma centralne FTS5 i loopback Ollama. Natywny odczyt UI Automation wymaga walidacji na interaktywnym Windows. Brak wyszukiwania wektorowego, parsera PDF i integracji z przeglądarką.
+Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. **Dostarczono pierwszy etap integracji Edge/Chrome przez rozszerzenie Chromium i Native Messaging.** Opcjonalny lokalny provider Ollama oraz prywatna baza FTS5 dla TXT/Markdown/DOCX są dostępne; serwer ma centralne FTS5 i loopback Ollama. Natywny odczyt UI Automation i instalacja rozszerzenia wymagają walidacji na interaktywnym Windows. Brak reputacji z feedu threat intelligence, wsparcia Firefoksa, wyszukiwania wektorowego i parsera PDF.
 
 ## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.12.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle, egzekwuje wybrane ograniczenia polityki i umożliwia rotację tokena; treść kontekstu nie jest wysyłana automatycznie. Dla serwera dostępny jest graficzny instalator Windows Server oraz self-contained pakiet ZIP. Serwer domyślnie nasłuchuje tylko na loopback; kreator TLS/firewall dla dostępu LAN pozostaje do wykonania. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
+Plik: `artifacts/installer/SentinelAI-0.13.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle, egzekwuje wybrane ograniczenia polityki i umożliwia rotację tokena; treść kontekstu nie jest wysyłana automatycznie. Dla serwera dostępny jest graficzny instalator Windows Server oraz self-contained pakiet ZIP. Serwer domyślnie nasłuchuje tylko na loopback; kreator TLS/firewall dla dostępu LAN pozostaje do wykonania. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.
@@ -15,6 +15,8 @@ Instalator zawiera .NET; nie wymaga administratora, dodatkowych pobrań ani kome
 Bieżący EXE nie jest podpisany zaufanym certyfikatem wydawcy. Windows może wyświetlić ostrzeżenie o nieznanym wydawcy. Nie dodano wyłączania zabezpieczeń ani wyjątków antywirusa.
 
 Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
+
+Architektura rozszerzenia Edge/Chrome i jego ograniczenia: [docs/BROWSER-INTEGRATION.md](docs/BROWSER-INTEGRATION.md).
 
 ## Serwer firmowy — pierwszy etap
 
@@ -45,11 +47,17 @@ Pierwszy start proponuje prywatny katalog w profilu użytkownika i pozwala wybra
 4. Opcjonalne „Analizuj przy zmianie aktywnego okna” wymaga zapisania ustawień i włączonego zbierania. Nie analizuje każdej klatki ani zmian zawartości strony wewnątrz tego samego okna. Zdarzenia objęte limitem częstotliwości są pomijane, a nie kolejkowane. Można ponowić odczyt ręcznie.
 5. Wykluczenia procesów i fragmentów tytułów działają przed odczytem UI Automation. Dodatkowe kategorie obejmują znane przeglądarki oraz komunikatory/klientów poczty rozpoznawane po nazwie procesu. Listy edytuje się, rozdzielając wpisy średnikiem. Dodaj używane aplikacje, jeśli nie znajdują się na liście.
 
+## Edge i Chrome
+
+Instalator rejestruje lokalny host Native Messaging dla bieżącego użytkownika i dołącza rozszerzenie w `app/BrowserExtension`. Aby je włączyć, otwórz `edge://extensions` lub `chrome://extensions`, włącz **Tryb dewelopera**, wybierz **Załaduj rozpakowane** i wskaż ten folder. Rozszerzenie nie jest jeszcze opublikowane w sklepach przeglądarek, więc ta aktywacja wymaga ręcznego kroku. Po odinstalowaniu host i wpisy rejestru są usuwane.
+
+Rozszerzenie obserwuje główne nawigacje HTTP/HTTPS i przekazuje pełny adres wyłącznie do lokalnego procesu przez Native Messaging. Host nie odpytuje sieci ani DNS. Gdy reguły URL wykażą co najmniej umiarkowane ryzyko, rozszerzenie wyświetla własne ostrzeżenie z opcją zamknięcia karty lub świadomej kontynuacji. API MV3 nie wstrzymuje gwarantowanie ładowania przed odpowiedzią hosta; strona może zacząć się otwierać przed wyświetleniem ostrzeżenia. Nie nazywamy tego twardą blokadą. W historii zapisują się tylko ostrzeżenia, opis reguł i ryzyko — bez pełnego adresu; zdarzenia browser są zapisywane lokalnie i nie trafiają do kolejki synchronizacji Enterprise. Integracja nie obsługuje jeszcze Firefoksa ani reputacji znanych wskaźników z feedu.
+
 UI Automation czyta wyłącznie dostępne nazwy kontrolek Text, Hyperlink i Button. Pomija poddrzewa oznaczone jako hasła, Edit i ComboBox. Nie odczytuje ValuePattern, TextPattern, naciśnięć klawiszy, ciasteczek, pól formularzy ani zrzutów. Limity: 250 węzłów, 12 poziomów, 16 000 znaków i budżet pracy 2 s; oczekiwanie na dostawcę maksymalnie 3 s. Zablokowany dostawca może nadal zajmować jeden wątek do zakończenia wywołania; aplikacja nie uruchamia wtedy kolejnych pracowników.
 
 Maskowanie statycznych etykiet jest heurystyczne: usuwa m.in. adresy, e-maile, długie numery, identyfikatory i jawne przypisania sekretów. Nie jest niezawodnym klasyfikatorem danych poufnych. Surowa treść i tytuł okna nie trafiają do historii. Tytuł służy tylko do lokalnego wykluczenia okna. Analizowane dane nie są wysyłane do usług zewnętrznych. Nie ma telemetrii.
 
-**URL w zwykłej etykiecie UI Automation nie jest uznawany za rzeczywisty cel.** Do wiarygodnego automatycznego śledzenia nawigacji i przekierowań potrzebne jest przyszłe rozszerzenie przeglądarki. Obecnie URL podaje użytkownik ręcznie. Nie wykrywamy faktycznego pobrania/otwarcia pliku — reguły rozpoznają jedynie ryzykowne prośby i polecenia widoczne w tekście.
+**URL w zwykłej etykiecie UI Automation nie jest uznawany za rzeczywisty cel.** Automatyczne sprawdzanie głównej nawigacji działa przez opisane wyżej rozszerzenie Chromium dla Edge i Chrome; przekierowania oraz faktyczne pobrania nie są jeszcze analizowane. Bez rozszerzenia URL podaje użytkownik ręcznie. Nie wykrywamy faktycznego otwarcia pliku — reguły rozpoznają jedynie ryzykowne prośby i polecenia widoczne w tekście.
 
 ## Zakres reguł
 
@@ -94,6 +102,6 @@ Linux/Codex: `bash scripts/setup-cloud.sh` odtwarza oba rozwiązania w locked-mo
 
 Zaimplementowana część Etapu 3: provider Ollama loopback, walidacja strukturalnej odpowiedzi i fallback regułowy, prywatny indeks FTS5 dla TXT/MD/DOCX, import, wyszukiwanie, usuwanie, backup i źródła z fragmentów. Serwer udostępnia lokalną konfigurację/test Ollama i centralne FTS5; analiza serwerowa wymaga polityki oraz potwierdzenia klienta. Ograniczenia: bez PDF, embeddingów/semantyki, katalogu modeli i potwierdzonego doboru sprzętowego. Nie podawaj kluczy ani nie pobieraj modeli bez własnej świadomej decyzji.
 
-Pozostałe etapy i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Brak blokowania, semantycznego RAG, usługi Enterprise Server, analizy serwerowej treści bez jawnej zgody, rozszerzenia przeglądarki i aplikacji mobilnych.
+Pozostałe etapy i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Nadal brakuje gwarantowanej blokady przed załadowaniem strony, lokalnej reputacji URL z aktualizowanego feedu, publikacji rozszerzenia w sklepach Edge/Chrome, obsługi Firefoksa, semantycznego RAG, aplikacji mobilnych oraz nowego serwera Enterprise. Analiza serwerowa treści nadal wymaga jawnej zgody.
 
 Architektura i punktacja: [ARCHITECTURE.md](ARCHITECTURE.md). Źródła wersji: [metadane .NET 10](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json), [NuGet](https://api.nuget.org/v3/index.json). Wersje i hashe pakietów: `packages.lock.json`. Informacje o licencji PSL: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

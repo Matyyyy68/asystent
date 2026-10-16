@@ -1,9 +1,12 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using Sentinel.Core;
 using Sentinel.Core.Configuration;
+using System.Security.Cryptography;
+using System.Text;
 namespace Sentinel.Desktop;
 public sealed class AsyncCommand(Func<Task> action, Action<Exception> error) : ICommand
 {
@@ -44,6 +47,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string ThreatCount { get => threatCount; private set { threatCount = value; Changed(); } }
     private string lastWarning = "Brak danych";
     public string LastWarning { get => lastWarning; private set { lastWarning = value; Changed(); } }
+    private string browserIntegrationStatus = "Nie sprawdzono stanu integracji Edge/Chrome.";
+    public string BrowserIntegrationStatus { get => browserIntegrationStatus; private set { browserIntegrationStatus = value; Changed(); } }
     public string VersionText => $"Wersja {typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "—"}";
     private string productVariant = "Sentinel AI User";
     public string ProductVariant { get => productVariant; private set { productVariant = value; Changed(); } }
@@ -88,7 +93,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OpenHistory = Command(() => { SelectedTabIndex = 3; return Task.CompletedTask; });
         OpenSettings = Command(() => { SelectedTabIndex = 4; return Task.CompletedTask; });
     }
-    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); IsEnterprise = profile.Variant == Sentinel.Core.Configuration.ProductVariant.EnterpriseClient; ProductVariant = IsEnterprise ? "Sentinel AI Enterprise Client" : "Sentinel AI User"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; StartWithWindows = s.StartWithWindows; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); await Knowledge.InitializeAsync(); await Enterprise.InitializeAsync(); }
+    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); IsEnterprise = profile.Variant == Sentinel.Core.Configuration.ProductVariant.EnterpriseClient; ProductVariant = IsEnterprise ? "Sentinel AI Enterprise Client" : "Sentinel AI User"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; StartWithWindows = s.StartWithWindows; RefreshBrowserIntegrationStatus(); await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); await Knowledge.InitializeAsync(); await Enterprise.InitializeAsync(); }
     private async Task Reload()
     {
         var rows = await store.ReadAsync(); Events.Clear(); RecentEvents.Clear();
@@ -97,5 +102,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
         EventCount = Events.Count == 0 ? "0" : Events.Count.ToString(System.Globalization.CultureInfo.CurrentCulture);
         ThreatCount = Events.Count(e => e.Risk >= RiskLevel.High).ToString(System.Globalization.CultureInfo.CurrentCulture);
         LastWarning = Events.FirstOrDefault(e => e.Risk >= RiskLevel.High)?.Timestamp.ToLocalTime().ToString("g") ?? "Brak ostrzeżeń";
+    }
+    public async Task RefreshFromBrowserAsync()
+    {
+        await Reload();
+        var item = RecentEvents.FirstOrDefault(e => e.Application == "Rozszerzenie Sentinel AI");
+        if (item is null || !Notifications || item.Risk < RiskLevel.High) return;
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(item.Category + item.Explanation)));
+        NotificationRequested?.Invoke($"Sentinel AI — {EnumLabelConverter.Label(item.Risk)} ryzyko",
+            item.Explanation.Length > 220 ? item.Explanation[..219] + "…" : item.Explanation, "browser:" + key);
+    }
+    public void RefreshBrowserIntegrationStatus()
+    {
+        var marker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI", "browser-integration.json");
+        try
+        {
+            if (!File.Exists(marker)) { BrowserIntegrationStatus = "Edge/Chrome: oczekiwanie na pierwsze połączenie rozszerzenia."; return; }
+            if (new FileInfo(marker).Length > 1024) { BrowserIntegrationStatus = "Edge/Chrome: nie można potwierdzić ostatniego połączenia."; return; }
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(marker));
+            if (!document.RootElement.TryGetProperty("LastContactUtc", out var value) || !value.TryGetDateTimeOffset(out var lastContact) || lastContact > DateTimeOffset.UtcNow.AddMinutes(1))
+            { BrowserIntegrationStatus = "Edge/Chrome: nie można potwierdzić ostatniego połączenia."; return; }
+            BrowserIntegrationStatus = DateTimeOffset.UtcNow - lastContact <= TimeSpan.FromMinutes(5)
+                ? $"Edge/Chrome: rozszerzenie połączone o {lastContact.ToLocalTime():HH:mm}."
+                : $"Ostatni kontakt Edge/Chrome: {lastContact.ToLocalTime():g}.";
+        }
+        catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        { BrowserIntegrationStatus = "Edge/Chrome: nie można odczytać stanu połączenia."; }
     }
 }

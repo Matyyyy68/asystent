@@ -5,6 +5,46 @@
     "sha256": "582684c68564516ad2ecdfe14534b2ff80fce67bba55c554f1b65be69e4e9360"
   },
   {
+    "path": "BrowserExtension/background.js",
+    "size": 4103,
+    "sha256": "08a6c10bbea87604cc90272d456c9f4c81ec9ddb2c8b0cfe490952637c1db05e"
+  },
+  {
+    "path": "BrowserExtension/manifest.json",
+    "size": 1092,
+    "sha256": "7607d5613789e38dc27e5875e55810078024015a9ceead6ee60da3370b2f55fa"
+  },
+  {
+    "path": "BrowserExtension/popup.html",
+    "size": 603,
+    "sha256": "5a0df320fea5e6bf1719e6e25a361e561cf93c7e9f3672263019787896ec1583"
+  },
+  {
+    "path": "BrowserExtension/popup.js",
+    "size": 550,
+    "sha256": "f7bf4efbde8ee47cdaca8bc7cb0a21c06a19f8ec42a4320d279ad8ad39257327"
+  },
+  {
+    "path": "BrowserExtension/style.css",
+    "size": 1999,
+    "sha256": "6f8acf15d4008f87cbcb5d971bf8e4b64f0c0452a9e6b67a5f2f176e47511fde"
+  },
+  {
+    "path": "BrowserExtension/warning.html",
+    "size": 1048,
+    "sha256": "fc8311d9a6d0b87a4557d2a0878c7ca293cb494cb2650356cc8aca2fcb0875ce"
+  },
+  {
+    "path": "BrowserExtension/warning.js",
+    "size": 1067,
+    "sha256": "ed212958f6bcbc1724b04c10106ba4e889892b5a207e17e5926842bf60a9079b"
+  },
+  {
+    "path": "BrowserHost/Sentinel.UrlHost.exe",
+    "size": 76370990,
+    "sha256": "65176e89c763514d5c2904f037b07e41620f002ebc25e4204e1efc6f6a88c377"
+  },
+  {
     "path": "D3DCompiler_47_cor3.dll",
     "size": 4741488,
     "sha256": "a05f99734f7c4822fefc12b367af21fd0976ed6608752fb1e1e80b6ece7ecbbb"
@@ -96,8 +136,8 @@
   },
   {
     "path": "Pomoc.html",
-    "size": 3526,
-    "sha256": "00592460ce95efe5cd632c65331e6c90b2cea2bbd4cd375902af405a92783ae8"
+    "size": 4008,
+    "sha256": "bd0429bd344e01a6a6524160fba44584e83cafaef6041c9c260fad317eadee84"
   },
   {
     "path": "PresentationCore.dll",
@@ -201,23 +241,23 @@
   },
   {
     "path": "Sentinel.Core.dll",
-    "size": 529920,
-    "sha256": "8f265b6f064b154f7e018f13e3ffb0080f80bf61d0622e50500110324bdea237"
+    "size": 530432,
+    "sha256": "9292afb27dd8d16b15ac299cb34befc37a2e4d3145054bc3035db338a23bda41"
   },
   {
     "path": "Sentinel.Desktop.deps.json",
     "size": 41789,
-    "sha256": "03db85a5925bde81ce61147fc99cd5c49aa56a7933ac265de98f6e761e1cc7e3"
+    "sha256": "06fd29ce70a59bbab069e07cddb30e043939db3c0dba243b11a455ebfcc9fc22"
   },
   {
     "path": "Sentinel.Desktop.dll",
-    "size": 141312,
-    "sha256": "3f2790a17b7f63332b0fffdbedb69f475483feef7b2abfee5274bdf131d38600"
+    "size": 145408,
+    "sha256": "d5e8cff19d9104811bd76899bc3da97989c8260cf6dd53ad1d08a221d015af4d"
   },
   {
     "path": "Sentinel.Desktop.exe",
     "size": 162816,
-    "sha256": "66c38538a76882f0b9fea9c2a1b682b80043dca300761283484773cab82fadeb"
+    "sha256": "bd8669830b04b212e47256bc9ba4ab9cb35d1b05ad7feff98e8197b31a5257f2"
   },
   {
     "path": "Sentinel.Desktop.runtimeconfig.json",
