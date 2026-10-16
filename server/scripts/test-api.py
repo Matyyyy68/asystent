@@ -20,10 +20,11 @@ with socket.socket() as listener:
     listener.bind(("127.0.0.1", 0))
     port = listener.getsockname()[1]
 address = f"http://127.0.0.1:{port}"
-admin_key = secrets.token_urlsafe(32)
+admin_password = "Initial-api-admin-password-42!"
 data_directory = pathlib.Path(tempfile.mkdtemp(prefix="sentinel-server-api-test-"))
 environment = os.environ.copy()
-environment.update({"ASPNETCORE_URLS": address, "Sentinel__DataDirectory": str(data_directory), "Sentinel__AdminApiKey": admin_key})
+environment.update({"ASPNETCORE_URLS": address, "Sentinel__DataDirectory": str(data_directory),
+                    "Sentinel__BootstrapAdminUsername": "it-admin", "Sentinel__BootstrapAdminPassword": admin_password})
 process = subprocess.Popen(["dotnet", str(application)], cwd=root, env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -58,20 +59,44 @@ try:
 
     assert request("/healthz")["status"] == "healthy"
     request("/api/v1/admin/devices", expected=401)
+    request("/api/v1/admin/auth/login", "POST", {"username": "it-admin", "password": "incorrect-password"}, expected=401)
+    system_session = request("/api/v1/admin/auth/login", "POST", {"username": "it-admin", "password": admin_password})["accessToken"]
+    request("/api/v1/admin/devices", token=system_session)
+    request("/api/v1/admin/users", "POST", {
+        "username": "operator", "password": "Operator-api-password-42!", "role": "Operator",
+    }, system_session, 201)
+    operator_session = request("/api/v1/admin/auth/login", "POST", {
+        "username": "operator", "password": "Operator-api-password-42!",
+    })["accessToken"]
+    request("/api/v1/admin/audit", token=operator_session, expected=403)
+    request("/api/v1/admin/devices", token=operator_session)
     expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=1)).isoformat()
     invitation = request("/api/v1/admin/invitations", "POST", {
         "group": "Testowe", "expiresAt": expiry, "maximumRegistrations": 1,
-    }, admin_key, 201)
+    }, system_session, 201)
+    request("/api/v1/admin/invitations", "POST", {
+        "group": "Testowe", "expiresAt": expiry, "maximumRegistrations": 1,
+    }, operator_session, 403)
     device = request("/api/v1/agents/enroll", "POST", {
         "invitationCode": invitation["registrationCode"], "deviceName": "TEST-01", "clientVersion": "0.2.0",
     }, expected=201)
     assert request("/api/v1/agents/me", token=device["deviceToken"])["id"] == device["deviceId"]
     request("/api/v1/agents/heartbeat", "POST", {"lastError": "sync_failed"}, device["deviceToken"], 204)
-    inventory = request("/api/v1/admin/devices", token=admin_key)
+    inventory = request("/api/v1/admin/devices", token=system_session)
     assert len(inventory) == 1 and inventory[0]["isOnline"] and inventory[0]["group"] == "Testowe"
-    request("/api/v1/admin/devices/" + device["deviceId"], "DELETE", token=admin_key, expected=204)
+    request("/api/v1/admin/devices/" + device["deviceId"], "DELETE", token=system_session, expected=204)
     request("/api/v1/agents/me", token=device["deviceToken"], expected=401)
-    print("PASS: health, admin authorization, invitation, enrollment, device auth, heartbeat and revocation")
+    request("/api/v1/admin/auth/password", "PUT", {
+        "currentPassword": admin_password, "newPassword": "Rotated-api-admin-password-42!",
+    }, system_session, 204)
+    request("/api/v1/admin/devices", token=system_session, expected=401)
+    rotated_session = request("/api/v1/admin/auth/login", "POST", {
+        "username": "it-admin", "password": "Rotated-api-admin-password-42!",
+    })["accessToken"]
+    audit = request("/api/v1/admin/audit", token=rotated_session)
+    assert any(entry["action"] == "device.revoked" for entry in audit)
+    assert any(entry["action"] == "admin.password_changed" for entry in audit)
+    print("PASS: health, admin bootstrap/login, RBAC, invitation, enrollment, heartbeat, role checks, audit and revocation")
 finally:
     process.terminate()
     try:

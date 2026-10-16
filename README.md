@@ -20,7 +20,7 @@ Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
 
 Repozytorium zawiera teraz odrębny fundament ASP.NET Core w katalogu `server/`: SQLite serwera, health/readiness, zaproszenia ograniczone czasem i limitem, rejestrację urządzeń z indywidualnymi poświadczeniami, heartbeat oraz odwoływanie urządzeń. Instrukcje uruchomienia i endpointy są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i plan etapów są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
 
-To nie jest jeszcze gotowy serwer produkcyjny. Nie ma panelu administracyjnego, kont i ról administratorów, dystrybucji polityk, synchronizacji zdarzeń, AI/RAG, instalatora usługi Windows ani integracji klienta. Obecny klucz administracyjny przez zmienną środowiskową jest rozwiązaniem przejściowym dla pierwszego etapu.
+To nadal nie jest gotowy serwer produkcyjny. Ma indywidualne konta administratorów, cztery role, ograniczone sesje, ochronę logowania i audyt operacji administracyjnych. Nie ma jeszcze panelu, zarządzanych grup i polityk, synchronizacji zdarzeń, AI/RAG, instalatora usługi Windows ani integracji klienta.
 
 ## Uruchomienie deweloperskie na Windows
 

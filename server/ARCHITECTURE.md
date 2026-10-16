@@ -40,28 +40,32 @@ Serwer używa obecnego celu `net10.0`, zgodnego z istniejącym repozytorium i ws
 
 - API ma wersję w ścieżce (`/api/v1`) oraz identyfikator korelacji w `X-Correlation-ID`. Maksymalny rozmiar żądania wynosi 64 KiB; rejestracja jest limitowana do 20 prób na minutę na adres IP.
 - Domyślny adres nasłuchiwania to `127.0.0.1:5080`. Serwer odmawia startu dla zewnętrznego adresu HTTP; zdalne nasłuchiwanie wymaga jawnego adresu HTTPS i skonfigurowanego certyfikatu Kestrel. Walidacja TLS pozostaje w systemowym stosie HTTP klienta i nie ma trybu pomijania certyfikatu.
-- Endpointy administracyjne w obecnym fundamencie przyjmują osobny klucz administracyjny przez zmienną środowiskową `Sentinel__AdminApiKey` (co najmniej 32 znaki), porównywany w stałym czasie. Nie jest to docelowy system użytkowników/ ról i należy go zastąpić kontami, sesjami i autoryzacją RBAC przed wdrożeniem panelu lub udostępnieniem LAN.
+- Pierwsze konto tworzy się jawnie przez `Sentinel__BootstrapAdminUsername` i `Sentinel__BootstrapAdminPassword` przy pierwszym uruchomieniu. Konto otrzymuje rolę `SystemAdministrator`; po udanym bootstrapie proces usuwa hasło ze swojego środowiska. Administrator musi usunąć je również ze stałej konfiguracji usługi. Hasła są haszowane PBKDF2-HMAC-SHA256 z losową solą i 600 000 iteracji. Brak skonfigurowanego konta nie uruchamia domyślnego konta ani znanego hasła.
+- Logowanie ma limit pięciu prób na 15 minut na adres IP. Sesje administratorów to losowe tokeny bearer ważne 12 godzin; serwer przechowuje wyłącznie ich SHA-256. Zmiana hasła i wyłączenie konta unieważnia aktywne sesje. Blokada nie może wyłączyć ani zdegradować ostatniego aktywnego administratora systemu.
+- RBAC jest egzekwowany na API: Administrator systemu zarządza kontami i wszystkimi operacjami; Administrator bezpieczeństwa może tworzyć/unieważniać zaproszenia, odłączać urządzenia i czytać audyt; Operator i Odczyt mogą przeglądać urządzenia. Każda rola może zarządzać własną sesją i hasłem. Tożsamość użytkownika jest wymagana dla wszystkich endpointów administracyjnych.
+- Operacje bootstrapu, logowania, zarządzania kontami, zaproszeniami, sesjami i odłączeniem urządzeń są zapisywane w tym samym magazynie SQLite co zmiana, w tabeli audytu bez haseł, tokenów i treści zdarzeń.
 - Kod zaproszenia oraz poświadczenie każdego urządzenia są losowe, różne dla każdego użycia, zwracane tylko przy utworzeniu i przechowywane na serwerze wyłącznie jako SHA-256. Zaproszenie atomowo egzekwuje limit rejestracji i termin ważności. Odwołane urządzenie przestaje się uwierzytelniać. Nie ma wspólnego sekretu agentów.
 - Zdarzenia bezpieczeństwa i prywatny kontekst nie są jeszcze przyjmowane przez API. Heartbeat przyjmuje wyłącznie ograniczony, opcjonalny opis ostatniego błędu. Nie wysyłamy ekranów, haseł, tokenów sesyjnych ani treści prywatnych wiadomości.
 - `healthz` i `readyz` zwracają jedynie stan i wersję API; nie publikują ścieżki bazy ani sekretów. Dostępność modelu nie jest jeszcze częścią gotowości.
 - Baza serwera jest w `C:\ProgramData\SentinelAI\Server` na Windows albo w systemowym katalogu danych na innych platformach; można ustawić `Sentinel__DataDirectory`. Nie jest trzymana w katalogu programu ani tymczasowym.
 
-W produkcji trzeba uruchamiać usługę pod dedykowanym kontem o minimalnych uprawnieniach do jej katalogu danych i certyfikatu. Instalator usługi, ACL, rotacja logów, backup/restore, audyt administratorów, ochrona brute force kont, token rotation oraz zatwierdzanie ryzykownych zmian polityk są zaplanowane, ale nie są zaimplementowane w tym etapie.
+W produkcji trzeba uruchamiać usługę pod dedykowanym kontem o minimalnych uprawnieniach do jej katalogu danych i certyfikatu. Instalator usługi, ACL, rotacja logów, backup/restore, rotacja poświadczeń urządzeń, zatwierdzanie ryzykownych zmian polityk i odporniejsza na rozproszony brute force blokada kont są zaplanowane, ale nie są zaimplementowane w tym etapie.
 
 ## Plan migracji i etapowanie
 
 1. **Etap A — audyt i projekt (ukończony):** inwentaryzacja klienta, diagram, uzasadnienie granic, plan migracji, decyzje prywatności i transportu.
 2. **Etap B1 — fundament API i urządzeń (zaimplementowany):** host API, SQLite serwera, health/readiness, zaproszenia ograniczone limitem i czasem, rejestracja z unikalnym poświadczeniem, lista/odwołanie urządzeń, uwierzytelniony heartbeat oraz testy trwałości i unieważniania.
-3. **Etap B2 — zarządzanie (następne):** administratorzy i role z bezpiecznym bootstrapem, grupy jako zarządzane rekordy, polityki wersjonowane, dziedziczenie, audyt, zdarzenia idempotentne, migracje i retencja.
-4. **Etap C — panel:** hostowany panel operacyjny po dodaniu pełnego RBAC i ochrony żądań przeglądarkowych; wyświetla tylko rzeczywisty stan z API.
-5. **Etap D — klient-serwer:** klient rejestruje się zaproszeniem, chroni poświadczenia w Windows Credential Manager/DPAPI, pobiera walidowaną politykę, synchronizuje ograniczoną kolejkę z retry/backoff/jitter i działa lokalnie offline.
-6. **Etap E — UX klienta:** tray, jednoznaczny stan modułów, opt-in autostart, ciche domyślne zachowanie, ograniczone i deduplikowane powiadomienia.
-7. **Etap F — AI i wiedza:** `IServerAIProvider`, rzeczywiste testy Ollama, limity zasobów i timeouty; odseparowany import, walidacja typów/rozmiaru, wersjonowanie i wyszukiwanie RAG z cytowaniami. Niedostępny model nie zatrzymuje ochrony regułowej.
-8. **Etap G — wdrożenie operacyjne:** kreator instalacji i konfiguracji, usługa Windows, TLS/CA, firewall, backup/restore, aktualizacje podpisane kryptograficznie i rollback; natywne testy Windows Server oraz testy klienta na Windows.
+3. **Etap B2a — tożsamość administracyjna (zaimplementowany):** bootstrap administratora, PBKDF2, sesje, cztery role, limit logowania, unieważnianie sesji i audyt.
+4. **Etap B2b — flota i polityki (następne):** grupy jako zarządzane rekordy, przypisywanie urządzeń, polityki globalne/grupowe/urządzeń, dziedziczenie i wersjonowanie, idempotentne zdarzenia oraz retencja.
+5. **Etap C — panel:** hostowany panel operacyjny z ochroną żądań przeglądarkowych; wyświetla tylko rzeczywisty stan z API.
+6. **Etap D — klient-serwer:** klient rejestruje się zaproszeniem, chroni poświadczenia w Windows Credential Manager/DPAPI, pobiera walidowaną politykę, synchronizuje ograniczoną kolejkę z retry/backoff/jitter i działa lokalnie offline.
+7. **Etap E — UX klienta:** tray, jednoznaczny stan modułów, opt-in autostart, ciche domyślne zachowanie, ograniczone i deduplikowane powiadomienia.
+8. **Etap F — AI i wiedza:** `IServerAIProvider`, rzeczywiste testy Ollama, limity zasobów i timeouty; odseparowany import, walidacja typów/rozmiaru, wersjonowanie i wyszukiwanie RAG z cytowaniami. Niedostępny model nie zatrzymuje ochrony regułowej.
+9. **Etap G — wdrożenie operacyjne:** kreator instalacji i konfiguracji, usługa Windows, TLS/CA, firewall, backup/restore, aktualizacje podpisane kryptograficznie i rollback; natywne testy Windows Server oraz testy klienta na Windows.
 
 ## Bieżący zakres i uruchomienie
 
-Ten commit zamyka spójny etap A+B1, a nie całą architekturę docelową. Działają rejestracja, odwołanie zaproszeń/urządzeń, heartbeat, status online obliczany jako komunikacja w ostatnich dwóch minutach, proste health/readiness i trwała baza urządzeń. Zaproszenia tworzy administrator przez API. Nie ma jeszcze panelu, grup z politykami, konfiguracji klienta, synchronizacji zdarzeń, AI/RAG, kont administratorów ani instalatora usługi.
+Ten etap dostarcza audyt A, fundament B1 i tożsamość B2a, a nie całą architekturę docelową. Działają indywidualne konta administratorów, cztery role, sesje, bootstrap, limit logowania, audyt operacji, rejestracja, odwołanie zaproszeń/urządzeń, heartbeat, status online obliczany jako komunikacja w ostatnich dwóch minutach, health/readiness i trwała baza SQLite. Nie ma jeszcze panelu, zarządzanych grup/polityk, konfiguracji klienta, synchronizacji zdarzeń, AI/RAG, instalatora usługi ani rotacji poświadczeń urządzeń.
 
 Uruchomienie lokalne (domyślnie loopback):
 
@@ -70,7 +74,7 @@ $env:Sentinel__DataDirectory = "$env:ProgramData\SentinelAI\Server"
 dotnet run --project server/src/Sentinel.Server.Api/Sentinel.Server.Api.csproj
 ```
 
-Do operacji administracyjnych ustaw tymczasowy klucz o długości co najmniej 32 znaków w `Sentinel__AdminApiKey`; nie zapisuj go w repozytorium. Do LAN skonfiguruj `ASPNETCORE_URLS=https://0.0.0.0:5443` oraz certyfikat Kestrel przez chronioną konfigurację lub magazyn certyfikatów i rozdystrybuuj łańcuch zaufania na klientach. Nie otwieraj portu HTTP do sieci.
+Przy pierwszym uruchomieniu ustaw `Sentinel__BootstrapAdminUsername` i `Sentinel__BootstrapAdminPassword` w środowisku procesu (hasło 14–128 znaków). Aplikacja tworzy konto systemowe tylko jeśli baza nie ma jeszcze administratora; usuń zmienne ze stałej konfiguracji usługi po pierwszym uruchomieniu. Logowanie: `POST /api/v1/admin/auth/login`; użyj zwróconego tokenu w `Authorization: Bearer …`. Sesja trwa 12 godzin. Administrator może zmienić hasło pod `PUT /api/v1/admin/auth/password`. Do LAN skonfiguruj `ASPNETCORE_URLS=https://0.0.0.0:5443` oraz certyfikat Kestrel przez chronioną konfigurację lub magazyn certyfikatów i rozdystrybuuj łańcuch zaufania na klientach. Nie otwieraj portu HTTP do sieci.
 
 Testy: `dotnet test server/tests/Sentinel.Server.Tests/Sentinel.Server.Tests.csproj`. Testują działającą bazę SQLite, limit, wygaśnięcie, odwołanie i poświadczenia. Integracyjne testy HTTP, TLS na Windows, restartu usługi i instalatora serwera są przyszłą pracą.
 

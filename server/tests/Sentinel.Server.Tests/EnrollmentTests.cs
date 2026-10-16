@@ -19,7 +19,7 @@ public sealed class EnrollmentTests : IDisposable
 
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private Task<Invitation> CreateInviteAsync(string code, int maximum = 1, DateTimeOffset? expires = null) =>
-        _store.CreateInvitationAsync(new("Testowe", expires ?? DateTimeOffset.UtcNow.AddHours(1), maximum), Hash(code));
+        _store.CreateInvitationAsync(new("Testowe", expires ?? DateTimeOffset.UtcNow.AddHours(1), maximum), Hash(code), "test-admin", DateTimeOffset.UtcNow);
 
     [Fact]
     public async Task EnrollmentReturnsUniqueDeviceCredentialAndHeartbeatUpdatesPresence()
@@ -63,7 +63,7 @@ public sealed class EnrollmentTests : IDisposable
         Assert.Null(await _store.EnrollAsync(new("expired-code", "PC", "1", "secret"), Hash("expired-code"), Hash("secret"), now));
 
         var invitation = await CreateInviteAsync("revoked-code");
-        Assert.True(await _store.RevokeInvitationAsync(invitation.Id));
+        Assert.True(await _store.RevokeInvitationAsync(invitation.Id, "test-admin", DateTimeOffset.UtcNow));
         Assert.Null(await _store.EnrollAsync(new("revoked-code", "PC", "1", "secret-2"), Hash("revoked-code"), Hash("secret-2"), now));
     }
 
@@ -73,7 +73,7 @@ public sealed class EnrollmentTests : IDisposable
         await CreateInviteAsync("revoke-code");
         var device = await _store.EnrollAsync(new("revoke-code", "PC", "1", "secret"), Hash("revoke-code"), Hash("secret"), DateTimeOffset.UtcNow);
         Assert.NotNull(device);
-        Assert.True(await _store.RevokeDeviceAsync(device.DeviceId));
+        Assert.True(await _store.RevokeDeviceAsync(device.DeviceId, "test-admin", DateTimeOffset.UtcNow));
         Assert.Null(await _store.AuthenticateDeviceAsync(Hash("secret"), DateTimeOffset.UtcNow));
         Assert.True(Assert.Single(await _store.ListDevicesAsync()).Revoked);
     }
