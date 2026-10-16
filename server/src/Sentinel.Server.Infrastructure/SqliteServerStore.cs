@@ -1,11 +1,21 @@
 using Microsoft.Data.Sqlite;
 using Sentinel.Server.Core;
+using System.Text.Json;
 
 namespace Sentinel.Server.Infrastructure;
 
-public sealed class SqliteServerStore(string databasePath) : IServerStore
+public sealed class SqliteServerStore : IServerStore
 {
-    private readonly string _databasePath = Path.GetFullPath(databasePath);
+    private readonly string _databasePath;
+    private readonly int _eventRetentionDays;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    public SqliteServerStore(string databasePath, int eventRetentionDays = 90)
+    {
+        if (eventRetentionDays is < 30 or > 3650) throw new ArgumentOutOfRangeException(nameof(eventRetentionDays), "Retencja zdarzeń musi wynosić 30–3650 dni.");
+        _databasePath = Path.GetFullPath(databasePath);
+        _eventRetentionDays = eventRetentionDays;
+    }
     private string ConnectionString => new SqliteConnectionStringBuilder { DataSource = _databasePath, Pooling = false, Mode = SqliteOpenMode.ReadWriteCreate }.ToString();
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
@@ -22,7 +32,7 @@ public sealed class SqliteServerStore(string databasePath) : IServerStore
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
-        if (version > 2) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
+        if (version > 4) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
         command.Parameters.Clear();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -47,7 +57,24 @@ public sealed class SqliteServerStore(string databasePath) : IServerStore
               id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, actor_username TEXT NULL,
               action TEXT NOT NULL, target_id TEXT NULL);
             CREATE INDEX IF NOT EXISTS ix_admin_audit_time ON admin_audit(timestamp DESC);
-            PRAGMA user_version=2;
+            CREATE TABLE IF NOT EXISTS device_groups(
+              id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, created_at TEXT NOT NULL,
+              policy_json TEXT NULL, policy_version INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS server_policies(
+              id INTEGER PRIMARY KEY CHECK(id=1), policy_json TEXT NOT NULL, version INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS device_policies(
+              device_id TEXT PRIMARY KEY REFERENCES devices(id), policy_json TEXT NOT NULL, version INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS security_events(
+              event_id TEXT NOT NULL, device_id TEXT NOT NULL REFERENCES devices(id), occurred_at TEXT NOT NULL, received_at TEXT NOT NULL,
+              category TEXT NOT NULL, risk_level INTEGER NOT NULL CHECK(risk_level BETWEEN 0 AND 4), rule_code TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved','false_positive')), PRIMARY KEY(device_id,event_id));
+            CREATE INDEX IF NOT EXISTS ix_security_events_time ON security_events(occurred_at DESC);
+            CREATE INDEX IF NOT EXISTS ix_security_events_device_time ON security_events(device_id,occurred_at DESC);
+            INSERT OR IGNORE INTO device_groups(id,name,created_at)
+              SELECT lower(hex(randomblob(16))),device_group,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM invitations WHERE length(device_group)>0;
+            INSERT OR IGNORE INTO device_groups(id,name,created_at)
+              SELECT lower(hex(randomblob(16))),device_group,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM devices WHERE length(device_group)>0;
+            PRAGMA user_version=4;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -262,6 +289,169 @@ public sealed class SqliteServerStore(string databasePath) : IServerStore
             throw new InvalidOperationException("Nie można wyłączyć ani zdegradować ostatniego aktywnego administratora systemu.");
     }
 
+    public async Task<DeviceGroup> CreateGroupAsync(string name, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        name = name.Trim();
+        if (name.Length is < 1 or > 80 || name.Any(char.IsControl)) throw new ArgumentException("Nazwa grupy musi mieć 1–80 znaków.", nameof(name));
+        var group = new DeviceGroup(Guid.NewGuid().ToString("N"), name, now, 0);
+        await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using var insert = connection.CreateCommand(); insert.Transaction = (SqliteTransaction)transaction;
+            insert.CommandText = "INSERT INTO device_groups(id,name,created_at) VALUES($id,$name,$now)";
+            insert.Parameters.AddWithValue("$id", group.Id); insert.Parameters.AddWithValue("$name", group.Name); insert.Parameters.AddWithValue("$now", now.ToString("O"));
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "group.created", group.Id, cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return group;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<IReadOnlyList<DeviceGroup>> ListGroupsAsync(CancellationToken cancellationToken = default)
+    {
+        var groups = new List<DeviceGroup>(); await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id,name,created_at,policy_version FROM device_groups ORDER BY name COLLATE NOCASE";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) groups.Add(new(reader.GetString(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2)), reader.GetInt64(3)));
+        return groups;
+    }
+
+    public async Task<DeviceGroup?> FindGroupByNameAsync(string name, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id,name,created_at,policy_version FROM device_groups WHERE name=$name COLLATE NOCASE";
+        command.Parameters.AddWithValue("$name", name); await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        return await reader.ReadAsync(cancellationToken)
+            ? new(reader.GetString(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2)), reader.GetInt64(3)) : null;
+    }
+
+    public async Task<bool> SetDeviceGroupAsync(string deviceId, string groupId, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using var update = connection.CreateCommand(); update.Transaction = (SqliteTransaction)transaction;
+            update.CommandText = """
+                UPDATE devices SET device_group=(SELECT name FROM device_groups WHERE id=$group)
+                WHERE id=$device AND EXISTS(SELECT 1 FROM device_groups WHERE id=$group)
+                """;
+            update.Parameters.AddWithValue("$group", groupId); update.Parameters.AddWithValue("$device", deviceId);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "device.group_changed", deviceId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<VersionedPolicy> ReadGlobalPolicyAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT policy_json,version FROM server_policies WHERE id=1";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return new(new PolicyDocument(), 0);
+        return new(JsonSerializer.Deserialize<PolicyDocument>(reader.GetString(0), JsonOptions) ?? new(), reader.GetInt64(1));
+    }
+
+    public async Task<bool> WriteGlobalPolicyAsync(PolicyWrite write, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        ValidatePolicy(write.Policy); await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var current = await ReadVersionAsync(connection, (SqliteTransaction)transaction, "SELECT COALESCE((SELECT version FROM server_policies WHERE id=1),0)", cancellationToken);
+            if (current != write.ExpectedVersion) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await using var update = connection.CreateCommand(); update.Transaction = (SqliteTransaction)transaction;
+            update.CommandText = "INSERT INTO server_policies(id,policy_json,version) VALUES(1,$json,$version) ON CONFLICT(id) DO UPDATE SET policy_json=$json,version=$version";
+            update.Parameters.AddWithValue("$json", JsonSerializer.Serialize(write.Policy, JsonOptions)); update.Parameters.AddWithValue("$version", current + 1);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "policy.global_changed", "global", cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<VersionedPolicy?> ReadGroupPolicyAsync(string groupId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT policy_json,policy_version FROM device_groups WHERE id=$id"; command.Parameters.AddWithValue("$id", groupId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        var policy = reader.IsDBNull(0) ? new PolicyDocument() : JsonSerializer.Deserialize<PolicyDocument>(reader.GetString(0), JsonOptions) ?? new();
+        return new(policy, reader.GetInt64(1));
+    }
+
+    public async Task<bool> WriteGroupPolicyAsync(string groupId, PolicyWrite write, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        ValidatePolicy(write.Policy); await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var current = await ReadVersionAsync(connection, (SqliteTransaction)transaction, "SELECT policy_version FROM device_groups WHERE id=$id", cancellationToken, ("$id", groupId));
+            if (current < 0 || current != write.ExpectedVersion) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await using var update = connection.CreateCommand(); update.Transaction = (SqliteTransaction)transaction;
+            update.CommandText = "UPDATE device_groups SET policy_json=$json,policy_version=$version WHERE id=$id";
+            update.Parameters.AddWithValue("$json", JsonSerializer.Serialize(write.Policy, JsonOptions)); update.Parameters.AddWithValue("$version", current + 1); update.Parameters.AddWithValue("$id", groupId);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "policy.group_changed", groupId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<VersionedPolicy?> ReadDevicePolicyAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT p.policy_json,p.version FROM devices d LEFT JOIN device_policies p ON p.device_id=d.id WHERE d.id=$id";
+        command.Parameters.AddWithValue("$id", deviceId); await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        return reader.IsDBNull(0) ? new(new PolicyDocument(), 0) : new(JsonSerializer.Deserialize<PolicyDocument>(reader.GetString(0), JsonOptions) ?? new(), reader.GetInt64(1));
+    }
+
+    public async Task<bool> WriteDevicePolicyAsync(string deviceId, PolicyWrite write, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        ValidatePolicy(write.Policy); await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var current = await ReadVersionAsync(connection, (SqliteTransaction)transaction, "SELECT COALESCE(p.version,0) FROM devices d LEFT JOIN device_policies p ON p.device_id=d.id WHERE d.id=$id", cancellationToken, ("$id", deviceId));
+            if (current < 0 || current != write.ExpectedVersion) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await using var update = connection.CreateCommand(); update.Transaction = (SqliteTransaction)transaction;
+            update.CommandText = "INSERT INTO device_policies(device_id,policy_json,version) VALUES($id,$json,$version) ON CONFLICT(device_id) DO UPDATE SET policy_json=$json,version=$version";
+            update.Parameters.AddWithValue("$id", deviceId); update.Parameters.AddWithValue("$json", JsonSerializer.Serialize(write.Policy, JsonOptions)); update.Parameters.AddWithValue("$version", current + 1);
+            await update.ExecuteNonQueryAsync(cancellationToken);
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "policy.device_changed", deviceId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<PolicyLayer?> GetEffectivePolicyAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT d.device_group,COALESCE(g.policy_version,0),COALESCE(dp.version,0),gp.policy_json,dp.policy_json,sp.policy_json,COALESCE(sp.version,0)
+            FROM devices d LEFT JOIN device_groups g ON g.name=d.device_group COLLATE NOCASE
+            LEFT JOIN device_policies dp ON dp.device_id=d.id LEFT JOIN server_policies sp ON sp.id=1
+            LEFT JOIN device_groups gp ON gp.id=g.id WHERE d.id=$id
+            """;
+        command.Parameters.AddWithValue("$id", deviceId); await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return null;
+        PolicyDocument Parse(int ordinal) => reader.IsDBNull(ordinal) ? new() : JsonSerializer.Deserialize<PolicyDocument>(reader.GetString(ordinal), JsonOptions) ?? new();
+        return PolicyRules.Resolve(reader.IsDBNull(0) ? null : reader.GetString(0), reader.GetInt64(6), Parse(5), reader.GetInt64(1), Parse(3), reader.GetInt64(2), Parse(4));
+    }
+
+    private static async Task<long> ReadVersionAsync(SqliteConnection connection, SqliteTransaction transaction, string sql,
+        CancellationToken cancellationToken, params (string Key, object Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = sql;
+        foreach (var (key, value) in parameters) command.Parameters.AddWithValue(key, value);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is null or DBNull ? -1 : Convert.ToInt64(result, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static void ValidatePolicy(PolicyDocument policy)
+    {
+        var error = PolicyRules.Validate(policy);
+        if (error is not null) throw new ArgumentException(error, nameof(policy));
+    }
+
     public async Task<Invitation> CreateInvitationAsync(InvitationRequest request, string codeHash, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
         var result = new Invitation(Guid.NewGuid().ToString("N"), request.Group, request.ExpiresAt.ToUniversalTime(), request.MaximumRegistrations, 0, false);
@@ -363,6 +553,91 @@ public sealed class SqliteServerStore(string databasePath) : IServerStore
         command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$now", now.ToString("O"));
         command.Parameters.AddWithValue("$error", (object?)lastError ?? DBNull.Value);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
+    public async Task<EventBatchResult> IngestEventsAsync(string deviceId, IReadOnlyList<SecurityEventInput> events,
+        DateTimeOffset receivedAt, CancellationToken cancellationToken = default)
+    {
+        if (events.Count is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(events), "Batch musi zawierać 1–100 zdarzeń.");
+        foreach (var item in events)
+        {
+            var validation = SecurityEventRules.Validate(item, receivedAt);
+            if (validation is not null) throw new ArgumentException(validation, nameof(events));
+        }
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using (var retention = connection.CreateCommand())
+            {
+                retention.Transaction = (SqliteTransaction)transaction;
+                retention.CommandText = "DELETE FROM security_events WHERE occurred_at < $cutoff";
+                retention.Parameters.AddWithValue("$cutoff", receivedAt.AddDays(-_eventRetentionDays).ToUniversalTime().ToString("O"));
+                await retention.ExecuteNonQueryAsync(cancellationToken);
+            }
+            var accepted = 0;
+            foreach (var item in events)
+            {
+                await using var command = connection.CreateCommand(); command.Transaction = (SqliteTransaction)transaction;
+                command.CommandText = """
+                    INSERT INTO security_events(event_id,device_id,occurred_at,received_at,category,risk_level,rule_code)
+                    SELECT $event,$device,$occurred,$received,$category,$risk,$rule
+                    WHERE EXISTS(SELECT 1 FROM devices WHERE id=$device AND revoked=0)
+                    ON CONFLICT(device_id,event_id) DO NOTHING
+                    """;
+                command.Parameters.AddWithValue("$event", Guid.Parse(item.EventId).ToString("D"));
+                command.Parameters.AddWithValue("$device", deviceId); command.Parameters.AddWithValue("$occurred", item.OccurredAt.ToUniversalTime().ToString("O"));
+                command.Parameters.AddWithValue("$received", receivedAt.ToUniversalTime().ToString("O")); command.Parameters.AddWithValue("$category", item.Category);
+                command.Parameters.AddWithValue("$risk", item.RiskLevel); command.Parameters.AddWithValue("$rule", item.RuleCode);
+                accepted += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+            await transaction.CommitAsync(cancellationToken);
+            return new(accepted, events.Count - accepted);
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<IReadOnlyList<SecurityEvent>> ListEventsAsync(int limit, string? deviceId = null, CancellationToken cancellationToken = default)
+    {
+        limit = Math.Clamp(limit, 1, 500);
+        var events = new List<SecurityEvent>(); await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT event_id,device_id,occurred_at,received_at,category,risk_level,rule_code,status
+            FROM security_events WHERE ($device IS NULL OR device_id=$device) ORDER BY occurred_at DESC LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$device", (object?)deviceId ?? DBNull.Value); command.Parameters.AddWithValue("$limit", limit);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            events.Add(new(reader.GetString(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
+                reader.GetString(4), reader.GetInt32(5), reader.GetString(6), reader.GetString(7)));
+        return events;
+    }
+
+    public async Task<bool> SetEventStatusAsync(string eventId, string deviceId, string status, string actorUsername,
+        DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        if (status is not ("open" or "resolved" or "false_positive")) throw new ArgumentException("Nieprawidłowy status zdarzenia.", nameof(status));
+        await using var connection = await OpenAsync(cancellationToken); await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using var update = connection.CreateCommand(); update.Transaction = (SqliteTransaction)transaction;
+            update.CommandText = "UPDATE security_events SET status=$status WHERE event_id=$event AND device_id=$device AND status<>$status";
+            update.Parameters.AddWithValue("$status", status); update.Parameters.AddWithValue("$event", eventId);
+            update.Parameters.AddWithValue("$device", deviceId);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "event.status_changed", eventId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken); return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<int> PurgeExpiredEventsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM security_events WHERE occurred_at < $cutoff";
+        command.Parameters.AddWithValue("$cutoff", now.AddDays(-_eventRetentionDays).ToUniversalTime().ToString("O"));
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static Device ReadDevice(SqliteDataReader reader) => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),

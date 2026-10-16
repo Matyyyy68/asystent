@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.Data.Sqlite;
+using Sentinel.Server.Api;
 using Sentinel.Server.Core;
 using Sentinel.Server.Infrastructure;
 
@@ -24,12 +25,15 @@ var defaultDataDirectory = OperatingSystem.IsWindows()
     : Path.Combine("/var/lib", "sentinel-ai", "server");
 var dataDirectory = builder.Configuration["Sentinel:DataDirectory"] ?? defaultDataDirectory;
 var databasePath = Path.GetFullPath(Path.Combine(dataDirectory, "sentinel-server.db"));
-var store = new SqliteServerStore(databasePath);
+var eventRetentionDays = builder.Configuration.GetValue<int?>("Sentinel:EventRetentionDays") ?? 90;
+if (eventRetentionDays is < 30 or > 3650) throw new InvalidOperationException("Sentinel:EventRetentionDays musi wynosić 30–3650.");
+var store = new SqliteServerStore(databasePath, eventRetentionDays);
 var passwordHasher = new AdminPasswordHasher();
 var configuredBootstrapUsername = builder.Configuration["Sentinel:BootstrapAdminUsername"];
 var configuredBootstrapPassword = builder.Configuration["Sentinel:BootstrapAdminPassword"];
 var dummyPasswordHash = passwordHasher.Hash(RandomToken(32));
 builder.Services.AddSingleton<IServerStore>(store);
+builder.Services.AddHostedService<EventRetentionService>();
 builder.Services.AddSingleton(passwordHasher);
 builder.Services.AddRateLimiter(options =>
 {
@@ -121,6 +125,54 @@ allAdmins.MapGet("/devices", async (IServerStore repository, CancellationToken c
         device.RegisteredAt, device.LastSeenAt, isOnline = device.LastSeenAt is { } seen && now - seen <= TimeSpan.FromMinutes(2),
         device.Revoked, device.LastError }));
 });
+allAdmins.MapGet("/groups", async (IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ListGroupsAsync(ct)));
+allAdmins.MapGet("/events", async (int? limit, string? deviceId, IServerStore repository, CancellationToken ct) =>
+    Results.Ok(await repository.ListEventsAsync(limit ?? 100, deviceId, ct)));
+allAdmins.MapGet("/policies/global", async (IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ReadGlobalPolicyAsync(ct)));
+allAdmins.MapGet("/devices/{id}/policy", async (string id, IServerStore repository, CancellationToken ct) =>
+{
+    var effective = await repository.GetEffectivePolicyAsync(id, ct);
+    return effective is null ? Results.NotFound() : Results.Ok(effective);
+});
+allAdmins.MapGet("/groups/{id}/policy", async (string id, IServerStore repository, CancellationToken ct) =>
+{
+    var policy = await repository.ReadGroupPolicyAsync(id, ct);
+    return policy is null ? Results.NotFound() : Results.Ok(policy);
+});
+
+securityAdmins.MapPost("/groups", async (CreateGroupBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(body.Name) || body.Name.Trim().Length > 80 || body.Name.Any(char.IsControl))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["name"] = ["Nazwa grupy jest wymagana i może mieć maksymalnie 80 znaków."] });
+    try
+    {
+        var actor = (AdminIdentity)context.Items["admin"]!;
+        var group = await repository.CreateGroupAsync(body.Name.Trim(), actor.Username, DateTimeOffset.UtcNow, ct);
+        return Results.Created($"/api/v1/admin/groups/{group.Id}", group);
+    }
+    catch (SqliteException ex) when (ex.SqliteErrorCode == 19) { return Results.Conflict(new { error = "Grupa o tej nazwie już istnieje." }); }
+});
+securityAdmins.MapPut("/devices/{id}/group", async (string id, SetDeviceGroupBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (!(await repository.ListGroupsAsync(ct)).Any(g => g.Id == body.GroupId)) return Results.NotFound();
+    var actor = (AdminIdentity)context.Items["admin"]!;
+    return await repository.SetDeviceGroupAsync(id, body.GroupId, actor.Username, DateTimeOffset.UtcNow, ct) ? Results.NoContent() : Results.NotFound();
+});
+securityAdmins.MapPut("/policies/global", async (PolicyWriteBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+    await WritePolicy(body, (AdminIdentity)context.Items["admin"]!, repository, ct,
+        (write, actor, now) => repository.WriteGlobalPolicyAsync(write, actor, now, ct)));
+securityAdmins.MapPut("/groups/{id}/policy", async (string id, PolicyWriteBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (await repository.ReadGroupPolicyAsync(id, ct) is null) return Results.NotFound();
+    return await WritePolicy(body, (AdminIdentity)context.Items["admin"]!, repository, ct,
+        (write, actor, now) => repository.WriteGroupPolicyAsync(id, write, actor, now, ct));
+});
+securityAdmins.MapPut("/devices/{id}/policy", async (string id, PolicyWriteBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (await repository.ReadDevicePolicyAsync(id, ct) is null && (await repository.GetEffectivePolicyAsync(id, ct)) is null) return Results.NotFound();
+    return await WritePolicy(body, (AdminIdentity)context.Items["admin"]!, repository, ct,
+        (write, actor, now) => repository.WriteDevicePolicyAsync(id, write, actor, now, ct));
+});
 
 securityAdmins.MapPost("/invitations", async (CreateInvitationBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
 {
@@ -128,6 +180,8 @@ securityAdmins.MapPost("/invitations", async (CreateInvitationBody body, HttpCon
     if (string.IsNullOrWhiteSpace(body.Group) || body.Group.Length > 80 || body.Group.Any(char.IsControl) ||
         body.ExpiresAt <= now || body.ExpiresAt > now.AddDays(30) || body.MaximumRegistrations is < 1 or > 1000)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["invitation"] = ["Podaj grupę, ważność do 30 dni i limit rejestracji 1–1000."] });
+    if (await repository.FindGroupByNameAsync(body.Group.Trim(), ct) is null)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["group"] = ["Wybierz istniejącą grupę urządzeń."] });
     var code = RandomToken(24);
     var administrator = (AdminIdentity)context.Items["admin"]!;
     var invitation = await repository.CreateInvitationAsync(new(body.Group.Trim(), body.ExpiresAt, body.MaximumRegistrations), HashToken(code), administrator.Username, now, ct);
@@ -145,6 +199,15 @@ securityAdmins.MapDelete("/devices/{id}", async (string id, HttpContext context,
     return await repository.RevokeDeviceAsync(id, administrator.Username, DateTimeOffset.UtcNow, ct) ? Results.NoContent() : Results.NotFound();
 });
 securityAdmins.MapGet("/audit", async (int? limit, IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ReadAuditAsync(limit ?? 100, ct)));
+securityAdmins.MapPut("/events/{deviceId}/{eventId}/status", async (string deviceId, string eventId, SetEventStatusBody body,
+    HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (body.Status is not ("open" or "resolved" or "false_positive"))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["status"] = ["Status musi mieć wartość open, resolved lub false_positive."] });
+    var actor = (AdminIdentity)context.Items["admin"]!;
+    return await repository.SetEventStatusAsync(eventId, deviceId, body.Status, actor.Username, DateTimeOffset.UtcNow, ct)
+        ? Results.NoContent() : Results.NotFound();
+});
 
 systemAdmins.MapGet("/users", async (IServerStore repository, CancellationToken ct) =>
 {
@@ -209,6 +272,12 @@ authenticatedAgents.MapGet("/me", (HttpContext context) =>
     var device = (Device)context.Items["device"]!;
     return Results.Ok(new { device.Id, device.Name, device.Group, device.ClientVersion, device.RegisteredAt });
 });
+authenticatedAgents.MapGet("/configuration", async (HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    var device = (Device)context.Items["device"]!;
+    var configuration = await repository.GetEffectivePolicyAsync(device.Id, ct);
+    return configuration is null ? Results.NotFound() : Results.Ok(configuration);
+});
 authenticatedAgents.MapPost("/heartbeat", async (HeartbeatBody? body, HttpContext context, IServerStore repository, CancellationToken ct) =>
 {
     var device = (Device)context.Items["device"]!;
@@ -218,6 +287,19 @@ authenticatedAgents.MapPost("/heartbeat", async (HeartbeatBody? body, HttpContex
     await repository.HeartbeatAsync(device.Id, DateTimeOffset.UtcNow, error, ct);
     return Results.NoContent();
 });
+authenticatedAgents.MapPost("/events", async (SubmitEventsBody? body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (body?.Events is not { Count: >= 1 and <= 100 } events)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["events"] = ["Batch musi zawierać 1–100 zdarzeń."] });
+    var now = DateTimeOffset.UtcNow;
+    foreach (var item in events)
+    {
+        var error = SecurityEventRules.Validate(item, now);
+        if (error is not null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["events"] = [error] });
+    }
+    var device = (Device)context.Items["device"]!;
+    return Results.Ok(await repository.IngestEventsAsync(device.Id, events, now, ct));
+});
 
 app.Run();
 
@@ -225,6 +307,20 @@ static string RandomToken(int bytes) => Convert.ToBase64String(RandomNumberGener
 static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 static bool IsValidUsername(string? username) => username is { Length: >= 3 and <= 64 } && username.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '@' or '-');
 static string NormalizeUsername(string username) => username.Trim().ToLowerInvariant();
+static async Task<IResult> WritePolicy(PolicyWriteBody body, AdminIdentity identity, IServerStore repository, CancellationToken ct,
+    Func<PolicyWrite, string, DateTimeOffset, Task<bool>> write)
+{
+    if (body.Policy is null || body.ExpectedVersion < 0)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["policy"] = ["Polityka i nieujemny expectedVersion są wymagane."] });
+    var error = PolicyRules.Validate(body.Policy);
+    if (error is not null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["policy"] = [error] });
+    if (PolicyRules.ExposesContext(body.Policy) &&
+        (identity.Role != AdminRole.SystemAdministrator || !body.ConfirmedSensitiveChange))
+        return Results.Problem(title: "Zmiana udostępnia kontekst poza urządzeniem.",
+            detail: "Wymagane jest konto administratora systemowego oraz jawne potwierdzenie zmiany.", statusCode: StatusCodes.Status403Forbidden);
+    var saved = await write(new(body.Policy, body.ExpectedVersion), identity.Username, DateTimeOffset.UtcNow);
+    return saved ? Results.NoContent() : Results.Conflict(new { error = "Polityka zmieniła się od czasu odczytu. Pobierz aktualną wersję i ponów zapis." });
+}
 static Func<EndpointFilterInvocationContext, EndpointFilterDelegate, ValueTask<object?>> AuthenticateAdmin(IServerStore repository) => async (context, next) =>
 {
     var header = context.HttpContext.Request.Headers.Authorization.ToString();
@@ -251,5 +347,10 @@ sealed record CreateAdminBody(string Username, string Password, string Role);
 sealed record SetDisabledBody(bool Disabled);
 sealed record SetRoleBody(string Role);
 sealed record ChangePasswordBody(string CurrentPassword, string NewPassword);
+sealed record CreateGroupBody(string Name);
+sealed record SetDeviceGroupBody(string GroupId);
+sealed record PolicyWriteBody(PolicyDocument? Policy, long ExpectedVersion, bool ConfirmedSensitiveChange = false);
+sealed record SubmitEventsBody(IReadOnlyList<SecurityEventInput>? Events);
+sealed record SetEventStatusBody(string Status);
 
 public partial class Program;

@@ -18,9 +18,9 @@ Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
 
 ## Serwer firmowy — pierwszy etap
 
-Repozytorium zawiera teraz odrębny fundament ASP.NET Core w katalogu `server/`: SQLite serwera, health/readiness, zaproszenia ograniczone czasem i limitem, rejestrację urządzeń z indywidualnymi poświadczeniami, heartbeat oraz odwoływanie urządzeń. Instrukcje uruchomienia i endpointy są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i plan etapów są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
+Repozytorium zawiera odrębny projekt ASP.NET Core w `server/`: SQLite, health/readiness, zaproszenia, unikalne tożsamości urządzeń, cztery role administratorów, grupy, wersjonowane dziedziczone polityki, minimalną idempotentną historię zdarzeń i endpoint konfiguracji agenta. Instrukcje i ograniczenia są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i etapy są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
 
-To nadal nie jest gotowy serwer produkcyjny. Ma indywidualne konta administratorów, cztery role, ograniczone sesje, ochronę logowania i audyt operacji administracyjnych. Nie ma jeszcze panelu, zarządzanych grup i polityk, synchronizacji zdarzeń, AI/RAG, instalatora usługi Windows ani integracji klienta.
+To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient nie pobiera jeszcze efektywnej polityki, nie wysyła historii offline i nie rejestruje się przez UI. Nie ma jeszcze panelu, ręcznej akceptacji urządzeń, rotacji poświadczeń, AI/RAG, instalatora/usługi Windows, backup/restore ani integracji klienta.
 
 ## Uruchomienie deweloperskie na Windows
 
@@ -86,7 +86,7 @@ dotnet publish src/Sentinel.Desktop/Sentinel.Desktop.csproj -c Release -r win-x6
 
 Uruchom `artifacts/win-x64/Sentinel.Desktop.exe` na Windows, zachowując cały katalog publikacji. To katalog programu z runtime. Gotowy instalator EXE jest dostępny osobno w `artifacts/installer`. Procedura natywnej walidacji: [docs/WINDOWS-VALIDATION.md](docs/WINDOWS-VALIDATION.md).
 
-Linux/Codex: `bash scripts/setup-cloud.sh` odtwarza zależności w locked-mode, kompiluje WPF i uruchamia testy Core. SDK: `/workspace/tools/dotnet/dotnet`. Pobranie SDK jest przypięte i weryfikowane SHA-512. WPF i user32/UI Automation nie mogą zostać uruchomione na Linux. Testy podstawiają źródło okien, ale wykonują rzeczywistą analizę regułową i operacje SQLite. Test offline najpierw sprawdza działanie audytora żądaniem loopback bez danych użytkownika, a następnie sprawdza brak zdarzeń HTTP, DNS i połączeń zarządzanych podczas lokalnej analizy.
+Linux/Codex: `bash scripts/setup-cloud.sh` odtwarza oba rozwiązania w locked-mode, kompiluje WPF i serwer, uruchamia testy klienta i serwera oraz smoke test API. SDK: `/workspace/tools/dotnet/dotnet`. Pobranie SDK jest przypięte i weryfikowane SHA-512. WPF i user32/UI Automation nie mogą zostać uruchomione na Linux. Testy podstawiają źródło okien, ale wykonują rzeczywistą analizę regułową i operacje SQLite. Test offline najpierw sprawdza działanie audytora żądaniem loopback bez danych użytkownika, a następnie sprawdza brak zdarzeń HTTP, DNS i połączeń zarządzanych podczas lokalnej analizy.
 
 ## Następne etapy
 

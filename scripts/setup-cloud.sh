@@ -18,3 +18,7 @@ cd /workspace/asystent
 dotnet restore Sentinel.sln --locked-mode --disable-parallel -m:1 -nr:false
 dotnet build Sentinel.sln -c Release --no-restore --disable-build-servers -m:1 -nr:false
 dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-build --no-restore --disable-build-servers -m:1 -nr:false
+dotnet restore server/Sentinel.Server.sln --locked-mode --disable-parallel -m:1 -nr:false
+dotnet build server/Sentinel.Server.sln -c Release --no-restore --disable-build-servers -m:1 -nr:false
+dotnet test server/Sentinel.Server.sln -c Release --no-build --no-restore --disable-build-servers -m:1 -nr:false
+python3 server/scripts/test-api.py

@@ -109,6 +109,7 @@ public sealed class AdminSecurityTests : IDisposable
             "legacy-code-hash", Hash("legacy-device-token"), _now);
         Assert.NotNull(enrollment);
         Assert.Equal("IT", enrollment.Group);
+        Assert.Contains(await migrated.ListGroupsAsync(), group => group.Name == "IT");
         Assert.Single(await migrated.ListDevicesAsync());
     }
 

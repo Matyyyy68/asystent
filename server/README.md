@@ -1,4 +1,4 @@
-# Sentinel AI Server — etapy A, B1 i B2a
+# Sentinel AI Server — etapy A, B1, B2a i B2b (częściowo)
 
 Serwer jest odrębnym projektem w `server/`; istniejący klient WPF i jego reguły pozostają bez zmian. Wymagany jest .NET SDK 10.0.402.
 
@@ -17,7 +17,9 @@ Przy pierwszym uruchomieniu ustaw `Sentinel__BootstrapAdminUsername` (3–64 zna
 
 Logowanie: `POST /api/v1/admin/auth/login` z `{ "username": "…", "password": "…" }`; odpowiedź zawiera token bearer ważny 12 godzin. Hasła są haszowane PBKDF2-HMAC-SHA256 z osobną losową solą. Logowanie ma limit 5 prób na 15 minut z jednego adresu IP. `PUT /api/v1/admin/auth/password` wymaga bieżącego i nowego hasła; unieważnia wszystkie sesje tego konta. `POST /api/v1/admin/auth/logout` unieważnia bieżącą sesję. Tokeny są przechowywane w bazie tylko jako SHA-256.
 
-Role: **SystemAdministrator** może zarządzać kontami/rolami i wszystkimi funkcjami; **SecurityAdministrator** może zarządzać zaproszeniami, odłączać urządzenia i czytać audyt; **Operator** i **ReadOnly** mogą przeglądać urządzenia. Każda rola może zarządzać własnym hasłem i sesją. Zmiany kont, udane logowania, zaproszenia i odłączenia są zapisywane w audycie. Ostatniego aktywnego administratora systemu nie można wyłączyć ani zdegradować.
+Role: **SystemAdministrator** może zarządzać kontami/rolami i wszystkimi funkcjami; **SecurityAdministrator** może zarządzać grupami, przypisaniem urządzeń i politykami (bez włączania wysyłania kontekstu), zaproszeniami, odłączać urządzenia i czytać audyt; **Operator** i **ReadOnly** mogą przeglądać urządzenia, grupy oraz efektywną politykę. Każda rola może zarządzać własnym hasłem i sesją. Zmiany kont, udane logowania, zaproszenia, grupy, polityki i odłączenia są zapisywane w audycie. Ostatniego aktywnego administratora systemu nie można wyłączyć ani zdegradować.
+
+Wrażliwa polityka włączająca tryb `server`/`hybrid` lub `includeContext` wymaga jawnego `confirmedSensitiveChange: true` oraz roli `SystemAdministrator`. Polityki globalne, grupowe i urządzenia są dokumentami częściowymi: pole `null` dziedziczy, a podana wartość nadpisuje warstwę niższą; pusta lista jawnie zastępuje listę niższej warstwy pustą listą. Priorytet to urządzenie → grupa → globalnie → bezpieczne wartości domyślne. `expectedVersion` musi zgadzać się z aktualną wersją, inaczej API zwraca konflikt i nie zapisuje zmian. Efektywny endpoint zwraca wersje warstw i źródło każdej wartości.
 
 ## API v1
 
@@ -26,14 +28,20 @@ Role: **SystemAdministrator** może zarządzać kontami/rolami i wszystkimi funk
 - `POST /api/v1/admin/invitations` — tworzy jednorazowo ujawniony losowy kod rejestracji. JSON: `{ "group": "Testowe", "expiresAt": "<ISO-8601 UTC>", "maximumRegistrations": 1 }`. Maksymalna ważność to 30 dni, limit użyć 1–1000.
 - `DELETE /api/v1/admin/invitations/{id}` — unieważnia zaproszenie.
 - `GET /api/v1/admin/devices` — lista bez sekretów, z `isOnline` wyliczanym z heartbeat w ostatnich 2 minutach.
+- `GET /api/v1/admin/groups`, `POST /api/v1/admin/groups` — lista i tworzenie grup. Zaproszenie może wskazywać wyłącznie istniejącą grupę.
+- `PUT /api/v1/admin/devices/{id}/group` — przypisuje urządzenie do istniejącej grupy.
+- `GET/PUT /api/v1/admin/policies/global`, `GET/PUT /api/v1/admin/groups/{id}/policy`, `PUT /api/v1/admin/devices/{id}/policy` — czytanie i wersjonowane ustawianie polityk. `GET /api/v1/admin/devices/{id}/policy` zwraca efektywną politykę, wersje i źródła pól.
 - `DELETE /api/v1/admin/devices/{id}` — odcina i unieważnia tożsamość urządzenia (Administrator systemu/bezpieczeństwa).
 - `GET /api/v1/admin/users`, `POST /api/v1/admin/users`, `PUT /api/v1/admin/users/{id}/disabled`, `PUT /api/v1/admin/users/{id}/role` — zarządzanie kontami (Administrator systemu).
 - `GET /api/v1/admin/audit?limit=100` — ostatnie wpisy dziennika (Administrator systemu/bezpieczeństwa).
 - `GET /api/v1/admin/auth/me`, `POST /api/v1/admin/auth/logout`, `PUT /api/v1/admin/auth/password` — bieżące konto, koniec sesji i zmiana własnego hasła.
 - `POST /api/v1/agents/enroll` — JSON `{ "invitationCode": "…", "deviceName": "PC-01", "clientVersion": "0.2.0" }`; kod urządzenia zwracany jest tylko raz.
-- `GET /api/v1/agents/me` oraz `POST /api/v1/agents/heartbeat` — wymagają nagłówka `Authorization: Bearer <poświadczenie urządzenia>`.
+- `GET /api/v1/agents/me`, `GET /api/v1/agents/configuration` oraz `POST /api/v1/agents/heartbeat` — wymagają nagłówka `Authorization: Bearer <poświadczenie urządzenia>`. Endpoint konfiguracji zwraca efektywną politykę, wersje źródeł i pochodzenie wartości.
+- `POST /api/v1/agents/events` — idempotentny batch 1–100 zdarzeń, np. `{ "events": [{ "eventId": "<GUID>", "occurredAt": "<ISO-8601 UTC>", "category": "url", "riskLevel": 3, "ruleCode": "url.suspicious_domain" }] }`. Schemat celowo nie przyjmuje treści, adresów URL, zrzutów ekranu ani danych użytkownika. Powtórzony identyfikator zdarzenia w obrębie urządzenia jest ignorowany.
+- `GET /api/v1/admin/events?limit=100&deviceId=…` — historia z ograniczonymi metadanymi zdarzenia.
+- `PUT /api/v1/admin/events/{deviceId}/{eventId}/status` z `{ "status": "resolved" }` lub `false_positive` — zmiana statusu (Administrator systemu/bezpieczeństwa), audytowana.
 
-API nie przyjmuje jeszcze zdarzeń ani kontekstu użytkownika. Heartbeat przyjmuje wyłącznie jeden z kodów błędu `local_store`, `sync_failed`, `configuration_invalid`, `client_update`; nie przechowuje dowolnych komunikatów, które mogłyby zawierać dane prywatne. Limit rejestracji wynosi 20 prób/minutę/adres IP. Odpowiedzi API zawierają `X-Correlation-ID`; żądania są ograniczone do 64 KiB.
+Serwer przyjmuje ograniczone metadane zdarzeń, lecz istniejący klient nie ma jeszcze kolejki offline ani synchronizacji z tym endpointem i nie stosuje pobranej polityki. Surowego kontekstu użytkownika nie przyjmuje się. Heartbeat przyjmuje wyłącznie jeden z kodów błędu `local_store`, `sync_failed`, `configuration_invalid`, `client_update`; nie przechowuje dowolnych komunikatów, które mogłyby zawierać dane prywatne. Domyślna retencja zdarzeń wynosi 90 dni i można ją ustawić przez `Sentinel:EventRetentionDays` (30–3650 dni); czyszczenie działa cyklicznie i przy przyjęciu zdarzeń. Limit rejestracji wynosi 20 prób/minutę/adres IP. Odpowiedzi API zawierają `X-Correlation-ID`; żądania są ograniczone do 64 KiB.
 
 Do dostępu spoza loopback ustaw HTTPS w Kestrel (`ASPNETCORE_URLS=https://<adres>:<port>` i chroniona konfiguracja certyfikatu Kestrel). Serwer przerwie start, gdy otrzyma zewnętrzny adres HTTP. Certyfikat CA musi zostać zaufany przez klientów; aplikacja nie pomija weryfikacji certyfikatów. Kreator konfiguracji TLS, firewall i test połączenia zostaną dodane w etapie instalatora.
 
@@ -46,4 +54,4 @@ dotnet test server/tests/Sentinel.Server.Tests/Sentinel.Server.Tests.csproj -c R
 python server/scripts/test-api.py
 ```
 
-Testy jednostkowe używają oddzielnej tymczasowej bazy SQLite i sprawdzają haszowanie haseł, bootstrap, role, sesje, audyt, migrację v1→v2, zaproszenia, rejestrację i unieważnianie. Skrypt HTTP uruchamia API na losowym porcie loopback z tymczasową bazą i sprawdza logowanie, RBAC oraz cykl życia urządzenia. Dalsze etapy i ograniczenia są w [ARCHITECTURE.md](ARCHITECTURE.md).
+Testy jednostkowe używają oddzielnej tymczasowej bazy SQLite i sprawdzają haszowanie haseł, bootstrap, role, sesje, audyt, migrację, zaproszenia, rejestrację/unieważnianie, walidację polityk, priorytety dziedziczenia i wersjonowanie. Skrypt HTTP uruchamia API na losowym porcie loopback z tymczasową bazą i sprawdza logowanie, RBAC, grupy, polityki i cykl życia urządzenia. Dalsze etapy i ograniczenia są w [ARCHITECTURE.md](ARCHITECTURE.md).
