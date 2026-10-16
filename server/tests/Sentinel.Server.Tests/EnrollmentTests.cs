@@ -44,6 +44,22 @@ public sealed class EnrollmentTests : IDisposable
     }
 
     [Fact]
+    public async Task OnlineBackupIsAnIntegrityCheckedSnapshotOfTheServerDatabase()
+    {
+        await CreateInviteAsync("backup-test-code");
+        var backupPath = Path.Combine(_directory, "Backups", "snapshot.db");
+        await _store.CreateBackupAsync(backupPath);
+
+        Assert.True(File.Exists(backupPath));
+        await using var backup = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = backupPath, Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly }.ToString());
+        await backup.OpenAsync();
+        await using var integrity = backup.CreateCommand(); integrity.CommandText = "PRAGMA integrity_check";
+        Assert.Equal("ok", await integrity.ExecuteScalarAsync());
+        await using var rows = backup.CreateCommand(); rows.CommandText = "SELECT COUNT(*) FROM invitations";
+        Assert.Equal(1L, (long)(await rows.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task InvitationCannotBeUsedMoreThanItsLimit()
     {
         await CreateInviteAsync("limited-code", maximum: 1);

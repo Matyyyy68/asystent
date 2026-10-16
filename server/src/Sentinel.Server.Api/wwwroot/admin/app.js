@@ -24,7 +24,6 @@ const navItems = [
 ];
 const unavailableSources = {
   diagnostics: { title: "Diagnostyka serwera jest ograniczona", detail: "Dostępne są publiczne healthz i readyz. API nie udostępnia dziennika błędów technicznych ani diagnostyki hosta.", source: "Dostępne tylko GET /healthz i GET /readyz; brak endpointu diagnostycznego." },
-  backups: { title: "Operacje kopii nie są dostępne", detail: "Serwer nie ma endpointów tworzenia, pobierania ani przywracania kopii zapasowych.", source: "Brak API oraz procedury backup/restore." },
   server: { title: "Konfiguracja serwera poza panelem", detail: "Konfigurację hosta, TLS, certyfikatu i katalogu danych ustawia administrator systemu poza aplikacją.", source: "Brak API zarządzania konfiguracją wdrożenia." }
 };
 const iconPaths = {
@@ -168,6 +167,7 @@ async function showSection(section) {
     else if (section === "audit") await renderAudit();
     else if (section === "knowledge") await renderKnowledge();
     else if (section === "models") await renderModels();
+    else if (section === "backups") await renderBackups();
     else if (unavailableSources[section]) renderUnavailable(section);
   } catch (error) { showError(error, () => showSection(section)); }
 }
@@ -301,6 +301,24 @@ function renderUnavailable(section) {
   const card = node("section", "card unavailable-state");
   card.append(node("h2", "", info.title), node("p", "muted", info.detail));
   const source = node("p", "field-help", `Źródło danych: ${info.source}`); card.append(source); view.append(card);
+}
+async function renderBackups() {
+  view.replaceChildren(pageHeading("Kopie zapasowe", "Twórz spójne kopie bazy serwera. Pliki zawierają dane administracyjne i powinny być przechowywane w bezpiecznym miejscu."));
+  const card = node("section", "card");
+  card.append(node("h2", "", "Utwórz kopię bazy"), node("p", "muted", "Kopia zawiera urządzenia, zdarzenia, polityki, konta administratorów i dziennik audytowy. Dostęp ma wyłącznie administrator systemu."));
+  const create = actionButton("Utwórz kopię zapasową", async () => {
+    create.disabled = true;
+    try {
+      const result = await request("/backups", { method: "POST" });
+      const response = await fetch(result.downloadUrl, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+      if (!response.ok) throw new Error("Nie udało się pobrać utworzonej kopii.");
+      const link = document.createElement("a"); link.href = URL.createObjectURL(await response.blob()); link.download = result.fileName; link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 30000); toast("Kopia została utworzona i pobrana.");
+    } catch (error) { toast(error.message, "error"); }
+    finally { create.disabled = false; }
+  }, "primary");
+  card.append(create, node("p", "field-help", "Tworzenie używa mechanizmu SQLite online backup i sprawdza integralność pliku. Przywracanie wymaga zatrzymania usługi i nie jest dostępne w panelu."));
+  view.append(card);
 }
 async function renderDevices() {
   const [devices, groups] = await Promise.all([request("/devices"), request("/groups")]);

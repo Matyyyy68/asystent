@@ -15,9 +15,9 @@ Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.
 ## Braki wykryte w kodzie
 
 - Klient i serwer mają provider Ollama loopback; serwer udostępnia konfigurację, wykrywanie modeli, syntetyczny test i endpoint analizy agenta. Ollama musi być wcześniej zainstalowane; nie ma katalogu kompatybilnych modeli, aktualizatora ani procesu pobierania. Nie można wiarygodnie dobierać modelu na podstawie GPU/RAM/backendu.
-- Lokalne i centralne bazy wiedzy obsługują import TXT/MD/DOCX oraz FTS5. Panel serwera pozwala importować, wyszukiwać i usuwać dokumenty. Nie obsługują PDF ani embeddingów/semantycznego wyszukiwania; centralne wersjonowanie źródeł i pełny backup/restore pozostają brakujące.
+- Lokalne i centralne bazy wiedzy obsługują import TXT/MD/DOCX oraz FTS5. Panel serwera pozwala importować, wyszukiwać i usuwać dokumenty. Nie obsługują PDF ani embeddingów/semantycznego wyszukiwania; centralne wersjonowanie źródeł i przywracanie kopii pozostają brakujące. Administrator systemu może pobrać audytowaną kopię bazy SQLite, której integralność jest sprawdzana przy tworzeniu.
 - Klient Enterprise paruje się przez HTTPS, przechowuje token w DPAPI, pobiera efektywną politykę i ręcznie wysyła lokalną kolejkę minimalnych metadanych zdarzeń. Nadal brakuje automatycznej synchronizacji z retry/backoff oraz egzekwowania polityk przez klienta.
-- API przyjmuje politykę i metadane, a analizę kontekstu wyłącznie po jawnym potwierdzeniu agenta i zezwoleniu polityki. Nie ma ręcznej akceptacji, rotacji poświadczeń, backup/restore, raportowania wersji zgodności ani API diagnostyki hosta.
+- API przyjmuje politykę i metadane, a analizę kontekstu wyłącznie po jawnym potwierdzeniu agenta i zezwoleniu polityki. Nie ma ręcznej akceptacji, rotacji poświadczeń, przywracania kopii, raportowania wersji zgodności ani API diagnostyki hosta.
 - Brak usługi Windows, ACL/configuration bootstrap serwera i instalatora Enterprise Server. API uruchamia się jako proces konsolowy; jego aktualny bootstrap hasła nie jest mechanizmem produkcyjnego instalatora usługi.
 - Instalator ma strony MUI NSIS ze zmienioną paletą/tekstem i wyborem profilu; nie jest aplikacją WPF. Instalacja Enterprise Server/usługi i jej bootstrap są nadal niedostępne.
 - Sprzęt jest odczytywany lokalnie przez standardowe API/registry; adaptery raportują nazwę, ale nie VRAM/backend/sterownik. NPU jest jawnie unknown. Nie skanujemy plików, skrzynek, cookies ani historii przeglądarki. Inne programy ochronne są wykrywane heurystycznie wyłącznie z rejestru uninstall i lista nie jest pełna.
@@ -34,7 +34,7 @@ Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.
 1. **Zaimplementowano:** profile wariantu, diagnostykę, deterministyczną konfigurację, osobną lokalną bazę FTS5 dla TXT/MD/DOCX, lokalny Ollama provider z walidacją odpowiedzi i fallback regułowy, testy i dokumentację.
 2. **Następne:** PDF, lokalny runtime wbudowany lub katalog kompatybilności modeli, wiarygodne wymagania pamięci oraz wyszukiwanie semantyczne/embeddingi.
 3. **Częściowo wdrożone:** parowanie Enterprise przez HTTPS, token DPAPI, pobieranie konfiguracji, lokalna kolejka i ręczne wysyłanie dozwolonych metadanych. **Następne:** egzekwowanie polityk, autoryzowany retry z backoff/jitter, heartbeat w tle oraz diagnostyka i rotacja.
-4. **Częściowo wdrożone:** serwerowy loopback Ollama, centralne FTS5, limity czasu, test modelu i analiza agenta z bramką zgody. **Następne:** limity współbieżności, PDF/embeddingi, backup/restore, rotacja i wersje/zgodność.
+4. **Częściowo wdrożone:** serwerowy loopback Ollama, centralne FTS5, limity czasu, test modelu, analiza agenta z bramką zgody i tworzenie kopii bazy. **Następne:** limity współbieżności, PDF/embeddingi, przywracanie kopii, rotacja i wersje/zgodność.
 5. **Następne:** Enterprise Server/service package; dla obecnego instalatora pozostaje dopracowanie pełnego własnego wizardu, wymagań, postępu, naprawy i natywnych scenariuszy Windows. Wymaga bezpiecznego bootstrapu sekretów usługi.
 
 Etapów 2–5 nie oznaczamy jako dostarczonych, dopóki nie ma rzeczywistych komponentów, testów scenariuszy oraz binariów, które je zawierają.

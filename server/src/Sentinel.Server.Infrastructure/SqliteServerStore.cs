@@ -85,6 +85,30 @@ public sealed class SqliteServerStore : IServerStore
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    public async Task CreateBackupAsync(string destinationPath, CancellationToken cancellationToken = default)
+    {
+        var destination = Path.GetFullPath(destinationPath);
+        if (string.Equals(destination, _databasePath, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new ArgumentException("Kopia musi być zapisana w osobnym pliku.", nameof(destinationPath));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        await using var source = await OpenAsync(cancellationToken);
+        await using var target = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = destination, Pooling = false, Mode = SqliteOpenMode.ReadWriteCreate
+        }.ToString());
+        await target.OpenAsync(cancellationToken);
+        source.BackupDatabase(target);
+        await using var check = target.CreateCommand();
+        check.CommandText = "PRAGMA integrity_check";
+        var result = Convert.ToString(await check.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+        {
+            await target.CloseAsync();
+            File.Delete(destination);
+            throw new InvalidDataException("Utworzona kopia bazy nie przeszła kontroli integralności.");
+        }
+    }
+
     public async Task<bool> CheckReadyAsync(CancellationToken cancellationToken = default)
     {
         try

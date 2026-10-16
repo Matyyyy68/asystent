@@ -43,6 +43,7 @@ var configuredBootstrapUsername = builder.Configuration["Sentinel:BootstrapAdmin
 var configuredBootstrapPassword = builder.Configuration["Sentinel:BootstrapAdminPassword"];
 var dummyPasswordHash = passwordHasher.Hash(RandomToken(32));
 builder.Services.AddSingleton<IServerStore>(store);
+builder.Services.AddSingleton(store);
 builder.Services.AddHostedService<EventRetentionService>();
 builder.Services.AddSingleton(passwordHasher);
 builder.Services.AddRateLimiter(options =>
@@ -123,6 +124,35 @@ securityAdmins.AddEndpointFilter(RequireRoles(AdminRole.SystemAdministrator, Adm
 var systemAdmins = app.MapGroup("/api/v1/admin");
 systemAdmins.AddEndpointFilter(AuthenticateAdmin(store));
 systemAdmins.AddEndpointFilter(RequireRoles(AdminRole.SystemAdministrator));
+
+systemAdmins.MapPost("/backups", async (HttpContext context, SqliteServerStore repository, IServerStore audit, CancellationToken ct) =>
+{
+    var actor = (AdminIdentity)context.Items["admin"]!;
+    var backupDirectory = Path.Combine(Path.GetFullPath(dataDirectory), "Backups");
+    Directory.CreateDirectory(backupDirectory);
+    var backupName = $"sentinel-server-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.db";
+    var backupPath = Path.Combine(backupDirectory, backupName);
+    try
+    {
+        await audit.RecordAdminActionAsync(actor.Username, "server.backup_requested", backupName, DateTimeOffset.UtcNow, ct);
+        await repository.CreateBackupAsync(backupPath, ct);
+        return Results.Ok(new { fileName = backupName, downloadUrl = $"/api/v1/admin/backups/{Uri.EscapeDataString(backupName)}" });
+    }
+    catch
+    {
+        if (File.Exists(backupPath)) File.Delete(backupPath);
+        throw;
+    }
+});
+systemAdmins.MapGet("/backups/{fileName}", (string fileName) =>
+{
+    if (!System.Text.RegularExpressions.Regex.IsMatch(fileName, "^sentinel-server-[0-9]{8}-[0-9]{6}-[a-f0-9]{32}\\.db$", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+        return Results.NotFound();
+    var backupPath = Path.Combine(Path.GetFullPath(dataDirectory), "Backups", fileName);
+    return File.Exists(backupPath)
+        ? Results.File(backupPath, "application/vnd.sqlite3", fileName, enableRangeProcessing: false)
+        : Results.NotFound();
+});
 
 allAdmins.MapGet("/ai/configuration", async (IServerStore repository, CancellationToken ct) =>
 {
