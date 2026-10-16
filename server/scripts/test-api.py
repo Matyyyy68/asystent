@@ -77,6 +77,14 @@ try:
         raise TimeoutError("Server did not become ready")
 
     assert request("/healthz")["status"] == "healthy"
+    with urllib.request.urlopen(address + "/", timeout=3) as response:
+        page = response.read().decode("utf-8")
+        assert response.status == 200 and "Bezpieczeństwo cyfrowe." in page and "Kontakt i zgłoszenia" in page
+        assert response.headers.get("Content-Security-Policy", "").find("script-src 'self'") >= 0
+        assert response.headers.get("X-Frame-Options") == "DENY"
+    for asset, expected_marker in (("/site.css", ".feature-grid"), ("/site.js", "aria-expanded")):
+        with urllib.request.urlopen(address + asset, timeout=3) as response:
+            assert response.status == 200 and expected_marker.encode() in response.read()
     with urllib.request.urlopen(address + "/admin/", timeout=3) as response:
         page = response.read().decode("utf-8")
         assert response.status == 200 and "Panel administracyjny" in page

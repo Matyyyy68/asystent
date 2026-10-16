@@ -96,6 +96,11 @@ app.Use(async (context, next) =>
 });
 app.UseRateLimiter();
 
+var publicSiteRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+app.MapGet("/", () => Results.File(Path.Combine(publicSiteRoot, "index.html"), "text/html; charset=utf-8"));
+app.MapGet("/site.css", () => Results.File(Path.Combine(publicSiteRoot, "site.css"), "text/css; charset=utf-8"));
+app.MapGet("/site.js", () => Results.File(Path.Combine(publicSiteRoot, "site.js"), "text/javascript; charset=utf-8"));
+app.MapGet("/favicon.svg", () => Results.File(Path.Combine(publicSiteRoot, "favicon.svg"), "image/svg+xml"));
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
 app.MapGet("/readyz", async (IServerStore repository, CancellationToken ct) =>
     await repository.CheckReadyAsync(ct)

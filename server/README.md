@@ -4,7 +4,7 @@ Wersja API i aplikacji jest wspólna z klientem i pochodzi z `eng/ProductVersion
 
 Serwer jest odrębnym projektem w `server/`; istniejący klient WPF i jego reguły pozostają bez zmian. Wymagany jest .NET SDK 10.0.402. API może działać jako usługa Windows przez `Microsoft.Extensions.Hosting.WindowsServices` 10.0.13.
 
-Panel `/admin/` ma centralną bazę FTS5 i konfigurację/test lokalnego Ollama na loopback serwera. Zainstalowane modele są wykrywane z API Ollama; instalator nie pobiera modeli. Administrator systemu może wykonać syntetyczny test. Analiza agentów wymaga jednocześnie polityki `includeContext=true`, providera `ollama` i potwierdzenia w żądaniu; surowy kontekst nie jest utrwalany na serwerze. Bez skonfigurowanego modelu serwer zwraca analizę regułową.
+Strona informacyjna produktu jest dostępna pod `/`, a panel zespołu pod `/admin/`. Strona pobiera aktualny numer wydania z `/readyz`, nie używa zewnętrznych fontów ani analityki; odsyła do GitHuba w sprawach kontaktu. Panel ma centralną bazę FTS5 i konfigurację/test lokalnego Ollama na loopback serwera. Zainstalowane modele są wykrywane z API Ollama; instalator nie pobiera modeli. Administrator systemu może wykonać syntetyczny test. Analiza agentów wymaga jednocześnie polityki `includeContext=true`, providera `ollama` i potwierdzenia w żądaniu; surowy kontekst nie jest utrwalany na serwerze. Bez skonfigurowanego modelu serwer zwraca analizę regułową.
 
 ## Uruchomienie lokalne
 
