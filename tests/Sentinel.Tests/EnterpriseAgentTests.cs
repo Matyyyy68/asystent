@@ -8,6 +8,26 @@ namespace Sentinel.Tests;
 [Collection("NetworkAudit")]
 public sealed class EnterpriseAgentTests
 {
+    [Fact]
+    public void EnterprisePolicyParsesValidatedEffectiveSettings()
+    {
+        using var json = System.Text.Json.JsonDocument.Parse("""{"globalVersion":4,"effective":{"analysisMode":"local","analysisIntervalSeconds":45,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":["browser.exe"],"syncIntervalSeconds":600}}""");
+        var policy = EnterprisePolicy.Parse(json);
+        Assert.Equal(4, policy.Version);
+        Assert.Equal(45, policy.AnalysisIntervalSeconds);
+        Assert.Equal(600, policy.SyncIntervalSeconds);
+        Assert.Equal("browser.exe", Assert.Single(policy.ExcludedApplications));
+    }
+
+    [Theory]
+    [InlineData("""{"globalVersion":1,"effective":{"analysisMode":"local","analysisIntervalSeconds":1,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":[],"syncIntervalSeconds":300}}""")]
+    [InlineData("""{"globalVersion":1,"effective":{"analysisMode":"hybrid","analysisIntervalSeconds":5,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":["bad;name"],"syncIntervalSeconds":300}}""")]
+    public void EnterprisePolicyRejectsUnsafeOrOutOfRangeValues(string source)
+    {
+        using var json = System.Text.Json.JsonDocument.Parse(source);
+        Assert.Throws<InvalidDataException>(() => EnterprisePolicy.Parse(json));
+    }
+
     [Theory]
     [InlineData("http://sentinel.example")]
     [InlineData("https://user:secret@sentinel.example")]

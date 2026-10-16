@@ -98,9 +98,10 @@ public sealed class ConfigurationRecommendationEngine
         if (variant == ProductVariant.EnterpriseClient)
         {
             available.Add("Parowanie z serwerem Enterprise przez HTTPS i chronione poświadczenie Windows");
-            available.Add("Ręczne wysyłanie ograniczonych metadanych zdarzeń i heartbeat");
-            unavailable.Add("Egzekwowanie pobranych polityk, automatyczna synchronizacja w tle, zatwierdzanie urządzeń i rotacja poświadczeń");
-            notices.Add("Połączenie Enterprise jest dostępne ręcznie; pobrana polityka nie jest jeszcze egzekwowana przez klienta.");
+            available.Add("Synchronizacja w tle ograniczonych metadanych i heartbeat według polityki serwera");
+            available.Add("Egzekwowanie interwału analizy, wykluczeń aplikacji i trybu bez automatycznego udostępniania treści");
+            unavailable.Add("Automatyczna analiza serwerowa treści, zatwierdzanie urządzeń i rotacja poświadczeń");
+            notices.Add("Polityki wymagające przesłania treści nie obchodzą jawnej zgody użytkownika; klient pozostaje przy analizie lokalnej na żądanie.");
             if (system.NetworkAvailable == false) notices.Add("Nie wykryto połączenia sieciowego. Lokalna analiza reguł nadal działa offline.");
         }
         return new(variant, available, unavailable, "Lokalne reguły + opcjonalny Ollama loopback", false,

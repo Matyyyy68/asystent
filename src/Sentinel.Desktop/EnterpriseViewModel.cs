@@ -19,6 +19,11 @@ public sealed class EnterpriseViewModel : INotifyPropertyChanged
     private string status = "Nie skonfigurowano połączenia.";
     private string deviceStatus = "Nie sparowano urządzenia.";
     private bool isPaired;
+    private int syncIntervalSeconds = 300;
+    private EnterprisePolicy? activePolicy;
+    private CancellationTokenSource? backgroundSyncCancellation;
+    private readonly SemaphoreSlim synchronization = new(1, 1);
+    public event Action<EnterprisePolicy>? PolicyReceived;
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
     public string ServerAddress { get => serverAddress; set { serverAddress = value; Changed(); } }
@@ -52,6 +57,7 @@ public sealed class EnterpriseViewModel : INotifyPropertyChanged
         DeviceStatus = IsPaired ? "Urządzenie ma zapisane poświadczenie Windows." : "Nie sparowano urządzenia.";
         if (profile.Variant != ProductVariant.EnterpriseClient)
             Status = "Połączenie Enterprise jest dostępne tylko w wariancie Enterprise Client.";
+        if (IsPaired) StartBackgroundSync();
     }
 
     private async Task PairAsync()
@@ -67,30 +73,88 @@ public sealed class EnterpriseViewModel : INotifyPropertyChanged
         ServerAddress = server.ToString().TrimEnd('/'); InvitationCode = ""; IsPaired = true;
         DeviceStatus = $"Połączono urządzenie z grupą „{enrollment.Group}”.";
         Status = "Parowanie zakończone. Poświadczenie jest chronione przez Windows DPAPI dla tego konta.";
+        StartBackgroundSync();
     }
 
-    private async Task SynchronizeAsync()
+    private async Task SynchronizeAsync() => await SynchronizeAsync(CancellationToken.None);
+
+    private async Task SynchronizeAsync(CancellationToken cancellationToken)
+    {
+        await synchronization.WaitAsync(cancellationToken);
+        try { await SynchronizeCoreAsync(cancellationToken); }
+        finally { synchronization.Release(); }
+    }
+
+    private async Task SynchronizeCoreAsync(CancellationToken cancellationToken)
     {
         var profile = await store.GetInstallationProfileAsync();
         if (profile.Variant != ProductVariant.EnterpriseClient || profile.EnterpriseServerUri is null)
             throw new InvalidOperationException("Najpierw zapisz poprawny adres serwera i sparuj urządzenie.");
         var token = await credentials.ReadAsync() ?? throw new InvalidOperationException("Urządzenie nie jest sparowane.");
         var server = EnterpriseAgentClient.ValidateServer(profile.EnterpriseServerUri);
-        Status = "Sprawdzam połączenie i pobieram efektywną politykę…";
-        using var configuration = await client.ReadConfigurationAsync(server, token);
-        if (!configuration.RootElement.TryGetProperty("effective", out var effective) || effective.ValueKind != System.Text.Json.JsonValueKind.Object)
-            throw new InvalidDataException("Serwer zwrócił nieprawidłową konfigurację.");
+        SetStatus("Sprawdzam połączenie i pobieram efektywną politykę…");
+        using var configuration = await client.ReadConfigurationAsync(server, token, cancellationToken);
+        var policy = EnterprisePolicy.Parse(configuration);
+        if (!PoliciesEqual(activePolicy, policy)) { activePolicy = policy; PolicyReceived?.Invoke(policy); }
+        syncIntervalSeconds = policy.SyncIntervalSeconds;
         var pending = await store.ReadPendingEnterpriseEventsAsync(100);
         if (pending.Count > 0)
         {
-            var result = await client.SendEventsAsync(server, token, pending);
+            var result = await client.SendEventsAsync(server, token, pending, cancellationToken);
             if (result.Accepted + result.Duplicates != pending.Count)
                 throw new InvalidDataException("Serwer nie potwierdził wszystkich zdarzeń; pozostawiono je w lokalnej kolejce do ponowienia.");
             await store.MarkEnterpriseEventsSentAsync(pending.Select(item => item.EventId));
         }
-        await client.SendHeartbeatAsync(server, token);
-        Status = $"Połączenie sprawdzone. Wysłano {pending.Count} zdarzeń zawierających wyłącznie kategorię, poziom ryzyka i kod reguły. Efektywna polityka została pobrana; jej egzekwowanie w kliencie pozostaje nieaktywne.";
+        await client.SendHeartbeatAsync(server, token, cancellationToken: cancellationToken);
+        SetStatus($"Synchronizacja zakończona. Polityka v{policy.Version} · interwał {policy.SyncIntervalSeconds}s · wysłano {pending.Count} zdarzeń z ograniczonymi metadanymi.");
     }
+
+    private void StartBackgroundSync()
+    {
+        if (backgroundSyncCancellation is not null) return;
+        backgroundSyncCancellation = new CancellationTokenSource();
+        _ = BackgroundSyncLoopAsync(backgroundSyncCancellation.Token);
+    }
+
+    private async Task BackgroundSyncLoopAsync(CancellationToken cancellationToken)
+    {
+        var failures = 0;
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var succeeded = false;
+                try { await SynchronizeAsync(cancellationToken); failures = 0; succeeded = true; }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+                catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidDataException or ArgumentException or InvalidOperationException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+                { SetStatus("Synchronizacja w tle nie powiodła się. Zdarzenia pozostają lokalnie i zostaną ponowione."); }
+                TimeSpan delay;
+                if (succeeded) delay = TimeSpan.FromSeconds(syncIntervalSeconds);
+                else
+                {
+                    failures = Math.Min(failures + 1, 12);
+                    var baseSeconds = Math.Min(syncIntervalSeconds * Math.Pow(2, failures), 3600);
+                    delay = TimeSpan.FromSeconds(baseSeconds + Random.Shared.NextDouble() * Math.Min(baseSeconds * 0.2, 120));
+                }
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private static bool PoliciesEqual(EnterprisePolicy? left, EnterprisePolicy right) => left is not null &&
+        left.Version == right.Version && left.AnalysisMode == right.AnalysisMode && left.AnalysisIntervalSeconds == right.AnalysisIntervalSeconds &&
+        left.AiProvider == right.AiProvider && left.NotificationLevel == right.NotificationLevel && left.SyncIntervalSeconds == right.SyncIntervalSeconds &&
+        left.ExcludedApplications.SequenceEqual(right.ExcludedApplications, StringComparer.OrdinalIgnoreCase);
+
+    private void SetStatus(string value)
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess()) Status = value;
+        else dispatcher.BeginInvoke(new Action(() => Status = value));
+    }
+
+    public void Dispose() { backgroundSyncCancellation?.Cancel(); backgroundSyncCancellation?.Dispose(); }
 
     private void ShowSafeError(Exception exception)
     {

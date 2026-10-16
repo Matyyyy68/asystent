@@ -95,14 +95,15 @@ public sealed class ConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void EnterpriseRecommendationSeparatesAvailablePairingFromMissingPolicyEnforcement()
+    public void EnterpriseRecommendationListsImplementedPolicyEnforcementAndRemainingGaps()
     {
         var system = new SystemSnapshot("Windows", null, "X64", null, null, null, null, null, null,
             NpuAvailability.Unknown, null, [], true, true);
         var recommendation = new ConfigurationRecommendationEngine().Recommend(system, ProductVariant.EnterpriseClient);
         Assert.Contains(recommendation.AvailableModules, item => item.Contains("Parowanie z serwerem Enterprise", StringComparison.Ordinal));
-        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("Egzekwowanie pobranych polityk", StringComparison.Ordinal));
-        Assert.Contains(recommendation.Notices, item => item.Contains("nie jest jeszcze egzekwowana", StringComparison.Ordinal));
+        Assert.Contains(recommendation.AvailableModules, item => item.Contains("Egzekwowanie interwału analizy", StringComparison.Ordinal));
+        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("Automatyczna analiza serwerowa", StringComparison.Ordinal));
+        Assert.Contains(recommendation.Notices, item => item.Contains("jawnej zgody użytkownika", StringComparison.Ordinal));
     }
 
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }

@@ -6,6 +6,7 @@ using System.Collections.ObjectModel;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Sentinel.Core.Context;
+using Sentinel.Core.Enterprise;
 
 namespace Sentinel.Desktop;
 
@@ -17,6 +18,7 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
     private readonly AnalysisOrchestrator analysis;
     private readonly IAIProvider aiProvider;
     private AppSettings applied = new();
+    private AppSettings? enterpriseBaseSettings;
     private CancellationTokenSource session = new();
     private bool collecting;
     private bool autoActive;
@@ -128,6 +130,34 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
         UseLocalAI = UseLocalAI, LocalAIEndpoint = LocalAIEndpoint, LocalAIModel = LocalAIModel, LocalAITimeoutSeconds = LocalAITimeoutSeconds
     };
     public void Activate() => ApplySettings(applied);
+    public void ApplyUserSettings(AppSettings settings)
+    {
+        enterpriseBaseSettings = settings;
+        ApplySettings(settings);
+    }
+    public void ApplyEnterprisePolicy(EnterprisePolicy policy)
+    {
+        enterpriseBaseSettings ??= applied;
+        var baseSettings = enterpriseBaseSettings;
+        var excluded = (baseSettings.ExcludedApplications + ";" + string.Join(';', policy.ExcludedApplications))
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var remoteMode = policy.AnalysisMode is "server" or "hybrid";
+        var enforced = applied with
+        {
+            MinimumIntervalSeconds = Math.Max(baseSettings.MinimumIntervalSeconds, policy.AnalysisIntervalSeconds),
+            ExcludedApplications = string.Join(';', excluded),
+            MonitorForegroundChanges = remoteMode ? false : baseSettings.MonitorForegroundChanges,
+            Notifications = policy.NotificationLevel != "history"
+        };
+        ApplySettings(enforced with { RetentionDays = baseSettings.RetentionDays, Theme = baseSettings.Theme,
+            StartMinimized = baseSettings.StartMinimized, UseLocalAI = baseSettings.UseLocalAI,
+            LocalAIEndpoint = baseSettings.LocalAIEndpoint, LocalAIModel = baseSettings.LocalAIModel,
+            LocalAITimeoutSeconds = baseSettings.LocalAITimeoutSeconds });
+        Message = remoteMode
+            ? $"Polityka Enterprise v{policy.Version}: automatyczne wysyłanie treści jest wyłączone; tryb serwerowy wymaga jawnej zgody użytkownika. Analiza lokalna pozostaje dostępna na żądanie."
+            : $"Zastosowano politykę Enterprise v{policy.Version}: odstęp co najmniej {policy.AnalysisIntervalSeconds}s i wykluczenia administratora.";
+    }
     public void ApplySettings(AppSettings settings, bool activate = true)
     {
         // In-flight work is cancelled when privacy policy or pause state changes.

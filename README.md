@@ -4,7 +4,7 @@ Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. *
 
 ## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.4.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS i ręcznie wysyła minimalne metadane; lokalne reguły działają offline. Pobrane polityki nie są jeszcze egzekwowane, a instalator nie instaluje Enterprise Server. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
+Plik: `artifacts/installer/SentinelAI-0.6.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle i egzekwuje wybrane ograniczenia polityki; treść kontekstu nie jest wysyłana automatycznie. Instalator nie instaluje Enterprise Server. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.
@@ -94,6 +94,6 @@ Linux/Codex: `bash scripts/setup-cloud.sh` odtwarza oba rozwiązania w locked-mo
 
 Zaimplementowana część Etapu 3: provider Ollama loopback, walidacja strukturalnej odpowiedzi i fallback regułowy, prywatny indeks FTS5 dla TXT/MD/DOCX, import, wyszukiwanie, usuwanie, backup i źródła z fragmentów. Serwer udostępnia lokalną konfigurację/test Ollama i centralne FTS5; analiza serwerowa wymaga polityki oraz potwierdzenia klienta. Ograniczenia: bez PDF, embeddingów/semantyki, katalogu modeli i potwierdzonego doboru sprzętowego. Nie podawaj kluczy ani nie pobieraj modeli bez własnej świadomej decyzji.
 
-Pozostałe etapy i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Brak blokowania, semantycznego RAG, usługi Enterprise Server, synchronizacji klienta, rozszerzenia przeglądarki i aplikacji mobilnych.
+Pozostałe etapy i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Brak blokowania, semantycznego RAG, usługi Enterprise Server, analizy serwerowej treści bez jawnej zgody, rozszerzenia przeglądarki i aplikacji mobilnych.
 
 Architektura i punktacja: [ARCHITECTURE.md](ARCHITECTURE.md). Źródła wersji: [metadane .NET 10](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json), [NuGet](https://api.nuget.org/v3/index.json). Wersje i hashe pakietów: `packages.lock.json`. Informacje o licencji PSL: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

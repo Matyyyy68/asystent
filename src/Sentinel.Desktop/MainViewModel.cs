@@ -52,6 +52,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public KnowledgeViewModel Knowledge { get; }
     public EnterpriseViewModel Enterprise { get; }
     private bool isEnterprise;
+    private Sentinel.Core.Enterprise.EnterprisePolicy? enterprisePolicy;
     public bool IsEnterprise { get => isEnterprise; private set { isEnterprise = value; Changed(); } }
     public ICommand Save { get; }
     public ICommand Refresh { get; }
@@ -66,7 +67,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public MainViewModel(LocalStore store, MonitoringViewModel monitoring, KnowledgeViewModel knowledge, EnterpriseViewModel enterprise)
     {
         this.store = store; Monitoring = monitoring; Knowledge = knowledge; Enterprise = enterprise; Monitoring.HistoryChanged = Reload;
-        Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications, Theme = Theme, StartMinimized = StartMinimized }); await store.SaveSettingsAsync(settings); Monitoring.ApplySettings(settings); await store.ApplyRetentionAsync(RetentionDays); await Reload(); ThemeChanged?.Invoke(Theme); Message = "Ustawienia zapisane; retencja zastosowana."; });
+        Enterprise.PolicyReceived += policy => System.Windows.Application.Current.Dispatcher.BeginInvoke(() => { enterprisePolicy = policy; Monitoring.ApplyEnterprisePolicy(policy); });
+        Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications, Theme = Theme, StartMinimized = StartMinimized }); await store.SaveSettingsAsync(settings); Monitoring.ApplyUserSettings(settings); if (enterprisePolicy is not null) Monitoring.ApplyEnterprisePolicy(enterprisePolicy); await store.ApplyRetentionAsync(RetentionDays); await Reload(); ThemeChanged?.Invoke(Theme); Message = "Ustawienia zapisane; retencja zastosowana."; });
         Refresh = Command(Reload);
         TestNotification = Command(async () =>
         {
