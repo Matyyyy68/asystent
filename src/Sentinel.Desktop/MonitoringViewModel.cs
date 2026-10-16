@@ -24,6 +24,7 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
     private bool autoActive;
     private int eventPending;
     public Func<Task>? HistoryChanged { get; set; }
+    public event Action<string, string, string>? NotificationRequested;
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
     private string message = "Zbieranie kontekstu jest domyślnie wstrzymane.";
@@ -232,9 +233,16 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
             await store.ApplyRetentionAsync(applied.RetentionDays);
             if (HistoryChanged is not null) await HistoryChanged();
         }
+        if (applied.Notifications && assessment.Risk >= RiskLevel.High && assessment.Indicators.Count > 0)
+        {
+            var key = $"{assessment.Category}:{string.Join(',', assessment.Indicators.Select(i => i.Id).Order(StringComparer.Ordinal))}";
+            NotificationRequested?.Invoke($"Sentinel AI — {EnumLabelConverter.Label(assessment.Risk)} ryzyko",
+                Limit(string.Join(" ", assessment.Indicators.Select(i => i.Description).Distinct()), 220), key);
+        }
         Message = !applied.Notifications ? "Analiza zakończona; powiadomienia wyłączone. Wynik jest dostępny poniżej." :
             assessment.Risk == RiskLevel.Critical ? "KRYTYCZNE OSTRZEŻENIE: wiele powiązanych sygnałów ryzyka. Wstrzymaj działanie i zweryfikuj prośbę." :
             assessment.Risk >= RiskLevel.High ? "OSTRZEŻENIE: wiele sygnałów ryzyka. Wstrzymaj działanie i zweryfikuj prośbę niezależnie." : "Analiza zakończona. Przeczytaj wynik i jego ograniczenia.";
     }
+    private static string Limit(string value, int max) => value.Length <= max ? value : value[..(max - 1)] + "…";
     public void Dispose() { events.ForegroundChanged -= ForegroundChanged; events.Stop(); session.Cancel(); session.Dispose(); }
 }

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Forms;
+using Sentinel.Core;
 
 namespace Sentinel.Desktop;
 
@@ -10,6 +11,7 @@ public sealed class TrayController : IDisposable
     private readonly MainWindow window;
     private readonly MainViewModel model;
     private readonly NotifyIcon icon;
+    private readonly NotificationDeduplicator notificationDeduplicator = new();
     private bool allowClose;
 
     public TrayController(MainWindow window, MainViewModel model)
@@ -26,8 +28,18 @@ public sealed class TrayController : IDisposable
         icon = new NotifyIcon { Icon = System.Drawing.SystemIcons.Application, Text = "Sentinel AI · analiza lokalna", ContextMenuStrip = menu, Visible = true };
         icon.DoubleClick += (_, _) => ShowWindow();
         model.Monitoring.PropertyChanged += OnProtectionChanged;
+        model.NotificationRequested += OnNotificationRequested;
         window.Closing += OnWindowClosing;
+        icon.BalloonTipClicked += (_, _) => { ShowWindow(); model.OpenHistory.Execute(null); };
         UpdateStatus(status);
+    }
+
+    private void OnNotificationRequested(string title, string text, string key)
+    {
+        if (!window.Dispatcher.CheckAccess()) { window.Dispatcher.BeginInvoke(new Action(() => OnNotificationRequested(title, text, key))); return; }
+        if (!notificationDeduplicator.TryMark(key, DateTimeOffset.UtcNow)) return;
+        var kind = key.StartsWith("test:", StringComparison.Ordinal) ? ToolTipIcon.Info : ToolTipIcon.Warning;
+        icon.ShowBalloonTip(5000, title.Length > 63 ? title[..63] : title, text.Length > 240 ? text[..240] : text, kind);
     }
 
     private void OnProtectionChanged(object? sender, PropertyChangedEventArgs e)
@@ -72,6 +84,7 @@ public sealed class TrayController : IDisposable
     public void Dispose()
     {
         model.Monitoring.PropertyChanged -= OnProtectionChanged;
+        model.NotificationRequested -= OnNotificationRequested;
         icon.Visible = false; icon.Dispose();
     }
 }

@@ -4,7 +4,7 @@ Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. *
 
 ## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.11.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle, egzekwuje wybrane ograniczenia polityki i umożliwia rotację tokena; treść kontekstu nie jest wysyłana automatycznie. Dla serwera dostępny jest graficzny instalator Windows Server oraz self-contained pakiet ZIP. Serwer domyślnie nasłuchuje tylko na loopback; kreator TLS/firewall dla dostępu LAN pozostaje do wykonania. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
+Plik: `artifacts/installer/SentinelAI-0.12.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, synchronizuje minimalne metadane w tle, egzekwuje wybrane ograniczenia polityki i umożliwia rotację tokena; treść kontekstu nie jest wysyłana automatycznie. Dla serwera dostępny jest graficzny instalator Windows Server oraz self-contained pakiet ZIP. Serwer domyślnie nasłuchuje tylko na loopback; kreator TLS/firewall dla dostępu LAN pozostaje do wykonania. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.
@@ -55,7 +55,7 @@ Maskowanie statycznych etykiet jest heurystyczne: usuwa m.in. adresy, e-maile, d
 
 - HTTP/HTTPS, IDN/punycode, IP (IPv4/IPv6), porty, userinfo i domena rejestrowalna z lokalnej Public Suffix List, także dla sufiksów prywatnych.
 - Wybrane literówki i proste podobieństwa znaków nazw marek, mylące subdomeny i porównanie jawnie podanego tekstu linku z celem. Lista marek i zamienników znaków jest ograniczona; nie jest kompletnym filtrem homografów.
-- Presja czasu, groźba blokady, prośby o logowanie/przelew, wyłączenie zabezpieczeń, wykonywanie skryptów i instalację plików; polskie i angielskie frazy.
+- Wersjonowane reguły `2026.10.1`: presja czasu, groźba blokady, prośby o logowanie/przelew, dopłata do przesyłki, kody BLIK, zdalna pomoc, obietnice inwestycyjne, nagrody/zwroty, wyłączenie zabezpieczeń, wykonywanie skryptów i instalację plików; polskie i angielskie frazy. Reguły analizują wyłącznie tekst jawnie przekazany użytkownikowi do sprawdzenia lub ograniczone etykiety UI Automation; nie czytają SMS-ów ani poczty.
 - Krótka korelacja presji czasu z późniejszą prośbą o logowanie w **tym samym oknie**, maksymalnie 2 min. Przechowuje wyłącznie czas i flagę sygnału, nigdy wcześniejsze wiadomości. Nie potwierdza związku wiadomości z nawigacją między aplikacjami.
 - Jawna punktacja; pojedynczy słaby sygnał nie daje wysokiego ryzyka. Wynik nie jest prawdopodobieństwem oszustwa.
 
@@ -76,7 +76,7 @@ Wpisz adres w osobnym polu „Rzeczywisty adres docelowy”. Domena `.test` jest
 
 Zachowane funkcje Etapu 1: SQLite z wersjonowaniem schematu i transakcyjną inicjalizacją, retencja 1–365 dni, do 500 ostatnich zdarzeń w UI, eksport całej historii JSON, spójna kopia SQLite, oznaczanie fałszywego alarmu, usuwanie historii z potwierdzeniem i test powiadomienia. Zapis wyniku obejmuje wyłącznie aplikację, kategorię, ryzyko, opis reguł, niepewności i zalecenia. Analiza bez sygnałów nie dodaje zdarzenia. Zgłoszenie fałszywego alarmu nie wyłącza automatycznie reguły.
 
-Ustawienia zbierania wymagają przycisku „Zapisz ustawienia”; zmiana pauzy zapisuje się natychmiast. Włączone zbieranie i tryb zmian okien są odtwarzane po starcie, także jeśli główne okno pozostaje schowane w zasobniku. Retencja jest stosowana przy starcie, zapisie ustawień i po ostrzeżeniu. Wyłączone powiadomienia nie ukrywają wyniku analizy na żądanie. W zasobniku można otworzyć aplikację, sprawdzić stan i historię, przejść do ustawień lub zakończyć proces. Nie ma jeszcze powiadomień systemowych ani autostartu przy logowaniu.
+Ustawienia zbierania wymagają przycisku „Zapisz ustawienia”; zmiana pauzy zapisuje się natychmiast. Włączone zbieranie i tryb zmian okien są odtwarzane po starcie, także jeśli główne okno pozostaje schowane w zasobniku. Opcjonalny autostart bieżącego użytkownika zapisuje wpis HKCU Run. Istotne wyniki reguł o wysokim lub krytycznym ryzyku wyświetlają balonik zasobnika Windows, z ograniczeniem powtórek w czasie działania procesu; nie oznacza to blokady strony. Retencja jest stosowana przy starcie, zapisie ustawień i po ostrzeżeniu. Wyłączone powiadomienia nie ukrywają wyniku analizy na żądanie. W zasobniku można otworzyć aplikację, sprawdzić stan i historię, przejść do ustawień lub zakończyć proces.
 
 Eksport/kopie nie nadpisują istniejących plików. Uszkodzona baza lub nieznana przyszła wersja schematu powodują błąd bez automatycznego resetu. Aby zmienić katalog danych: zamknij aplikację, wykonaj kopię i popraw `%LOCALAPPDATA%/SentinelAI/data-path.txt`. Zmiana lokalizacji z UI nie jest jeszcze dostępna.
 

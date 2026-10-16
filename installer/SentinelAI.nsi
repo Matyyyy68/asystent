@@ -238,6 +238,7 @@ Function un.onUninstSuccess
 FunctionEnd
 
 Section "Uninstall"
+ DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "SentinelAI"
  ; Only delete files listed when the package was built. Never recursively remove
  ; the application root: a user might have placed private files or data there.
  !include "${REMOVE_MANIFEST}"

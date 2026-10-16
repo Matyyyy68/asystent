@@ -34,6 +34,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string Theme { get => theme; set { theme = value; Changed(); } }
     private bool startMinimized;
     public bool StartMinimized { get => startMinimized; set { startMinimized = value; Changed(); } }
+    private bool startWithWindows;
+    public bool StartWithWindows { get => startWithWindows; set { startWithWindows = value; Changed(); } }
     private int selectedTabIndex;
     public int SelectedTabIndex { get => selectedTabIndex; set { selectedTabIndex = value; Changed(); } }
     private string eventCount = "Brak danych";
@@ -46,6 +48,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string productVariant = "Sentinel AI User";
     public string ProductVariant { get => productVariant; private set { productVariant = value; Changed(); } }
     public event Action<string>? ThemeChanged;
+    public event Action<string, string, string>? NotificationRequested;
     public SecurityEvent? SelectedEvent { get; set; }
     public string DataPath => store.DatabasePath;
     public MonitoringViewModel Monitoring { get; }
@@ -67,13 +70,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public MainViewModel(LocalStore store, MonitoringViewModel monitoring, KnowledgeViewModel knowledge, EnterpriseViewModel enterprise)
     {
         this.store = store; Monitoring = monitoring; Knowledge = knowledge; Enterprise = enterprise; Monitoring.HistoryChanged = Reload;
+        Monitoring.NotificationRequested += (title, text, key) => NotificationRequested?.Invoke(title, text, key);
         Enterprise.PolicyReceived += policy => System.Windows.Application.Current.Dispatcher.BeginInvoke(() => { enterprisePolicy = policy; Monitoring.ApplyEnterprisePolicy(policy); });
-        Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications, Theme = Theme, StartMinimized = StartMinimized }); await store.SaveSettingsAsync(settings); Monitoring.ApplyUserSettings(settings); if (enterprisePolicy is not null) Monitoring.ApplyEnterprisePolicy(enterprisePolicy); await store.ApplyRetentionAsync(RetentionDays); await Reload(); ThemeChanged?.Invoke(Theme); Message = "Ustawienia zapisane; retencja zastosowana."; });
+        Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications, Theme = Theme, StartMinimized = StartMinimized, StartWithWindows = StartWithWindows }); AutostartRegistration.SetEnabled(settings.StartWithWindows); await store.SaveSettingsAsync(settings); Monitoring.ApplyUserSettings(settings); if (enterprisePolicy is not null) Monitoring.ApplyEnterprisePolicy(enterprisePolicy); await store.ApplyRetentionAsync(RetentionDays); await Reload(); ThemeChanged?.Invoke(Theme); Message = "Ustawienia zapisane; retencja zastosowana."; });
         Refresh = Command(Reload);
         TestNotification = Command(async () =>
         {
             await store.AddAsync(new(0, DateTimeOffset.UtcNow, RiskLevel.Information, "Test powiadomienia", "Sentinel AI", "Użytkownik uruchomił test — to nie wykrycie zagrożenia.", "Brak wymaganych działań.", EventStatus.New));
-            await Reload(); Message = Notifications ? "Powiadomienie testowe. Zdarzenie zapisano lokalnie." : "Test zapisano; powiadomienia są wyłączone.";
+            await Reload();
+            if (Notifications) NotificationRequested?.Invoke("Sentinel AI — test powiadomienia", "To jest test powiadomień Windows. Nie wykryto zagrożenia.", "test:" + Guid.NewGuid().ToString("N"));
+            Message = Notifications ? "Testowe powiadomienie Windows wysłane; zdarzenie zapisano lokalnie." : "Test zapisano; powiadomienia są wyłączone.";
         });
         FalsePositive = Command(async () => { if (SelectedEvent is not { } item) { Message = "Wybierz zdarzenie."; return; } await store.SetStatusAsync(item.Id, EventStatus.FalsePositive); await Reload(); Message = "Oznaczono jako fałszywy alarm."; });
         Clear = Command(async () => { if (System.Windows.MessageBox.Show("Usunąć całą historię?", "Sentinel AI", System.Windows.MessageBoxButton.YesNo) != System.Windows.MessageBoxResult.Yes) return; await store.DeleteHistoryAsync(); await Reload(); Message = "Historia usunięta."; });
@@ -82,7 +88,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OpenHistory = Command(() => { SelectedTabIndex = 3; return Task.CompletedTask; });
         OpenSettings = Command(() => { SelectedTabIndex = 4; return Task.CompletedTask; });
     }
-    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); IsEnterprise = profile.Variant == Sentinel.Core.Configuration.ProductVariant.EnterpriseClient; ProductVariant = IsEnterprise ? "Sentinel AI Enterprise Client" : "Sentinel AI User"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); await Knowledge.InitializeAsync(); await Enterprise.InitializeAsync(); }
+    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); IsEnterprise = profile.Variant == Sentinel.Core.Configuration.ProductVariant.EnterpriseClient; ProductVariant = IsEnterprise ? "Sentinel AI Enterprise Client" : "Sentinel AI User"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; StartWithWindows = s.StartWithWindows; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); await Knowledge.InitializeAsync(); await Enterprise.InitializeAsync(); }
     private async Task Reload()
     {
         var rows = await store.ReadAsync(); Events.Clear(); RecentEvents.Clear();

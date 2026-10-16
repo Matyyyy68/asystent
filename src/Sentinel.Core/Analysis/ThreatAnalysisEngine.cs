@@ -7,6 +7,7 @@ namespace Sentinel.Core.Analysis;
 /// <summary>Deterministic rules; untrusted content cannot invoke tools or alter the rules.</summary>
 public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
 {
+    public const string RulesVersion = "2026.10.1";
     private readonly object gate = new();
     private readonly Dictionary<string, (DateTimeOffset Seen, DateTimeOffset? UrgencyAt)> sessions = new(StringComparer.Ordinal);
     public ThreatAssessment Analyze(AnalysisContext context)
@@ -21,6 +22,23 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
             Add("text.credentials", "Treść nakłania do uwierzytelnienia lub potwierdzenia danych.", 2, ThreatCategory.CredentialPhishing);
         if (Has("przelew", "zmiana rachunku", "zmieniony rachunek", "nowy numer konta", "bank transfer", "wire transfer", "new bank account"))
             Add("text.payment", "Treść dotyczy przelewu lub zmiany rachunku odbiorcy.", 2, ThreatCategory.PaymentFraud);
+        if (Has("paczka", "przesylk", "kurier", "delivery", "parcel") &&
+            Has("doplata", "oplac", "platnosc", "payment", "aktualizuj adres", "adres dostawy"))
+            Add("text.delivery_fee", "Prośba o dopłatę lub dane dostawy jest powiązana z przesyłką.", 3, ThreatCategory.PaymentFraud);
+        if (Has("blik") && Has("kod") && Has("podaj", "przekaz", "wyslij", "potwierdz", "zatwierdz", "send", "share"))
+            Add("text.blik_code", "Treść prosi o przekazanie lub zatwierdzenie kodu BLIK.", 4, ThreatCategory.PaymentFraud);
+        if (Has("anydesk", "teamviewer", "quick assist", "zdalny dostep", "pomoc techniczna", "technical support") &&
+            Has("zainstaluj", "udostepn", "podaj kod", "install", "access code", "remote access"))
+            Add("text.remote_support", "Prośba o zdalny dostęp jest połączona z działaniem użytkownika.", 3, ThreatCategory.UnsafeExecution);
+        if (Has("bitcoin", "kryptowalut", "crypto", "inwestycj") &&
+            Has("gwarantowany zysk", "bez ryzyka", "podwoj", "guaranteed return", "no risk"))
+            Add("text.investment", "Obietnica zysku bez ryzyka to sygnał potencjalnego oszustwa inwestycyjnego.", 3, ThreatCategory.SocialEngineering);
+        if (Has("wygra", "nagrod", "prize", "winner") &&
+            Has("doplata", "oplata", "dane karty", "podaj dane", "claim fee", "card details"))
+            Add("text.prize_fee", "Odbiór nagrody jest powiązany z opłatą lub przekazaniem danych.", 3, ThreatCategory.PaymentFraud);
+        if (Has("zwrot", "refund", "zwrot podatku") &&
+            Has("dane karty", "podaj haslo", "zaloguj", "oplat", "card details", "password"))
+            Add("text.refund", "Prośba o zwrot jest powiązana z danymi płatniczymi lub logowaniem.", 3, ThreatCategory.PaymentFraud);
         if (Has("wylacz antywirus", "wylacz zabezpieczenia", "disable antivirus", "disable defender", "set-mppreference -disablerealtimemonitoring"))
             Add("text.disable", "Treść nakłania do wyłączenia zabezpieczeń.", 4, ThreatCategory.SecurityTampering);
         if (Has("-encodedcommand", "-enc ", "invoke-expression", "iex(", "iex (", "curl ", "wget ") &&

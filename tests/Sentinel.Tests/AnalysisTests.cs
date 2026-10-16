@@ -77,6 +77,24 @@ public sealed class AnalysisTests
         var r = Engine().Analyze(Input("Pilnie wykonaj przelew na nowy numer konta"));
         Assert.Contains(r.Indicators, i=>i.Id=="text.payment"); Assert.Equal(ThreatCategory.PaymentFraud, r.Category); Assert.True(r.Risk >= RiskLevel.Moderate);
     }
+    [Theory]
+    [InlineData("Twoja paczka czeka, dopłać niewielką kwotę, aby potwierdzić adres dostawy", "text.delivery_fee")]
+    [InlineData("Podaj kod BLIK i zatwierdź płatność", "text.blik_code")]
+    [InlineData("Pomoc techniczna prosi o instalację AnyDesk i udostępnienie kodu", "text.remote_support")]
+    [InlineData("Inwestycja w kryptowalutę gwarantuje zysk bez ryzyka", "text.investment")]
+    [InlineData("Wygrałeś nagrodę, podaj dane karty aby odebrać", "text.prize_fee")]
+    [InlineData("Zwrot podatku: zaloguj się i podaj dane karty", "text.refund")]
+    public void ScamRulesRequireCombinedSignals(string text, string id)
+    {
+        var result = Engine().Analyze(Input(text));
+        Assert.Contains(result.Indicators, item => item.Id == id);
+        Assert.Equal("2026.10.1", ThreatAnalysisEngine.RulesVersion);
+    }
+    [Theory]
+    [InlineData("Kurier dostarczy paczkę jutro.")]
+    [InlineData("Informacje o inwestycjach i kryptowalutach.")]
+    [InlineData("Gratulacje, wygrałeś konkurs.")]
+    public void IsolatedScamVocabularyDoesNotTrigger(string text) => Assert.Empty(Engine().Analyze(Input(text)).Indicators);
     [Fact] public void UnsafeExecutionAndDisablingProtectionEscalate()
     {
         var r = Engine().Analyze(Input("Wyłącz antywirus. Uruchom plik .ps1: powershell -EncodedCommand SYNTHETIC"));
