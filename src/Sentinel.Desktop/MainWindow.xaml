@@ -103,7 +103,7 @@
      <Border Style="{StaticResource Card}"><StackPanel>
       <TextBlock Text="Adres serwera HTTPS" Style="{StaticResource SectionTitle}"/><TextBox Text="{Binding ServerAddress, UpdateSourceTrigger=PropertyChanged}" MaxLength="2048"/>
       <TextBlock Text="Jednorazowy kod od administratora" Style="{StaticResource SectionTitle}" Margin="4,12,4,4"/><TextBox Text="{Binding InvitationCode, UpdateSourceTrigger=PropertyChanged}" MaxLength="100"/>
-      <WrapPanel Margin="0,12,0,4"><Button Content="Połącz urządzenie" Command="{Binding Pair}" Style="{StaticResource PrimaryButton}"/><Button Content="Sprawdź połączenie i synchronizuj" Command="{Binding Synchronize}" IsEnabled="{Binding IsPaired}"/></WrapPanel>
+      <WrapPanel Margin="0,12,0,4"><Button Content="Połącz urządzenie" Command="{Binding Pair}" Style="{StaticResource PrimaryButton}"/><Button Content="Sprawdź połączenie i synchronizuj" Command="{Binding Synchronize}" IsEnabled="{Binding IsPaired}"/><Button Content="Zmień poświadczenie urządzenia" Command="{Binding RotateCredential}" IsEnabled="{Binding IsPaired}"/></WrapPanel>
       <TextBlock Text="{Binding DeviceStatus}" Style="{StaticResource SectionTitle}" Margin="4,8,4,4"/><TextBlock Text="{Binding Status}" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
       <TextBlock Text="Synchronizacja w tle przekazuje tylko kategorię, poziom ryzyka i kod reguły. Klient stosuje politykę interwału analizy i wykluczeń; treść, URL ani zrzuty nie są wysyłane automatycznie. Administrator może wymagać akceptacji urządzenia przed połączeniem." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="4,12,4,4"/>
      </StackPanel></Border>

@@ -23,7 +23,7 @@ def validate_database(path: Path) -> None:
         if result is None or result[0] != "ok":
             raise ValueError("Baza nie przechodzi kontroli integralności SQLite.")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (5, 6):
+        if version not in (5, 6, 7):
             raise ValueError(f"Nieobsługiwana wersja schematu bazy: {version}.")
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         missing = REQUIRED_TABLES - tables

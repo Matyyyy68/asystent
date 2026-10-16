@@ -32,7 +32,7 @@ public sealed class SqliteServerStore : IServerStore
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
-        if (version > 6) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
+        if (version > 7) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
         command.Parameters.Clear();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -45,7 +45,7 @@ public sealed class SqliteServerStore : IServerStore
               id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, name TEXT NOT NULL, device_group TEXT NOT NULL,
               client_version TEXT NOT NULL, registered_at TEXT NOT NULL, last_seen_at TEXT NULL,
               revoked INTEGER NOT NULL DEFAULT 0 CHECK(revoked IN (0,1)), last_error TEXT NULL,
-              approved INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1)));
+              approved INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1)), candidate_token_hash TEXT NULL);
             CREATE INDEX IF NOT EXISTS ix_devices_last_seen ON devices(last_seen_at);
             CREATE TABLE IF NOT EXISTS administrators(
               id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,
@@ -86,7 +86,13 @@ public sealed class SqliteServerStore : IServerStore
         await command.ExecuteNonQueryAsync(cancellationToken);
         await EnsureColumnAsync(connection, "invitations", "requires_approval", "INTEGER NOT NULL DEFAULT 0 CHECK(requires_approval IN (0,1))", cancellationToken);
         await EnsureColumnAsync(connection, "devices", "approved", "INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1))", cancellationToken);
-        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=6";
+        await EnsureColumnAsync(connection, "devices", "candidate_token_hash", "TEXT NULL", cancellationToken);
+        await using (var candidateIndex = connection.CreateCommand())
+        {
+            candidateIndex.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_candidate_token ON devices(candidate_token_hash) WHERE candidate_token_hash IS NOT NULL";
+            await candidateIndex.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=7";
         await setVersion.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -617,7 +623,13 @@ public sealed class SqliteServerStore : IServerStore
 
     public async Task<Device?> AuthenticateDeviceAsync(string tokenHash, DateTimeOffset now, CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        await using var connection = await OpenAsync(cancellationToken);
+        await using (var promote = connection.CreateCommand())
+        {
+            promote.CommandText = "UPDATE devices SET token_hash=candidate_token_hash,candidate_token_hash=NULL WHERE candidate_token_hash=$hash AND revoked=0 AND approved=1";
+            promote.Parameters.AddWithValue("$hash", tokenHash); await promote.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using var command = connection.CreateCommand();
         command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved FROM devices WHERE token_hash=$hash AND revoked=0 AND approved=1";
         command.Parameters.AddWithValue("$hash", tokenHash);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -664,6 +676,16 @@ public sealed class SqliteServerStore : IServerStore
             await transaction.CommitAsync(cancellationToken); return true;
         }
         catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<bool> StageDeviceCredentialRotationAsync(string id, string currentTokenHash, string candidateTokenHash, CancellationToken cancellationToken = default)
+    {
+        if (candidateTokenHash.Length != 64 || candidateTokenHash.Any(c => !Uri.IsHexDigit(c)))
+            throw new ArgumentException("Nieprawidłowy skrót nowego poświadczenia.", nameof(candidateTokenHash));
+        await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE devices SET candidate_token_hash=$candidate WHERE id=$id AND revoked=0 AND approved=1 AND (token_hash=$current OR candidate_token_hash=$current) AND NOT EXISTS(SELECT 1 FROM devices WHERE token_hash=$candidate)";
+        command.Parameters.AddWithValue("$candidate", candidateTokenHash); command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$current", currentTokenHash);
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     public async Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default)

@@ -169,6 +169,12 @@ try:
     request(f"/api/v1/admin/devices/{device['deviceId']}/approval", "PUT", {"approved": True}, operator_session, 403)
     request(f"/api/v1/admin/devices/{device['deviceId']}/approval", "PUT", {"approved": True}, system_session, 204)
     assert request("/api/v1/agents/me", token=device["deviceToken"])["id"] == device["deviceId"]
+    rotated_device_token = "rotated-api-device-token-12345678901234567890"
+    request("/api/v1/agents/credentials/rotate", "POST", {"newDeviceToken": rotated_device_token}, device["deviceToken"], 204)
+    assert request("/api/v1/agents/me", token=device["deviceToken"])["id"] == device["deviceId"]
+    assert request("/api/v1/agents/me", token=rotated_device_token)["id"] == device["deviceId"]
+    request("/api/v1/agents/me", token=device["deviceToken"], expected=401)
+    device["deviceToken"] = rotated_device_token
     agent_configuration = request("/api/v1/agents/configuration", token=device["deviceToken"])
     assert agent_configuration["effective"]["analysisMode"] == "server"
     request("/api/v1/agents/configuration", token="invalid-configuration-agent-token-123456789", expected=401)

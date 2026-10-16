@@ -76,6 +76,23 @@ public sealed class EnterpriseAgentTests
         Assert.DoesNotContain("https://", body, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task CredentialRotationStagesClientGeneratedTokenOverAuthenticatedHttps()
+    {
+        var handler = new DelegateHandler(async request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("https://sentinel.example/api/v1/agents/credentials/rotate", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("Bearer 012345678901234567890123456789012345678901234567890123456789", request.Headers.Authorization!.ToString());
+            Assert.Contains("replacement-device-token-12345678901234567890", await request.Content!.ReadAsStringAsync());
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        await client.RotateCredentialAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "012345678901234567890123456789012345678901234567890123456789", "replacement-device-token-12345678901234567890");
+    }
+
     private static HttpResponseMessage Json(HttpStatusCode status, string content) => new(status)
     { Content = new StringContent(content, Encoding.UTF8, "application/json") };
 

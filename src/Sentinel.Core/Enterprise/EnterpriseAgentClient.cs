@@ -84,6 +84,17 @@ public sealed class EnterpriseAgentClient(HttpClient httpClient)
         await EnsureSuccess(response, cancellationToken);
     }
 
+    public async Task RotateCredentialAsync(Uri server, string currentCredential, string newCredential, CancellationToken cancellationToken = default)
+    {
+        using var request = CreateRequest(server, "api/v1/agents/credentials/rotate", currentCredential);
+        if (newCredential.Length is < 40 or > 100 || newCredential.Any(char.IsControl))
+            throw new ArgumentException("Nieprawidłowe nowe poświadczenie urządzenia.", nameof(newCredential));
+        request.Method = HttpMethod.Post;
+        request.Content = JsonContent.Create(new { newDeviceToken = newCredential }, options: JsonOptions);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccess(response, cancellationToken);
+    }
+
     public async Task<EnterpriseEventBatchResult> SendEventsAsync(Uri server, string credential,
         IReadOnlyList<PendingEnterpriseEvent> events, CancellationToken cancellationToken = default)
     {

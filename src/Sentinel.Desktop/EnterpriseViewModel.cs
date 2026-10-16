@@ -33,12 +33,14 @@ public sealed class EnterpriseViewModel : INotifyPropertyChanged
     public bool IsPaired { get => isPaired; private set { isPaired = value; Changed(); } }
     public AsyncCommand Pair { get; }
     public AsyncCommand Synchronize { get; }
+    public AsyncCommand RotateCredential { get; }
 
     public EnterpriseViewModel(LocalStore store, EnterpriseAgentClient client, IDeviceCredentialStore credentials)
     {
         this.store = store; this.client = client; this.credentials = credentials;
         Pair = new AsyncCommand(PairAsync, ShowSafeError);
         Synchronize = new AsyncCommand(SynchronizeAsync, ShowSafeError);
+        RotateCredential = new AsyncCommand(RotateCredentialAsync, ShowSafeError);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
@@ -82,6 +84,24 @@ public sealed class EnterpriseViewModel : INotifyPropertyChanged
     {
         await synchronization.WaitAsync(cancellationToken);
         try { await SynchronizeCoreAsync(cancellationToken); }
+        finally { synchronization.Release(); }
+    }
+
+    private async Task RotateCredentialAsync()
+    {
+        await synchronization.WaitAsync();
+        try
+        {
+            var profile = await store.GetInstallationProfileAsync();
+            if (profile.Variant != ProductVariant.EnterpriseClient || profile.EnterpriseServerUri is null)
+                throw new InvalidOperationException("Najpierw skonfiguruj klienta Enterprise.");
+            var current = await credentials.ReadAsync() ?? throw new InvalidOperationException("Urządzenie nie jest sparowane.");
+            var replacement = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            var server = EnterpriseAgentClient.ValidateServer(profile.EnterpriseServerUri);
+            await client.RotateCredentialAsync(server, current, replacement);
+            await credentials.WriteAsync(replacement);
+            SetStatus("Poświadczenie urządzenia zostało zmienione. Nowy token aktywuje się przy następnej synchronizacji; stary pozostaje awaryjnie ważny do tego czasu.");
+        }
         finally { synchronization.Release(); }
     }
 

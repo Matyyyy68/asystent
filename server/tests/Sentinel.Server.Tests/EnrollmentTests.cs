@@ -140,5 +140,19 @@ public sealed class EnrollmentTests : IDisposable
         Assert.True(Assert.Single(await migrated.ListDevicesAsync()).Approved);
     }
 
+    [Fact]
+    public async Task CredentialRotationKeepsOldTokenUntilNewTokenIsFirstUsedThenInvalidatesIt()
+    {
+        await CreateInviteAsync("rotation-code");
+        var enrollment = await _store.EnrollAsync(new("rotation-code", "PC-rotate", "1", "old-device-secret"), Hash("rotation-code"), Hash("old-device-secret"), DateTimeOffset.UtcNow);
+        Assert.NotNull(enrollment);
+        Assert.True(await _store.StageDeviceCredentialRotationAsync(enrollment.DeviceId, Hash("old-device-secret"), Hash("new-device-secret")));
+        Assert.NotNull(await _store.AuthenticateDeviceAsync(Hash("old-device-secret"), DateTimeOffset.UtcNow));
+        Assert.Null(await _store.AuthenticateDeviceAsync(Hash("unrelated-device-secret"), DateTimeOffset.UtcNow));
+        Assert.NotNull(await _store.AuthenticateDeviceAsync(Hash("new-device-secret"), DateTimeOffset.UtcNow));
+        Assert.Null(await _store.AuthenticateDeviceAsync(Hash("old-device-secret"), DateTimeOffset.UtcNow));
+        Assert.False(await _store.StageDeviceCredentialRotationAsync(enrollment.DeviceId, Hash("old-device-secret"), Hash("another-device-secret")));
+    }
+
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 }

@@ -448,6 +448,17 @@ authenticatedAgents.MapGet("/configuration", async (HttpContext context, IServer
     var configuration = await repository.GetEffectivePolicyAsync(device.Id, ct);
     return configuration is null ? Results.NotFound() : Results.Ok(configuration);
 });
+authenticatedAgents.MapPost("/credentials/rotate", async (RotateDeviceCredentialBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    if (body.NewDeviceToken is null || body.NewDeviceToken.Length is < 40 or > 100 || body.NewDeviceToken.Any(char.IsControl))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["newDeviceToken"] = ["Nowe poświadczenie urządzenia jest nieprawidłowe."] });
+    var device = (Device)context.Items["device"]!;
+    var current = context.Request.Headers.Authorization.ToString()[7..];
+    var staged = await repository.StageDeviceCredentialRotationAsync(device.Id, HashToken(current), HashToken(body.NewDeviceToken), ct);
+    if (!staged) return Results.Conflict(new { error = "Nie można przygotować zmiany poświadczenia urządzenia." });
+    await repository.RecordAdminActionAsync($"device:{device.Id}", "device.credential_rotation_staged", device.Id, DateTimeOffset.UtcNow, ct);
+    return Results.NoContent();
+});
 authenticatedAgents.MapPost("/analyze", async (AgentAnalysisBody body, HttpContext context, IServerStore repository, AnalysisOrchestrator analysis, CancellationToken ct) =>
 {
     var device = (Device)context.Items["device"]!;
@@ -580,6 +591,7 @@ sealed record ChangePasswordBody(string CurrentPassword, string NewPassword);
 sealed record CreateGroupBody(string Name);
 sealed record SetDeviceGroupBody(string GroupId);
 sealed record SetDeviceApprovalBody(bool Approved);
+sealed record RotateDeviceCredentialBody(string? NewDeviceToken);
 sealed record PolicyWriteBody(PolicyDocument? Policy, long ExpectedVersion, bool ConfirmedSensitiveChange = false);
 sealed record SubmitEventsBody(IReadOnlyList<SecurityEventInput>? Events);
 sealed record SetEventStatusBody(string Status);

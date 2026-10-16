@@ -35,11 +35,11 @@ Wrażliwa polityka włączająca tryb `server`/`hybrid` lub `includeContext` wym
 
 ## API v1
 
-Panel działa pod `http://127.0.0.1:5080/admin/` i jest hostowany przez ten sam proces API. Zawiera dashboard, urządzenia i grupy, zaproszenia, polityki, zdarzenia, konta administratorów, audyt, centralną bazę FTS5 i konfigurację/test lokalnego Ollama. Widoczne działania odpowiadają roli. Token logowania pozostaje wyłącznie w pamięci karty; po odświeżeniu wymagane jest ponowne logowanie. Dostęp sieciowy wymaga HTTPS. Kopie/odtworzenie i aktualizacje serwera nie są zaimplementowane.
+Panel działa pod `http://127.0.0.1:5080/admin/` i jest hostowany przez ten sam proces API. Zawiera dashboard, urządzenia i grupy, zaproszenia z opcjonalną akceptacją, polityki, zdarzenia, konta administratorów, audyt, kopie bazy, centralną bazę FTS5 i konfigurację/test lokalnego Ollama. Widoczne działania odpowiadają roli. Token logowania pozostaje wyłącznie w pamięci karty; po odświeżeniu wymagane jest ponowne logowanie. Dostęp sieciowy wymaga HTTPS. Przywracanie działa narzędziem offline; aktualizacje serwera nadal wymagają procedury operatora.
 
 - `GET /healthz` — proces działa.
 - `GET /readyz` — serwer może otworzyć bazę.
-- `POST /api/v1/admin/invitations` — tworzy jednorazowo ujawniony losowy kod rejestracji. JSON: `{ "group": "Testowe", "expiresAt": "<ISO-8601 UTC>", "maximumRegistrations": 1 }`. Maksymalna ważność to 30 dni, limit użyć 1–1000.
+- `POST /api/v1/admin/invitations` — tworzy jednorazowo ujawniony losowy kod rejestracji. JSON: `{ "group": "Testowe", "expiresAt": "<ISO-8601 UTC>", "maximumRegistrations": 1, "requiresApproval": true }`. Maksymalna ważność to 30 dni, limit użyć 1–1000.
 - `DELETE /api/v1/admin/invitations/{id}` — unieważnia zaproszenie.
 - `GET /api/v1/admin/devices` — lista bez sekretów, z `isOnline` wyliczanym z heartbeat w ostatnich 2 minutach.
 - `GET /api/v1/admin/groups`, `POST /api/v1/admin/groups` — lista i tworzenie grup. Zaproszenie może wskazywać wyłącznie istniejącą grupę.
@@ -47,11 +47,13 @@ Panel działa pod `http://127.0.0.1:5080/admin/` i jest hostowany przez ten sam 
 - `GET/PUT /api/v1/admin/policies/global`, `GET/PUT /api/v1/admin/groups/{id}/policy`, `PUT /api/v1/admin/devices/{id}/policy` — czytanie i wersjonowane ustawianie polityk. `GET /api/v1/admin/devices/{id}/policy` zwraca efektywną politykę, wersje i źródła pól.
 - `GET /api/v1/admin/devices/{id}/policy/override` — dokument nadpisania polityki urządzenia i jego wersja do edycji w panelu.
 - `DELETE /api/v1/admin/devices/{id}` — odcina i unieważnia tożsamość urządzenia (Administrator systemu/bezpieczeństwa).
+- `PUT /api/v1/admin/devices/{id}/approval` z `{ "approved": true|false }` — zatwierdza oczekujące urządzenie lub je odrzuca i unieważnia token.
 - `GET /api/v1/admin/users`, `POST /api/v1/admin/users`, `PUT /api/v1/admin/users/{id}/disabled`, `PUT /api/v1/admin/users/{id}/role` — zarządzanie kontami (Administrator systemu).
 - `GET /api/v1/admin/audit?limit=100` — ostatnie wpisy dziennika (Administrator systemu/bezpieczeństwa).
 - `GET /api/v1/admin/auth/me`, `POST /api/v1/admin/auth/logout`, `PUT /api/v1/admin/auth/password` — bieżące konto, koniec sesji i zmiana własnego hasła.
 - `POST /api/v1/agents/enroll` — JSON `{ "invitationCode": "…", "deviceName": "PC-01", "clientVersion": "<wersja-klienta>" }`; kod urządzenia zwracany jest tylko raz.
 - `GET /api/v1/agents/me`, `GET /api/v1/agents/configuration` oraz `POST /api/v1/agents/heartbeat` — wymagają nagłówka `Authorization: Bearer <poświadczenie urządzenia>`. Endpoint konfiguracji zwraca efektywną politykę, wersje źródeł i pochodzenie wartości.
+- `POST /api/v1/agents/credentials/rotate` z `{ "newDeviceToken": "…" }` — przygotowuje rotację; stary token działa do pierwszego poprawnego uwierzytelnienia nowym tokenem.
 - `POST /api/v1/agents/analyze` — wymaga uwierzytelnienia urządzenia, jawnego `contextSharingConfirmed`, polityki `includeContext=true` i `aiProvider=ollama` do użycia modelu. Kontekst przetwarzany jest w pamięci; odpowiedź zawiera sygnały, ograniczenia i źródła FTS5.
 - `POST /api/v1/agents/events` — idempotentny batch 1–100 zdarzeń, np. `{ "events": [{ "eventId": "<GUID>", "occurredAt": "<ISO-8601 UTC>", "category": "url", "riskLevel": 3, "ruleCode": "url.suspicious_domain" }] }`. Schemat celowo nie przyjmuje treści, adresów URL, zrzutów ekranu ani danych użytkownika. Powtórzony identyfikator zdarzenia w obrębie urządzenia jest ignorowany.
 - `GET /api/v1/admin/events?limit=100&deviceId=…` — historia z ograniczonymi metadanymi zdarzenia.
@@ -59,7 +61,7 @@ Panel działa pod `http://127.0.0.1:5080/admin/` i jest hostowany przez ten sam 
 
 Klient Enterprise ma lokalną trwałą kolejkę, paruje się zaproszeniem, chroni poświadczenie DPAPI i synchronizuje heartbeat oraz ograniczone metadane w tle z retry/backoff/jitter. Obsługuje politykę interwału analizy, wykluczeń i trybu bez automatycznego wysyłania treści. Zaproszenie może wymagać akceptacji urządzenia w panelu; do zatwierdzenia jego token nie uwierzytelnia żądań, a odrzucenie natychmiast go unieważnia. Surowego kontekstu użytkownika nie przyjmuje się przez endpoint zdarzeń. Heartbeat przyjmuje wyłącznie jeden z kodów błędu `local_store`, `sync_failed`, `configuration_invalid`, `client_update`; nie przechowuje dowolnych komunikatów, które mogłyby zawierać dane prywatne. Domyślna retencja zdarzeń wynosi 90 dni i można ją ustawić przez `Sentinel:EventRetentionDays` (30–3650 dni); czyszczenie działa cyklicznie i przy przyjęciu zdarzeń. Limit rejestracji wynosi 20 prób/minutę/adres IP. Odpowiedzi API zawierają `X-Correlation-ID`; żądania są ograniczone do 64 KiB.
 
-Do dostępu spoza loopback ustaw HTTPS w Kestrel (`ASPNETCORE_URLS=https://<adres>:<port>` i chroniona konfiguracja certyfikatu Kestrel). Serwer przerwie start, gdy otrzyma zewnętrzny adres HTTP. Certyfikat CA musi zostać zaufany przez klientów; aplikacja nie pomija weryfikacji certyfikatów. Pakiet nie ma jeszcze graficznego kreatora TLS/firewall ani EXE/MSI dla Windows Server.
+Do dostępu spoza loopback ustaw HTTPS w Kestrel (`ASPNETCORE_URLS=https://<adres>:<port>` i chroniona konfiguracja certyfikatu Kestrel). Serwer przerwie start, gdy otrzyma zewnętrzny adres HTTP. Certyfikat CA musi zostać zaufany przez klientów; aplikacja nie pomija weryfikacji certyfikatów. Instalator nie ma jeszcze kreatora TLS/firewall ani konfiguracji dostępu z LAN.
 
 ## Kompilacja i testy
 
