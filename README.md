@@ -16,6 +16,12 @@ Bieżący EXE nie jest podpisany zaufanym certyfikatem wydawcy. Windows może wy
 
 Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
 
+## Serwer firmowy — pierwszy etap
+
+Repozytorium zawiera teraz odrębny fundament ASP.NET Core w katalogu `server/`: SQLite serwera, health/readiness, zaproszenia ograniczone czasem i limitem, rejestrację urządzeń z indywidualnymi poświadczeniami, heartbeat oraz odwoływanie urządzeń. Instrukcje uruchomienia i endpointy są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i plan etapów są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
+
+To nie jest jeszcze gotowy serwer produkcyjny. Nie ma panelu administracyjnego, kont i ról administratorów, dystrybucji polityk, synchronizacji zdarzeń, AI/RAG, instalatora usługi Windows ani integracji klienta. Obecny klucz administracyjny przez zmienną środowiskową jest rozwiązaniem przejściowym dla pierwszego etapu.
+
 ## Uruchomienie deweloperskie na Windows
 
 Zainstaluj .NET SDK **10.0.402** z oficjalnej dystrybucji Microsoft, następnie w katalogu repozytorium:
