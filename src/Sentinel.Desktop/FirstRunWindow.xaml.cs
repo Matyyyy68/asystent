@@ -33,7 +33,7 @@ public partial class FirstRunWindow : Window
             : "Wykryto wpisy programów ochronnych: " + string.Join(", ", detected) + (system.DetectedSecurityProducts.Count > detected.Length ? $" (+{system.DetectedSecurityProducts.Count - detected.Length})" : "") + ". Sentinel AI nie zmienia ich ustawień.";
         var adapters = system.DisplayAdapters is null ? "Adaptery graficzne: nieznane" : system.DisplayAdapters.Count == 0 ? "Adaptery graficzne: nie wykryto" : "Adaptery graficzne: " + string.Join(", ", system.DisplayAdapters.Take(3));
         InstalledProtectionSummary.Text = protection;
-        ModelSummary.Text = $"{adapters}. Zgodność GPU z modelem: nie można ocenić, bo ta wersja nie zawiera modelu ani backendu AI. NPU: {system.Npu switch { NpuAvailability.Detected => "wykryto", NpuAvailability.NotDetected => "nie wykryto", _ => "nieznane" }}.";
+        ModelSummary.Text = $"{adapters}. Możesz opcjonalnie podłączyć wcześniej zainstalowany lokalny serwer Ollama w ustawieniach. Model i jego zgodność sprzętowa wymagają osobnej weryfikacji; Sentinel AI nie pobiera modeli. NPU: {system.Npu switch { NpuAvailability.Detected => "wykryto", NpuAvailability.NotDetected => "nie wykryto", _ => "nieznane" }}.";
     }
     private void ChooseDirectory(object sender, RoutedEventArgs e)
     {

@@ -45,7 +45,7 @@ Var DeleteUserData
 !define MUI_ICON "${NSISDIR}/Contrib/Graphics/Icons/modern-install-blue-full.ico"
 !define MUI_UNICON "${NSISDIR}/Contrib/Graphics/Icons/modern-uninstall-blue-full.ico"
 !define MUI_WELCOMEPAGE_TITLE "Zainstaluj Sentinel AI"
-!define MUI_WELCOMEPAGE_TEXT "Ten kreator zainstaluje Sentinel AI na Twoim koncie Windows.$\r$\n$\r$\nProgram ocenia podejrzane wiadomości i adresy przy użyciu lokalnych reguł. Podstawowa analiza działa offline. Model AI i baza wiedzy nie są dostępne w tym wydaniu.$\r$\n$\r$\nZamknij Sentinel AI przed rozpoczęciem. Nie potrzebujesz konta administratora.$\r$\n$\r$\nKliknij Dalej, aby kontynuować."
+!define MUI_WELCOMEPAGE_TEXT "Ten kreator zainstaluje Sentinel AI na Twoim koncie Windows.$\r$\n$\r$\nProgram sprawdza podejrzane wiadomości i adresy lokalnie. Podstawowa analiza działa offline. Możesz dodać własne materiały bezpieczeństwa i włączyć opcjonalny lokalny model AI w ustawieniach.$\r$\n$\r$\nZamknij Sentinel AI przed rozpoczęciem. Nie potrzebujesz konta administratora.$\r$\n$\r$\nKliknij Dalej, aby kontynuować."
 !insertmacro MUI_PAGE_WELCOME
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE ValidateProductVariant
 !insertmacro MUI_PAGE_COMPONENTS
@@ -187,6 +187,7 @@ Section "Enterprise Client (brak parowania i synchronizacji w tym wydaniu)" SEC_
 SectionEnd
 
 Section "Skrót na pulpicie" SEC_DESKTOP
+ SectionIn 1 2
  CreateShortCut "$DESKTOP\Sentinel AI.lnk" "$INSTDIR\app\Sentinel.Desktop.exe"
 SectionEnd
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
@@ -257,6 +258,9 @@ Section "Uninstall"
    Delete "$1\sentinel.db"
    Delete "$1\sentinel.db-wal"
    Delete "$1\sentinel.db-shm"
+   Delete "$1\knowledge.db"
+   Delete "$1\knowledge.db-wal"
+   Delete "$1\knowledge.db-shm"
    RMDir "$1"
    Delete "$LOCALAPPDATA\SentinelAI\data-path.txt"
    DeleteRegKey HKCU "Software\SentinelAI"

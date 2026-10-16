@@ -49,6 +49,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public SecurityEvent? SelectedEvent { get; set; }
     public string DataPath => store.DatabasePath;
     public MonitoringViewModel Monitoring { get; }
+    public KnowledgeViewModel Knowledge { get; }
     public ICommand Save { get; }
     public ICommand Refresh { get; }
     public ICommand TestNotification { get; }
@@ -59,9 +60,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand OpenHistory { get; }
     public ICommand OpenSettings { get; }
     private AsyncCommand Command(Func<Task> action) => new(action, ex => Message = $"Operacja nie powiodła się ({ex.GetType().Name}). Dane nie zostały wysłane.");
-    public MainViewModel(LocalStore store, MonitoringViewModel monitoring)
+    public MainViewModel(LocalStore store, MonitoringViewModel monitoring, KnowledgeViewModel knowledge)
     {
-        this.store = store; Monitoring = monitoring; Monitoring.HistoryChanged = Reload;
+        this.store = store; Monitoring = monitoring; Knowledge = knowledge; Monitoring.HistoryChanged = Reload;
         Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications, Theme = Theme, StartMinimized = StartMinimized }); await store.SaveSettingsAsync(settings); Monitoring.ApplySettings(settings); await store.ApplyRetentionAsync(RetentionDays); await Reload(); ThemeChanged?.Invoke(Theme); Message = "Ustawienia zapisane; retencja zastosowana."; });
         Refresh = Command(Reload);
         TestNotification = Command(async () =>
@@ -72,11 +73,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
         FalsePositive = Command(async () => { if (SelectedEvent is not { } item) { Message = "Wybierz zdarzenie."; return; } await store.SetStatusAsync(item.Id, EventStatus.FalsePositive); await Reload(); Message = "Oznaczono jako fałszywy alarm."; });
         Clear = Command(async () => { if (System.Windows.MessageBox.Show("Usunąć całą historię?", "Sentinel AI", System.Windows.MessageBoxButton.YesNo) != System.Windows.MessageBoxResult.Yes) return; await store.DeleteHistoryAsync(); await Reload(); Message = "Historia usunięta."; });
         Export = Command(async () => { var d = new Microsoft.Win32.SaveFileDialog { Filter = "JSON|*.json", FileName = "sentinel-events.json", OverwritePrompt = true }; if (d.ShowDialog() == true) { if (System.IO.File.Exists(d.FileName)) { Message = "Wybierz nową nazwę pliku eksportu."; return; } await store.ExportAsync(d.FileName); Message = "Eksport zakończony."; } });
-        Backup = Command(async () => { var d = new Microsoft.Win32.SaveFileDialog { Filter = "SQLite|*.db", FileName = "sentinel-backup.db" }; if (d.ShowDialog() == true) { await store.BackupAsync(d.FileName); Message = "Kopia bazy utworzona."; } });
+        Backup = Command(async () => { var d = new Microsoft.Win32.SaveFileDialog { Filter = "SQLite|*.db", FileName = "sentinel-backup.db", OverwritePrompt = false }; if (d.ShowDialog() == true) { await store.BackupAsync(d.FileName); Message = "Kopia bazy utworzona."; } });
         OpenHistory = Command(() => { SelectedTabIndex = 2; return Task.CompletedTask; });
         OpenSettings = Command(() => { SelectedTabIndex = 3; return Task.CompletedTask; });
     }
-    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); ProductVariant = profile.Variant == Sentinel.Core.Configuration.ProductVariant.User ? "Sentinel AI User" : "Sentinel AI Enterprise Client — synchronizacja niedostępna"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); }
+    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); ProductVariant = profile.Variant == Sentinel.Core.Configuration.ProductVariant.User ? "Sentinel AI User" : "Sentinel AI Enterprise Client — synchronizacja niedostępna"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); await Knowledge.InitializeAsync(); }
     private async Task Reload()
     {
         var rows = await store.ReadAsync(); Events.Clear(); RecentEvents.Clear();

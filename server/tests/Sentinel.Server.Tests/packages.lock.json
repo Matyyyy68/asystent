@@ -132,6 +132,12 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "sentinel.core": {
+        "type": "Project",
+        "dependencies": {
+          "Microsoft.Data.Sqlite": "[10.0.13, )"
+        }
+      },
       "sentinel.server.core": {
         "type": "Project"
       },
@@ -139,7 +145,8 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "Sentinel.Server.Core": "[1.0.0, )"
+          "Sentinel.Core": "[0.3.0, )",
+          "Sentinel.Server.Core": "[0.3.0, )"
         }
       }
     },

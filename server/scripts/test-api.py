@@ -10,8 +10,10 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 root = pathlib.Path(__file__).resolve().parents[2]
+product_version = ET.parse(root / "eng" / "ProductVersion.props").findtext("./PropertyGroup/VersionPrefix")
 configuration = os.environ.get("Configuration", "Release")
 application = root / "server" / "src" / "Sentinel.Server.Api" / "bin" / configuration / "net10.0" / "Sentinel.Server.Api.dll"
 if not application.is_file():
@@ -45,12 +47,29 @@ def request(path, method="GET", body=None, token=None, expected=200):
     return json.loads(raw) if raw else None
 
 
+def request_raw(path, data, token=None, file_name=None, expected=200):
+    headers = {"Content-Type": "application/octet-stream"}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    if file_name:
+        headers["X-Sentinel-Filename"] = file_name
+    http_request = urllib.request.Request(address + path, data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(http_request, timeout=10) as response:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as error:
+        status, raw = error.code, error.read()
+    assert status == expected, f"POST {path}: expected {expected}, received {status}"
+    return json.loads(raw) if raw else None
+
+
 try:
     for _ in range(100):
         if process.poll() is not None:
             raise RuntimeError("Server process exited before becoming ready")
         try:
-            request("/readyz")
+            readiness = request("/readyz")
+            assert readiness.get("productVersion") == product_version, readiness
             break
         except (OSError, TimeoutError):
             time.sleep(0.1)
@@ -70,6 +89,21 @@ try:
     request("/api/v1/admin/auth/login", "POST", {"username": "it-admin", "password": "incorrect-password"}, expected=401)
     system_session = request("/api/v1/admin/auth/login", "POST", {"username": "it-admin", "password": admin_password})["accessToken"]
     request("/api/v1/admin/devices", token=system_session)
+    ai_config = request("/api/v1/admin/ai/configuration", token=system_session)
+    assert not ai_config["enabled"] and ai_config["execution"] == "loopback_only"
+    request("/api/v1/admin/ai/configuration", "PUT", {
+        "endpoint": "https://remote-model.invalid", "model": "synthetic", "enabled": False,
+        "timeoutSeconds": 30, "expectedVersion": ai_config["version"],
+    }, system_session, 400)
+    request("/api/v1/admin/ai/configuration", "PUT", {
+        "endpoint": "http://127.0.0.1:1", "model": "", "enabled": False,
+        "timeoutSeconds": 3, "expectedVersion": ai_config["version"],
+    }, system_session, 200)
+    request("/api/v1/admin/ai/models", token=system_session, expected=503)
+    request("/api/v1/admin/ai/configuration", "PUT", {
+        "endpoint": "http://127.0.0.1:1", "model": "", "enabled": False,
+        "timeoutSeconds": 3, "expectedVersion": ai_config["version"],
+    }, system_session, 409)
     request("/api/v1/admin/users", "POST", {
         "username": "operator", "password": "Operator-api-password-42!", "role": "Operator",
     }, system_session, 201)
@@ -102,6 +136,14 @@ try:
     security_session = request("/api/v1/admin/auth/login", "POST", {
         "username": "security", "password": "Security-api-password-42!",
     })["accessToken"]
+    request_raw("/api/v1/admin/knowledge/documents", b"Syntetyczna procedura: weryfikuj przelew niezaleznym kanalem.", operator_session, "policy.txt", 403)
+    document = request_raw("/api/v1/admin/knowledge/documents", b"Syntetyczna procedura: weryfikuj przelew niezaleznym kanalem.", security_session, "policy.txt", 201)
+    assert document["chunkCount"] >= 1
+    docs = request("/api/v1/admin/knowledge/documents", token=system_session)
+    assert len(docs) == 1 and docs[0]["id"] == document["id"]
+    hits = request("/api/v1/admin/knowledge/search?query=weryfikuj%20przelew", token=operator_session)
+    assert hits and hits[0]["documentId"] == document["id"]
+    request_raw("/api/v1/admin/knowledge/documents", b"synthetic", security_session, "../../bad.txt", 400)
     request(f"/api/v1/admin/groups/{group['id']}/policy", "PUT", {
         "policy": {"analysisMode": "server", "detailLevel": 3}, "expectedVersion": 1, "confirmedSensitiveChange": True,
     }, security_session, 403)
@@ -119,7 +161,7 @@ try:
         "group": "Testowe", "expiresAt": expiry, "maximumRegistrations": 1,
     }, operator_session, 403)
     device = request("/api/v1/agents/enroll", "POST", {
-        "invitationCode": invitation["registrationCode"], "deviceName": "TEST-01", "clientVersion": "0.2.0",
+        "invitationCode": invitation["registrationCode"], "deviceName": "TEST-01", "clientVersion": product_version,
     }, expected=201)
     assert request("/api/v1/agents/me", token=device["deviceToken"])["id"] == device["deviceId"]
     agent_configuration = request("/api/v1/agents/configuration", token=device["deviceToken"])
@@ -134,10 +176,22 @@ try:
     assert effective["sources"]["analysisIntervalSeconds"] == "global"
     assert effective["sources"]["detailLevel"] == "group"
     assert effective["effective"]["analysisMode"] == "server"
+    request("/api/v1/agents/analyze", "POST", {
+        "application": "Synthetic", "text": "Pilnie: blokada konta. Zaloguj się.",
+        "contextSharingConfirmed": True,
+    }, device["deviceToken"], 403)
+    request(f"/api/v1/admin/devices/{device['deviceId']}/policy", "PUT", {
+        "policy": {"includeContext": True, "aiProvider": "ollama"}, "expectedVersion": 0, "confirmedSensitiveChange": True,
+    }, system_session, 204)
+    remote_analysis = request("/api/v1/agents/analyze", "POST", {
+        "application": "Synthetic", "text": "Pilnie: blokada konta. Zaloguj się.",
+        "contextSharingConfirmed": True,
+    }, device["deviceToken"])
+    assert remote_analysis["modelEnabled"] is False and remote_analysis["contextPersisted"] is False
     request(f"/api/v1/admin/devices/{device['deviceId']}/group", "PUT", {"groupId": group["id"]}, system_session, 204)
     request(f"/api/v1/admin/devices/{device['deviceId']}/group", "PUT", {"groupId": "missing"}, system_session, 404)
     request(f"/api/v1/admin/devices/{device['deviceId']}/policy", "PUT", {
-        "policy": {"riskThreshold": 4}, "expectedVersion": 0,
+        "policy": {"riskThreshold": 4}, "expectedVersion": 1,
     }, system_session, 204)
     device_policy = request(f"/api/v1/admin/devices/{device['deviceId']}/policy", token=system_session)
     assert device_policy["effective"]["riskThreshold"] == 4
@@ -164,11 +218,15 @@ try:
     rotated_session = request("/api/v1/admin/auth/login", "POST", {
         "username": "it-admin", "password": "Rotated-api-admin-password-42!",
     })["accessToken"]
+    request(f"/api/v1/admin/knowledge/documents/{document['id']}", "DELETE", token=security_session, expected=204)
+    assert request("/api/v1/admin/knowledge/documents", token=rotated_session) == []
     audit = request("/api/v1/admin/audit", token=rotated_session)
     assert any(entry["action"] == "device.revoked" for entry in audit)
     assert any(entry["action"] == "event.status_changed" for entry in audit)
     assert any(entry["action"] == "admin.password_changed" for entry in audit)
-    print("PASS: health, admin bootstrap/login, RBAC, groups, policy inheritance/versioning, invitation, enrollment, heartbeat, audit and revocation")
+    assert any(entry["action"] == "knowledge.document_imported" for entry in audit)
+    assert any(entry["action"] == "knowledge.document_deleted" for entry in audit)
+    print("PASS: health, admin bootstrap/login, RBAC, policies, AI configuration/test and consent-gated analysis, knowledge import/search/delete, invitations, enrollment, heartbeat, audit and revocation")
 finally:
     process.terminate()
     try:

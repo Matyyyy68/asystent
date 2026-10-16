@@ -15,6 +15,7 @@ if [[ ! -x /workspace/tools/dotnet/dotnet ]]; then
     tar -xzf "$archive" -C /workspace/tools/dotnet
 fi
 cd /workspace/asystent
+python3 scripts/check-versioning.py
 dotnet restore Sentinel.sln --locked-mode --disable-parallel -m:1 -nr:false
 dotnet build Sentinel.sln -c Release --no-restore --disable-build-servers -m:1 -nr:false
 dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-build --no-restore --disable-build-servers -m:1 -nr:false

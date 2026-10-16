@@ -23,8 +23,6 @@ const navItems = [
   ["users", "users", "Administratorzy"], ["diagnostics", "events", "Diagnostyka"], ["audit", "audit", "Audyt"], ["backups", "devices", "Kopie zapasowe"], ["server", "settings", "Ustawienia serwera"]
 ];
 const unavailableSources = {
-  models: { title: "Brak źródła danych o modelach", detail: "Serwer nie udostępnia dostawcy AI, katalogu modeli ani stanu ich działania. Nie skonfigurowano i nie uruchomiono modelu w tym wydaniu.", source: "Brak kontraktu API dla modeli AI / IServerAIProvider." },
-  knowledge: { title: "Brak źródła danych bazy wiedzy", detail: "Serwer nie udostępnia importu dokumentów, indeksu ani wyszukiwania wiedzy.", source: "Brak kontraktu API dla dokumentów i indeksowania RAG." },
   diagnostics: { title: "Diagnostyka serwera jest ograniczona", detail: "Dostępne są publiczne healthz i readyz. API nie udostępnia dziennika błędów technicznych ani diagnostyki hosta.", source: "Dostępne tylko GET /healthz i GET /readyz; brak endpointu diagnostycznego." },
   backups: { title: "Operacje kopii nie są dostępne", detail: "Serwer nie ma endpointów tworzenia, pobierania ani przywracania kopii zapasowych.", source: "Brak API oraz procedury backup/restore." },
   server: { title: "Konfiguracja serwera poza panelem", detail: "Konfigurację hosta, TLS, certyfikatu i katalogu danych ustawia administrator systemu poza aplikacją.", source: "Brak API zarządzania konfiguracją wdrożenia." }
@@ -168,17 +166,104 @@ async function showSection(section) {
     else if (section === "policies") await renderPolicies();
     else if (section === "users") await renderUsers();
     else if (section === "audit") await renderAudit();
+    else if (section === "knowledge") await renderKnowledge();
+    else if (section === "models") await renderModels();
     else if (unavailableSources[section]) renderUnavailable(section);
   } catch (error) { showError(error, () => showSection(section)); }
 }
+async function renderModels() {
+  const config = await request("/ai/configuration");
+  let models = [];
+  let discoveryError = "";
+  try { models = await request("/ai/models"); } catch (error) { discoveryError = error.message; }
+  view.replaceChildren(pageHeading("Lokalny model AI serwera", "Provider jest ograniczony do Ollama działającego na loopback serwera. Model nie jest pobierany. Sam zapis nazwy nie oznacza gotowości — wykonaj test syntetyczny."));
+  const card = node("section", "card");
+  card.append(node("p", "notice", config.enabled ? "Konfiguracja włączona; dostępność wymaga testu." : "Provider wyłączony. Analizy serwerowe korzystają z reguł."));
+  if (discoveryError) card.append(node("p", "field-help", `Nie można teraz pobrać listy modeli: ${discoveryError}`));
+  const endpointLabel = node("label", "field-label", "Lokalny adres usługi na serwerze");
+  const endpoint = node("input"); endpoint.type = "url"; endpoint.value = config.endpoint; endpoint.maxLength = 2000;
+  endpoint.setAttribute("aria-label", endpointLabel.textContent);
+  const modelLabel = node("label", "field-label", "Model zainstalowany lokalnie");
+  const model = node("select"); model.setAttribute("aria-label", modelLabel.textContent);
+  for (const item of models) { const option = node("option", "", item.displayName); option.value = item.name; model.append(option); }
+  const known = models.some(item => item.name === config.model);
+  if (known) model.value = config.model;
+  else if (config.model) { const option = node("option", "", `${config.model} · nie wykryto na serwerze`); option.value = config.model; model.prepend(option); model.value = config.model; }
+  const enabled = node("input"); enabled.type = "checkbox"; enabled.checked = config.enabled; enabled.disabled = !canSystem();
+  const enableLine = node("label", "notice"); enableLine.append(enabled, node("span", "", "Włącz lokalny model przy analizie urządzeń, które mają zgodę polityki"));
+  const timeoutLabel = node("label", "field-label", "Limit czasu odpowiedzi (sekundy, 3–120)");
+  const timeout = node("input"); timeout.type = "number"; timeout.min = "3"; timeout.max = "120"; timeout.value = config.timeoutSeconds;
+  const result = node("p", "muted", "Nie wykonano testu w tej sesji.");
+  const save = actionButton("Zapisz konfigurację", async () => {
+    try {
+      await request("/ai/configuration", { method: "PUT", body: JSON.stringify({ endpoint: endpoint.value, model: model.value, enabled: enabled.checked, timeoutSeconds: Number(timeout.value), expectedVersion: config.version }) });
+      toast("Konfigurację AI zapisano. Dostępność nadal wymaga testu."); await renderModels();
+    } catch (error) { toast(error.message, "error"); }
+  }, "primary");
+  const test = actionButton("Testuj połączenie i syntetyczną analizę", async () => {
+    if (!model.value) { toast("Najpierw wykryj i wybierz lokalny model.", "warning"); return; }
+    try {
+      const output = await request("/ai/test", { method: "POST", body: JSON.stringify({ model: model.value }) });
+      result.textContent = `Test odpowiedział: ${output.risk} / ${output.category}. ${output.explanation} To test syntetyczny, nie ocena poprawności modelu.`;
+      result.className = "notice";
+    } catch (error) { result.textContent = error.message; result.className = "error-state"; }
+  });
+  if (!canSystem()) { save.disabled = true; test.disabled = true; }
+  card.append(endpointLabel, endpoint, modelLabel, model, enableLine, timeoutLabel, timeout, save, test, result);
+  if (models.length) {
+    const list = node("div", "grid");
+    for (const item of models) list.append(node("p", "muted small", item.displayName));
+    card.append(node("h3", "", `Lokalnie wykryte modele (${models.length})`), list);
+  }
+  view.append(card);
+}
+async function renderKnowledge() {
+  const documents = await request("/knowledge/documents");
+  const heading = pageHeading("Centralna baza wiedzy", "Dokumenty są zapisywane lokalnie na serwerze i indeksowane przez SQLite FTS5. Wyszukiwanie jest pełnotekstowe, nie semantyczne.");
+  view.replaceChildren(heading);
+  const controls = node("section", "card");
+  controls.append(node("h3", "", "Dodaj źródło"), node("p", "muted", "Formaty: TXT, Markdown i DOCX · limit 10 MB · PDF i embeddingi nie są dostępne."));
+  const file = node("input"); file.type = "file"; file.accept = ".txt,.md,.docx"; file.setAttribute("aria-label", "Wybierz plik wiedzy");
+  const importButton = actionButton("Importuj dokument", async () => {
+    if (!file.files?.length) { toast("Wybierz dokument do importu.", "warning"); return; }
+    const selected = file.files[0];
+    try {
+      const response = await fetch("/api/v1/admin/knowledge/documents", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/octet-stream", "X-Sentinel-Filename": selected.name }, body: selected, cache: "no-store" });
+      const payload = await response.json().catch(() => null);
+      if (response.status === 401) { clearSession(); throw new Error("Sesja wygasła. Zaloguj się ponownie."); }
+      if (!response.ok) throw new Error(payload?.error || payload?.detail || `Import nie powiódł się (HTTP ${response.status}).`);
+      toast(`Zaindeksowano ${payload.name}: ${payload.chunkCount} fragmentów.`); await renderKnowledge();
+    } catch (error) { toast(error.message || "Nie udało się zaimportować dokumentu.", "error"); }
+  }, "primary");
+  if (!canSecurity()) importButton.disabled = true;
+  controls.append(file, importButton); view.append(controls);
+  const list = node("section", "card"); list.append(node("h3", "", `Źródła (${documents.length})`));
+  if (documents.length === 0) list.append(node("p", "muted", "Brak zaimportowanych dokumentów."));
+  for (const document of documents) {
+    const row = node("article", "notice"); const content = node("div");
+    content.append(node("strong", "", document.name), node("p", "muted small", `${document.chunkCount} fragmentów · ${new Date(document.importedAt).toLocaleString("pl-PL")}`)); row.append(content);
+    if (canSecurity()) row.append(actionButton("Usuń", async () => { if (!confirm(`Usunąć dokument „${document.name}” z indeksu?`)) return; await request(`/knowledge/documents/${encodeURIComponent(document.id)}`, { method: "DELETE" }); toast("Dokument usunięty."); await renderKnowledge(); }));
+    list.append(row);
+  }
+  view.append(list);
+  const search = node("section", "card"); search.append(node("h3", "", "Test wyszukiwania"));
+  const input = node("input"); input.type = "search"; input.maxLength = 4000; input.placeholder = "Wpisz słowa kluczowe"; input.setAttribute("aria-label", "Zapytanie do lokalnej bazy wiedzy");
+  const results = node("div"); const submit = actionButton("Szukaj", async () => {
+    const query = input.value.trim(); if (!query) { toast("Wpisz słowa do wyszukania.", "warning"); return; }
+    const hits = await request(`/knowledge/search?query=${encodeURIComponent(query)}&limit=10`); results.replaceChildren();
+    if (!hits.length) results.append(node("p", "muted", "Brak pasujących fragmentów; brak wyniku nie oznacza bezpieczeństwa."));
+    for (const hit of hits) { const item = node("article", "notice"); item.append(node("strong", "", hit.sourceName), node("p", "muted", `Fragment ${hit.chunkNumber + 1}`), node("p", "", hit.excerpt)); results.append(item); }
+  }, "primary");
+  search.append(input, submit, results); view.append(search);
+}
 async function renderDashboard() {
-  const [devices, events, audit, health] = await Promise.all([
-    request("/devices"), request("/events?limit=100"), canSecurity() ? request("/audit?limit=5") : Promise.resolve([]), fetch("/readyz", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null)
+  const [devices, events, audit, health, documents, aiConfig] = await Promise.all([
+    request("/devices"), request("/events?limit=100"), canSecurity() ? request("/audit?limit=5") : Promise.resolve([]), fetch("/readyz", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null), request("/knowledge/documents"), request("/ai/configuration")
   ]);
   view.replaceChildren(pageHeading("Centrum bezpieczeństwa", "Rzeczywisty stan floty i ostatnich zdarzeń.", statusBadge(health?.status === "ready" ? "Serwer gotowy" : "Serwer niedostępny", health?.status === "ready" ? "success" : "danger")));
   const active = devices.filter(d => !d.revoked); const online = active.filter(d => d.isOnline); const needsAttention = active.filter(d => d.lastError);
   const stats = node("div", "grid stats");
-  stats.append(statCard("Zarejestrowane urządzenia", String(active.length), "Bez unieważnionych tożsamości"), statCard("Aktywne teraz", String(online.length), "Heartbeat w ostatnich 2 minutach"), statCard("Wymagają uwagi", String(needsAttention.length), "Zgłoszony kod błędu"), statCard("Ostatnie zdarzenia", String(events.length), "Maksymalnie 100 wpisów z serwera"), statCard("Model AI", "Niedostępny", "Brak skonfigurowanego dostawcy"), statCard("Baza wiedzy", "Niedostępna", "Brak API dokumentów i indeksu"));
+  stats.append(statCard("Zarejestrowane urządzenia", String(active.length), "Bez unieważnionych tożsamości"), statCard("Aktywne teraz", String(online.length), "Heartbeat w ostatnich 2 minutach"), statCard("Wymagają uwagi", String(needsAttention.length), "Zgłoszony kod błędu"), statCard("Ostatnie zdarzenia", String(events.length), "Maksymalnie 100 wpisów z serwera"), statCard("Konfiguracja AI", aiConfig.enabled ? "Włączona" : "Wyłączona", aiConfig.enabled ? "Gotowość sprawdź testem modelu" : "Analiza bez modelu"), statCard("Dokumenty wiedzy", String(documents.length), "Centralny indeks FTS5"));
   view.append(stats);
   const row = node("div", "grid two-col");
   const incidentsCard = node("section", "card"); const incidentsHead = node("div", "section-head"); incidentsHead.append(node("h2", "", "Ostatnie zdarzenia")); incidentsCard.append(incidentsHead);

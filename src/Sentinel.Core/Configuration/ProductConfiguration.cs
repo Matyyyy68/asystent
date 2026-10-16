@@ -82,8 +82,8 @@ public sealed class ConfigurationRecommendationEngine
     {
         ArgumentNullException.ThrowIfNull(system);
         if (!Enum.IsDefined(variant)) throw new ArgumentOutOfRangeException(nameof(variant));
-        var available = new List<string> { "Lokalny silnik reguł", "Lokalna historia SQLite", "Analiza ręcznie podanego tekstu i adresu" };
-        var unavailable = new List<string> { "Model AI — w tej wersji nie ma dostawcy ani katalogu zgodnych modeli", "RAG — nie ma importu dokumentów ani wyszukiwania bazy wiedzy", "Integracja przeglądarki — brak obsługiwanego rozszerzenia" };
+        var available = new List<string> { "Lokalny silnik reguł", "Lokalna historia SQLite", "Lokalna baza pełnotekstowa FTS5 (TXT, MD, DOCX)", "Opcjonalna analiza przez wcześniej zainstalowany Ollama loopback" };
+        var unavailable = new List<string> { "Wyszukiwanie semantyczne/embeddingi oraz indeksowanie PDF", "Automatyczny dobór modelu do GPU/RAM/NPU — brak zweryfikowanego katalogu wymagań", "Integracja przeglądarki — brak obsługiwanego rozszerzenia" };
         var notices = new List<string>();
         if (!system.IsWindows) notices.Add("Pełny klient desktopowy wymaga Windows 10/11 x64; wykrywanie nie potwierdziło Windows.");
         if (!system.Is64Bit) notices.Add("System nie jest 64-bitowy; instalator x64 nie może być użyty.");
@@ -91,7 +91,7 @@ public sealed class ConfigurationRecommendationEngine
         if (system.FreeDiskBytes is null) notices.Add("Nie można ustalić wolnego miejsca na dysku.");
         else if (system.FreeDiskBytes < 50L * 1024 * 1024) notices.Add("Na dysku jest mniej niż 50 MB wolnego miejsca wymaganego przez lokalną bazę.");
         if (system.DisplayAdapters is null) notices.Add("Nie można odczytać nazw adapterów graficznych; ich zgodność z backendem AI pozostaje nieznana.");
-        else if (system.DisplayAdapters.Count > 0) notices.Add("Wykryto adaptery graficzne, ale nie ma backendu/modelu, którego zgodność lub wymagania pamięci można sprawdzić.");
+        else if (system.DisplayAdapters.Count > 0) notices.Add("Wykryto adaptery graficzne, ale zgodność z modelem i backendem nie została zweryfikowana. Nazwa karty nie wystarcza do rekomendacji.");
         if (system.Npu == NpuAvailability.Unknown) notices.Add("Dostępność NPU pozostaje nieznana; ten build nie ma zweryfikowanego interfejsu detekcji NPU.");
         if (system.DetectedSecurityProducts.Count > 0)
             notices.Add("Wykryto lokalnie inne składniki ochrony. Sentinel AI ich nie wyłączy ani nie zmieni ich ustawień.");
@@ -101,7 +101,7 @@ public sealed class ConfigurationRecommendationEngine
             notices.Add("Wariant Enterprise Client nie może jeszcze połączyć się z serwerem w tym wydaniu.");
             if (system.NetworkAvailable == false) notices.Add("Nie wykryto połączenia sieciowego. Lokalna analiza reguł nadal działa offline.");
         }
-        return new(variant, available, unavailable, "Lokalna analiza regułowa", false,
-            "Dostępna konfiguracja używa lokalnych reguł i SQLite. Podstawowa analiza nie wymaga internetu. Nie wybrano modelu AI ani bazy RAG, ponieważ brak ich rzeczywistych implementacji.", notices);
+        return new(variant, available, unavailable, "Lokalne reguły + opcjonalny Ollama loopback", false,
+            "Podstawowa analiza i wyszukiwanie dokumentów działają lokalnie. Model AI jest opcjonalny i wymaga wcześniej zainstalowanego, przetestowanego Ollama oraz wyboru użytkownika; model nie jest automatycznie pobierany. Dostępne wyszukiwanie wiedzy jest pełnotekstowe, nie semantyczne.", notices);
     }
 }

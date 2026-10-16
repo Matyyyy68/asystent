@@ -6,6 +6,8 @@ using Microsoft.Data.Sqlite;
 using Sentinel.Server.Api;
 using Sentinel.Server.Core;
 using Sentinel.Server.Infrastructure;
+using Sentinel.Core.Knowledge;
+using Sentinel.Core.Analysis;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -32,6 +34,10 @@ var databasePath = Path.GetFullPath(Path.Combine(dataDirectory, "sentinel-server
 var eventRetentionDays = builder.Configuration.GetValue<int?>("Sentinel:EventRetentionDays") ?? 90;
 if (eventRetentionDays is < 30 or > 3650) throw new InvalidOperationException("Sentinel:EventRetentionDays musi wynosić 30–3650.");
 var store = new SqliteServerStore(databasePath, eventRetentionDays);
+var knowledgeDirectory = Path.Combine(Path.GetFullPath(dataDirectory), "Knowledge");
+var knowledge = new LocalKnowledgeBase(knowledgeDirectory);
+var aiProvider = new OllamaLocalProvider(new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan });
+var localRules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
 var passwordHasher = new AdminPasswordHasher();
 var configuredBootstrapUsername = builder.Configuration["Sentinel:BootstrapAdminUsername"];
 var configuredBootstrapPassword = builder.Configuration["Sentinel:BootstrapAdminPassword"];
@@ -49,10 +55,15 @@ builder.Services.AddRateLimiter(options =>
         context.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new SlidingWindowRateLimiterOptions
         { PermitLimit = 5, Window = TimeSpan.FromMinutes(15), SegmentsPerWindow = 3, QueueLimit = 0, AutoReplenishment = true }));
 });
-builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 64 * 1024);
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = LocalKnowledgeBase.MaximumFileBytes + 64 * 1024);
+builder.Services.AddSingleton<IKnowledgeBaseProvider>(knowledge);
+builder.Services.AddSingleton<IAIProvider>(aiProvider);
+builder.Services.AddSingleton(localRules);
+builder.Services.AddSingleton<AnalysisOrchestrator>();
 
 var app = builder.Build();
 await store.InitializeAsync();
+await knowledge.InitializeAsync();
 if (configuredBootstrapUsername is not null || configuredBootstrapPassword is not null)
 {
     if (!IsValidUsername(configuredBootstrapUsername) || !AdminPasswordHasher.IsValid(configuredBootstrapPassword ?? ""))
@@ -80,7 +91,7 @@ app.UseRateLimiter();
 app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
 app.MapGet("/readyz", async (IServerStore repository, CancellationToken ct) =>
     await repository.CheckReadyAsync(ct)
-        ? Results.Ok(new { status = "ready", apiVersion = "v1" })
+        ? Results.Ok(new { status = "ready", apiVersion = "v1", productVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "unknown" })
         : Results.Problem(title: "Magazyn danych niedostępny", statusCode: StatusCodes.Status503ServiceUnavailable));
 var adminUiRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot", "admin");
 app.MapGet("/admin", () => Results.File(Path.Combine(adminUiRoot, "index.html"), "text/html; charset=utf-8"));
@@ -113,6 +124,50 @@ var systemAdmins = app.MapGroup("/api/v1/admin");
 systemAdmins.AddEndpointFilter(AuthenticateAdmin(store));
 systemAdmins.AddEndpointFilter(RequireRoles(AdminRole.SystemAdministrator));
 
+allAdmins.MapGet("/ai/configuration", async (IServerStore repository, CancellationToken ct) =>
+{
+    var config = await repository.ReadServerAIConfigurationAsync(ct);
+    return Results.Ok(new { config.Endpoint, config.Model, config.Enabled, config.TimeoutSeconds, config.Version,
+        status = config.Enabled ? "configured_not_tested" : "disabled", execution = "loopback_only" });
+});
+allAdmins.MapGet("/ai/models", async (IServerStore repository, IAIProvider provider, CancellationToken ct) =>
+{
+    var config = await repository.ReadServerAIConfigurationAsync(ct);
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(10));
+    try { return Results.Ok(await provider.ListModelsAsync(config.Endpoint, timeout.Token)); }
+    catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or InvalidDataException or ArgumentException or System.Text.Json.JsonException)
+    { return Results.Problem(title: "Lokalny provider modelu nie odpowiada", detail: "Sprawdź, czy Ollama działa na serwerze i czy endpoint loopback jest prawidłowy.", statusCode: StatusCodes.Status503ServiceUnavailable); }
+});
+systemAdmins.MapPut("/ai/configuration", async (ServerAIConfigurationBody body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+{
+    var current = await repository.ReadServerAIConfigurationAsync(ct);
+    var actor = (AdminIdentity)context.Items["admin"]!;
+    var candidate = new ServerAIConfiguration(body.Endpoint ?? "", body.Model ?? "", body.Enabled, body.TimeoutSeconds, current.Version);
+    try
+    {
+        var saved = await repository.WriteServerAIConfigurationAsync(candidate, body.ExpectedVersion, actor.Username, DateTimeOffset.UtcNow, ct);
+        return saved ? Results.Ok(await repository.ReadServerAIConfigurationAsync(ct)) : Results.Conflict(new { error = "Konfiguracja zmieniła się od czasu odczytu." });
+    }
+    catch (ArgumentException exception) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["configuration"] = [exception.Message] }); }
+});
+systemAdmins.MapPost("/ai/test", async (ServerAITestBody body, IServerStore repository, IAIProvider provider, CancellationToken ct) =>
+{
+    var config = await repository.ReadServerAIConfigurationAsync(ct);
+    var model = string.IsNullOrWhiteSpace(body.Model) ? config.Model : body.Model;
+    if (string.IsNullOrWhiteSpace(model) || model.Length > 160 || model.Any(char.IsControl))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["model"] = ["Wybierz model z listy lokalnie zainstalowanych modeli."] });
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
+    try
+    {
+        var response = await provider.AnalyzeAsync(config.Endpoint, model,
+            new AnalysisContext("Synthetic server self-test", "Pilnie: blokada konta. Zaloguj się, aby potwierdzić dane.", DateTimeOffset.UtcNow), [], timeout.Token);
+        return Results.Ok(new { status = "responded", model, response.Risk, category = response.Category.ToString(), response.Explanation,
+            syntheticOnly = true, calibratedProbability = false });
+    }
+    catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or InvalidDataException or ArgumentException or System.Text.Json.JsonException)
+    { return Results.Problem(title: "Test lokalnego modelu nie powiódł się", detail: "Model nie odpowiedział poprawnym wynikiem w wyznaczonym czasie.", statusCode: StatusCodes.Status503ServiceUnavailable); }
+});
+
 allAdmins.MapGet("/auth/me", (HttpContext context) =>
 {
     var identity = (AdminIdentity)context.Items["admin"]!;
@@ -144,6 +199,57 @@ allAdmins.MapGet("/devices", async (IServerStore repository, CancellationToken c
 allAdmins.MapGet("/groups", async (IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ListGroupsAsync(ct)));
 allAdmins.MapGet("/events", async (int? limit, string? deviceId, IServerStore repository, CancellationToken ct) =>
     Results.Ok(await repository.ListEventsAsync(limit ?? 100, deviceId, ct)));
+allAdmins.MapGet("/knowledge/documents", async (IKnowledgeBaseProvider repository, CancellationToken ct) => Results.Ok(await repository.ListAsync(ct)));
+allAdmins.MapGet("/knowledge/search", async (string? query, int? limit, IKnowledgeBaseProvider repository, CancellationToken ct) =>
+{
+    if (query is null || query.Length > 4000 || limit is < 1 or > 20) return Results.BadRequest(new { error = "Podaj zapytanie do 4000 znaków i limit 1–20." });
+    return Results.Ok(await repository.SearchAsync(query, limit ?? 5, ct));
+});
+securityAdmins.MapPost("/knowledge/documents", async (HttpContext context, IKnowledgeBaseProvider repository, CancellationToken ct) =>
+{
+    var actor = (AdminIdentity)context.Items["admin"]!;
+    var nameHeader = context.Request.Headers["X-Sentinel-Filename"];
+    if (nameHeader.Count != 1 || string.IsNullOrWhiteSpace(nameHeader[0])) return Results.BadRequest(new { error = "Brak nagłówka X-Sentinel-Filename." });
+    var fileName = nameHeader[0]!;
+    if (fileName.Length > 180 || fileName != Path.GetFileName(fileName) || fileName.Contains('/') || fileName.Contains('\\') || fileName.Any(char.IsControl))
+        return Results.BadRequest(new { error = "Nazwa dokumentu jest nieprawidłowa." });
+    if (!string.Equals(context.Request.ContentType?.Split(';', 2)[0].Trim(), "application/octet-stream", StringComparison.OrdinalIgnoreCase))
+        return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
+    if (context.Request.ContentLength is > LocalKnowledgeBase.MaximumFileBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    var extension = Path.GetExtension(fileName).ToLowerInvariant();
+    if (extension is not (".txt" or ".md" or ".docx")) return Results.BadRequest(new { error = "Obsługiwane są pliki TXT, Markdown i DOCX." });
+    var temporaryFile = Path.Combine(Path.GetTempPath(), "sentinel-upload-" + Guid.NewGuid().ToString("N") + extension);
+    try
+    {
+        await using (var output = new FileStream(temporaryFile, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+        {
+            var buffer = new byte[81920]; long total = 0;
+            while (true)
+            {
+                var read = await context.Request.Body.ReadAsync(buffer, ct);
+                if (read == 0) break;
+                total += read;
+                if (total > LocalKnowledgeBase.MaximumFileBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+                await output.WriteAsync(buffer.AsMemory(0, read), ct);
+            }
+            await output.FlushAsync(ct);
+        }
+        var document = await repository.ImportAsync(temporaryFile, ct);
+        await store.RecordAdminActionAsync(actor.Username, "knowledge.document_imported", document.Id, DateTimeOffset.UtcNow, ct);
+        return Results.Created($"/api/v1/admin/knowledge/documents/{document.Id}", document);
+    }
+    catch (NotSupportedException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidDataException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    finally { try { File.Delete(temporaryFile); } catch (IOException) { } }
+});
+securityAdmins.MapDelete("/knowledge/documents/{id}", async (string id, HttpContext context, IKnowledgeBaseProvider repository, IServerStore serverStore, CancellationToken ct) =>
+{
+    var deleted = await repository.DeleteAsync(id, ct);
+    if (!deleted) return Results.NotFound();
+    var actor = (AdminIdentity)context.Items["admin"]!;
+    await serverStore.RecordAdminActionAsync(actor.Username, "knowledge.document_deleted", id, DateTimeOffset.UtcNow, ct);
+    return Results.NoContent();
+});
 allAdmins.MapGet("/policies/global", async (IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ReadGlobalPolicyAsync(ct)));
 allAdmins.MapGet("/devices/{id}/policy", async (string id, IServerStore repository, CancellationToken ct) =>
 {
@@ -299,6 +405,25 @@ authenticatedAgents.MapGet("/configuration", async (HttpContext context, IServer
     var configuration = await repository.GetEffectivePolicyAsync(device.Id, ct);
     return configuration is null ? Results.NotFound() : Results.Ok(configuration);
 });
+authenticatedAgents.MapPost("/analyze", async (AgentAnalysisBody body, HttpContext context, IServerStore repository, AnalysisOrchestrator analysis, CancellationToken ct) =>
+{
+    var device = (Device)context.Items["device"]!;
+    if (body.Text is null || body.Text.Length is 0 or > Sentinel.Core.Context.PrivacyFilter.MaximumTextLength ||
+        body.Application is null || body.Application.Length is 0 or > 100 || body.Application.Any(char.IsControl) ||
+        !body.ContextSharingConfirmed)
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["analysis"] = ["Wymagany jest tekst do 16 000 znaków, nazwa aplikacji i jawne potwierdzenie przesłania kontekstu."] });
+    var policy = await repository.GetEffectivePolicyAsync(device.Id, ct);
+    if (policy?.Effective.IncludeContext != true)
+        return Results.Problem(title: "Polityka nie zezwala na analizę serwerową", detail: "Administrator musi jawnie włączyć udostępnianie kontekstu dla urządzenia.", statusCode: StatusCodes.Status403Forbidden);
+    if (policy.Effective.AiProvider is not ("disabled" or "ollama"))
+        return Results.Problem(title: "Provider AI nie jest obsługiwany przez tę politykę.", statusCode: StatusCodes.Status409Conflict);
+    var config = await repository.ReadServerAIConfigurationAsync(ct);
+    var useModel = config.Enabled && policy.Effective.AiProvider == "ollama";
+    var result = await analysis.AnalyzeAsync(new AnalysisContext(body.Application, body.Text, DateTimeOffset.UtcNow,
+        string.IsNullOrWhiteSpace(body.TargetUrl) ? null : new NavigationSignal(body.TargetUrl)), useModel, config.Endpoint, config.Model, config.TimeoutSeconds, ct);
+    return Results.Ok(new { result.Category, result.Risk, result.Indicators, result.Uncertainties, result.Recommendations, result.Explanation,
+        modelEnabled = useModel, contextPersisted = false });
+});
 authenticatedAgents.MapPost("/heartbeat", async (HeartbeatBody? body, HttpContext context, IServerStore repository, CancellationToken ct) =>
 {
     var device = (Device)context.Items["device"]!;
@@ -373,5 +498,8 @@ sealed record SetDeviceGroupBody(string GroupId);
 sealed record PolicyWriteBody(PolicyDocument? Policy, long ExpectedVersion, bool ConfirmedSensitiveChange = false);
 sealed record SubmitEventsBody(IReadOnlyList<SecurityEventInput>? Events);
 sealed record SetEventStatusBody(string Status);
+sealed record ServerAIConfigurationBody(string? Endpoint, string? Model, bool Enabled, int TimeoutSeconds, long ExpectedVersion);
+sealed record ServerAITestBody(string? Model);
+sealed record AgentAnalysisBody(string? Application, string? Text, string? TargetUrl, bool ContextSharingConfirmed);
 
 public partial class Program;

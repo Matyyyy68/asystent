@@ -96,8 +96,8 @@
   },
   {
     "path": "Pomoc.html",
-    "size": 3279,
-    "sha256": "4e02eae804efaf0884ebd1851fa191d380b6521afae6c61acb8e03f81c672296"
+    "size": 3509,
+    "sha256": "6701d9e9adb2e5ed209b1316cf8c524af3b13e27caf4c5f015d61026549a2bd0"
   },
   {
     "path": "PresentationCore.dll",
@@ -201,23 +201,23 @@
   },
   {
     "path": "Sentinel.Core.dll",
-    "size": 428544,
-    "sha256": "9dc16fee2cd16d7e23eeda3c08021ac29ee03fb2754fc24f1f33a94ecc01e480"
+    "size": 487936,
+    "sha256": "95b1c15d1d26a4454924f31083feb319072f3fc5e9f9620cf40e53fce339ff9f"
   },
   {
     "path": "Sentinel.Desktop.deps.json",
     "size": 41782,
-    "sha256": "5afdf427034a162941decaf7cfc20fd71f11c17e57567fb4aab9dffe68c64a20"
+    "sha256": "6d9c9ff479eb8a17a3ab2d5263542fc5f16fe08b0938a6ca8e027022d8b9b04e"
   },
   {
     "path": "Sentinel.Desktop.dll",
-    "size": 96256,
-    "sha256": "23407bea51b3effa8b1a9731b70b2ad17dcee0bfc644dfa336ed6b50c97b52c1"
+    "size": 113152,
+    "sha256": "3d491e5f916d72f8912c6ff60be59c55a192e18e215ea9f8adfbcb8118872c10"
   },
   {
     "path": "Sentinel.Desktop.exe",
     "size": 162816,
-    "sha256": "67c55b4a4b6219be2b5a7d0edad820c7668e4cee1150a27d1d483dba66f71af2"
+    "sha256": "1bbde47d41f000bde170d35b64136e403b00b7e1688fecdd5b25c137a85020c6"
   },
   {
     "path": "Sentinel.Desktop.runtimeconfig.json",

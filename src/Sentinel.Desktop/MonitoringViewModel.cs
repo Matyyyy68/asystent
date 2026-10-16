@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Input;
+using System.Collections.ObjectModel;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Sentinel.Core.Context;
@@ -13,7 +14,8 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
     private readonly LocalStore store;
     private readonly ContextCollector collector;
     private readonly IForegroundEventSource events;
-    private readonly ThreatAnalysisEngine engine;
+    private readonly AnalysisOrchestrator analysis;
+    private readonly IAIProvider aiProvider;
     private AppSettings applied = new();
     private CancellationTokenSource session = new();
     private bool collecting;
@@ -59,15 +61,26 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
     public ICommand TogglePause { get; }
     public ICommand Capture { get; }
     public ICommand AnalyzeManual { get; }
+    public ICommand DiscoverLocalModels { get; }
+    public ICommand TestLocalModel { get; }
+    public ObservableCollection<LocalAIModel> LocalModels { get; } = [];
+    private bool useLocalAI;
+    public bool UseLocalAI { get => useLocalAI; set { useLocalAI = value; Changed(); } }
+    private string localAIEndpoint = "http://127.0.0.1:11434";
+    public string LocalAIEndpoint { get => localAIEndpoint; set { localAIEndpoint = value; Changed(); } }
+    private string localAIModel = "";
+    public string LocalAIModel { get => localAIModel; set { localAIModel = value; Changed(); } }
+    private int localAITimeoutSeconds = 30;
+    public int LocalAITimeoutSeconds { get => localAITimeoutSeconds; set { localAITimeoutSeconds = value; Changed(); } }
     private AsyncCommand Command(Func<Task> action) => new(action, ReportError);
     private void ReportError(Exception ex)
     {
         if (ex is OperationCanceledException) { Message = "Analiza anulowana."; return; }
         Message = $"Operacja nie powiodła się ({ex.GetType().Name}). Nie zapisano treści kontekstu.";
     }
-    public MonitoringViewModel(LocalStore store, ContextCollector collector, IForegroundEventSource events, ThreatAnalysisEngine engine)
+    public MonitoringViewModel(LocalStore store, ContextCollector collector, IForegroundEventSource events, AnalysisOrchestrator analysis, IAIProvider aiProvider)
     {
-        this.store = store; this.collector = collector; this.events = events; this.engine = engine;
+        this.store = store; this.collector = collector; this.events = events; this.analysis = analysis; this.aiProvider = aiProvider;
         TogglePause = Command(async () =>
         {
             var settings = await store.LoadSettingsAsync();
@@ -85,8 +98,25 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
             var input = new AnalysisContext("Manual", ManualText, DateTimeOffset.UtcNow,
                 string.IsNullOrWhiteSpace(ManualUrl) ? null : new(ManualUrl.Trim(), string.IsNullOrWhiteSpace(DisplayedUrl) ? null : DisplayedUrl.Trim()));
             ManualText = ""; ManualUrl = ""; DisplayedUrl = "";
-            var assessment = await Task.Run(() => engine.Analyze(input));
+            var assessment = await analysis.AnalyzeAsync(input, applied.UseLocalAI, applied.LocalAIEndpoint, applied.LocalAIModel, applied.LocalAITimeoutSeconds, session.Token);
             await PresentAsync(assessment, "Manual");
+        });
+        DiscoverLocalModels = Command(async () =>
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var found = await aiProvider.ListModelsAsync(LocalAIEndpoint, timeout.Token);
+            LocalModels.Clear(); foreach (var item in found) LocalModels.Add(item);
+            if (LocalModels.Count == 0) { Message = "Lokalny serwer działa, ale nie ma zainstalowanych modeli. Nie pobrano żadnego modelu."; return; }
+            if (!LocalModels.Any(item => item.Name == LocalAIModel)) LocalAIModel = LocalModels[0].Name;
+            Message = $"Wykryto {LocalModels.Count} lokalnych modeli. Model nie jest używany, dopóki go nie włączysz i zapiszesz ustawień.";
+        });
+        TestLocalModel = Command(async () =>
+        {
+            if (string.IsNullOrWhiteSpace(LocalAIModel)) { Message = "Najpierw wykryj i wybierz lokalny model."; return; }
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Clamp(LocalAITimeoutSeconds, 3, 120)));
+            var sample = new AnalysisContext("Synthetic self-test", "Pilnie: blokada konta. Zaloguj się, aby potwierdzić dane.", DateTimeOffset.UtcNow);
+            var response = await aiProvider.AnalyzeAsync(LocalAIEndpoint, LocalAIModel, sample, [], timeout.Token);
+            Message = $"Test modelu zakończony. Odpowiedź: {EnumLabelConverter.Label(response.Risk)} / {EnumLabelConverter.Label(response.Category)}. Wysłano wyłącznie syntetyczny tekst testowy do lokalnego endpointu.";
         });
         events.ForegroundChanged += ForegroundChanged;
     }
@@ -94,7 +124,8 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
     {
         Paused = Paused, MinimumIntervalSeconds = MinimumIntervalSeconds, ExcludedApplications = ExcludedApplications,
         ExcludedWindowTitles = ExcludedWindowTitles, ExcludeBrowsers = ExcludeBrowsers, ExcludeMessaging = ExcludeMessaging,
-        CollectStaticText = CollectStaticText, MonitorForegroundChanges = MonitorForegroundChanges
+        CollectStaticText = CollectStaticText, MonitorForegroundChanges = MonitorForegroundChanges,
+        UseLocalAI = UseLocalAI, LocalAIEndpoint = LocalAIEndpoint, LocalAIModel = LocalAIModel, LocalAITimeoutSeconds = LocalAITimeoutSeconds
     };
     public void Activate() => ApplySettings(applied);
     public void ApplySettings(AppSettings settings, bool activate = true)
@@ -105,6 +136,7 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
         MinimumIntervalSeconds = settings.MinimumIntervalSeconds; ExcludedApplications = settings.ExcludedApplications;
         ExcludedWindowTitles = settings.ExcludedWindowTitles; ExcludeBrowsers = settings.ExcludeBrowsers;
         ExcludeMessaging = settings.ExcludeMessaging; CollectStaticText = settings.CollectStaticText; MonitorForegroundChanges = settings.MonitorForegroundChanges;
+        UseLocalAI = settings.UseLocalAI; LocalAIEndpoint = settings.LocalAIEndpoint; LocalAIModel = settings.LocalAIModel; LocalAITimeoutSeconds = settings.LocalAITimeoutSeconds;
         events.Stop(); autoActive = false;
         if (activate && !Paused && settings.MonitorForegroundChanges)
         {
@@ -149,7 +181,7 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
                 };
                 return;
             }
-            var assessment = await Task.Run(() => engine.Analyze(context), token);
+            var assessment = await analysis.AnalyzeAsync(context, applied.UseLocalAI, applied.LocalAIEndpoint, applied.LocalAIModel, applied.LocalAITimeoutSeconds, token);
             token.ThrowIfCancellationRequested();
             if (capture.Truncated) assessment = assessment with { Uncertainties = [.. assessment.Uncertainties, "UI Automation osiągnęło limit czasu, głębokości lub rozmiaru; odczyt jest częściowy."] };
             if (string.IsNullOrWhiteSpace(context.Text)) assessment = assessment with { Uncertainties = [.. assessment.Uncertainties, "Brak dostępnego statycznego tekstu; analiza nie obejmuje zawartości okna."] };

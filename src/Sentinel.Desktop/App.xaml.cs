@@ -7,7 +7,9 @@ using Sentinel.Core.Analysis;
 using Sentinel.Desktop.Context;
 using Microsoft.Win32;
 using System.IO.Pipes;
+using System.Net.Http;
 using Sentinel.Core.Configuration;
+using Sentinel.Core.Knowledge;
 namespace Sentinel.Desktop;
 public partial class App : System.Windows.Application
 {
@@ -43,8 +45,12 @@ public partial class App : System.Windows.Application
             if (drive.DriveType == DriveType.Network || !drive.IsReady || drive.AvailableFreeSpace < 50 * 1024 * 1024)
                 throw new IOException("Wymagany lokalny, dostępny dysk z co najmniej 50 MB wolnego miejsca.");
             var store = new LocalStore(directory); await store.InitializeAsync(requestedProfile);
+            var knowledge = new LocalKnowledgeBase(directory); await knowledge.InitializeAsync();
+            var ai = new OllamaLocalProvider(new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan });
             await File.WriteAllTextAsync(pointer, directory);
             services = new ServiceCollection().AddSingleton(store).AddSingleton<IEventRepository>(store)
+                .AddSingleton(knowledge).AddSingleton<IKnowledgeBaseProvider>(knowledge).AddSingleton<KnowledgeViewModel>()
+                .AddSingleton<IAIProvider>(ai).AddSingleton<AnalysisOrchestrator>()
                 .AddSingleton<ISettingsRepository>(store)
                 .AddSingleton<WindowsContextProvider>()
                 .AddSingleton<IContextProvider>(s => s.GetRequiredService<WindowsContextProvider>())

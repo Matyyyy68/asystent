@@ -10,6 +10,7 @@ public sealed record AdminIdentity(string Id, string Username, AdminRole Role, s
 public sealed record AdminCredential(string Id, string Username, string PasswordHash, AdminRole Role, bool Disabled);
 public sealed record AuditEntry(long Id, DateTimeOffset Timestamp, string? ActorUsername, string Action, string? TargetId);
 public sealed record DeviceGroup(string Id, string Name, DateTimeOffset CreatedAt, long PolicyVersion);
+public sealed record ServerAIConfiguration(string Endpoint, string Model, bool Enabled, int TimeoutSeconds, long Version);
 public sealed record PolicyDocument(string? AnalysisMode = null, bool? IncludeContext = null, int? AnalysisIntervalSeconds = null,
     int? DetailLevel = null, string? AiProvider = null, int? AiTimeoutSeconds = null, int? MaxParallelAnalyses = null,
     bool? RagEnabled = null, string? NotificationLevel = null, int? RiskThreshold = null, IReadOnlyList<string>? ExcludedApplications = null,
@@ -34,6 +35,9 @@ public interface IServerStore
     Task<AdminIdentity?> AuthenticateAdminSessionAsync(string sessionHash, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> RevokeAdminSessionAsync(string sessionId, string adminId, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AuditEntry>> ReadAuditAsync(int limit, CancellationToken cancellationToken = default);
+    Task RecordAdminActionAsync(string actorUsername, string action, string? targetId, DateTimeOffset now, CancellationToken cancellationToken = default);
+    Task<ServerAIConfiguration> ReadServerAIConfigurationAsync(CancellationToken cancellationToken = default);
+    Task<bool> WriteServerAIConfigurationAsync(ServerAIConfiguration configuration, long expectedVersion, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<DeviceGroup> CreateGroupAsync(string name, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<DeviceGroup>> ListGroupsAsync(CancellationToken cancellationToken = default);
     Task<DeviceGroup?> FindGroupByNameAsync(string name, CancellationToken cancellationToken = default);

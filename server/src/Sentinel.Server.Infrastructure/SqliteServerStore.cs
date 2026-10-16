@@ -32,7 +32,7 @@ public sealed class SqliteServerStore : IServerStore
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
-        if (version > 4) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
+        if (version > 5) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
         command.Parameters.Clear();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -62,6 +62,12 @@ public sealed class SqliteServerStore : IServerStore
               policy_json TEXT NULL, policy_version INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS server_policies(
               id INTEGER PRIMARY KEY CHECK(id=1), policy_json TEXT NOT NULL, version INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS server_ai_config(
+              id INTEGER PRIMARY KEY CHECK(id=1), endpoint TEXT NOT NULL, model TEXT NOT NULL,
+              enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), timeout_seconds INTEGER NOT NULL CHECK(timeout_seconds BETWEEN 3 AND 120),
+              version INTEGER NOT NULL CHECK(version >= 0));
+            INSERT OR IGNORE INTO server_ai_config(id,endpoint,model,enabled,timeout_seconds,version)
+              VALUES(1,'http://127.0.0.1:11434','',0,30,0);
             CREATE TABLE IF NOT EXISTS device_policies(
               device_id TEXT PRIMARY KEY REFERENCES devices(id), policy_json TEXT NOT NULL, version INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS security_events(
@@ -74,7 +80,7 @@ public sealed class SqliteServerStore : IServerStore
               SELECT lower(hex(randomblob(16))),device_group,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM invitations WHERE length(device_group)>0;
             INSERT OR IGNORE INTO device_groups(id,name,created_at)
               SELECT lower(hex(randomblob(16))),device_group,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM devices WHERE length(device_group)>0;
-            PRAGMA user_version=4;
+            PRAGMA user_version=5;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -260,6 +266,62 @@ public sealed class SqliteServerStore : IServerStore
         return entries;
     }
 
+    public async Task RecordAdminActionAsync(string actorUsername, string action, string? targetId, DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(actorUsername) || actorUsername.Length > 64 || string.IsNullOrWhiteSpace(action) || action.Length > 100 || targetId is { Length: > 200 })
+            throw new ArgumentException("Nieprawidłowy wpis audytowy.");
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, action, targetId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
+    public async Task<ServerAIConfiguration> ReadServerAIConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT endpoint,model,enabled,timeout_seconds,version FROM server_ai_config WHERE id=1";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) throw new InvalidDataException("Brak konfiguracji AI serwera.");
+        return new(reader.GetString(0), reader.GetString(1), reader.GetInt32(2) != 0, reader.GetInt32(3), reader.GetInt64(4));
+    }
+
+    public async Task<bool> WriteServerAIConfigurationAsync(ServerAIConfiguration configuration, long expectedVersion,
+        string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        if (configuration.Endpoint.Length > 2000 || !Uri.TryCreate(configuration.Endpoint, UriKind.Absolute, out var endpoint) ||
+            endpoint.Scheme != Uri.UriSchemeHttp || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0 || endpoint.AbsolutePath != "/" ||
+            !(endpoint.DnsSafeHost.Equals("localhost", StringComparison.OrdinalIgnoreCase) || System.Net.IPAddress.TryParse(endpoint.DnsSafeHost, out var ip) && System.Net.IPAddress.IsLoopback(ip)))
+            throw new ArgumentException("Model serwera może działać wyłącznie na localhost/loopback; zdalne endpointy nie są obsługiwane.", nameof(configuration));
+        if (configuration.Model.Length > 160 || configuration.Model.Any(char.IsControl) || configuration.Enabled && string.IsNullOrWhiteSpace(configuration.Model))
+            throw new ArgumentException("Wybierz lokalny model albo pozostaw provider wyłączony.", nameof(configuration));
+        if (configuration.TimeoutSeconds is < 3 or > 120 || expectedVersion < 0 || string.IsNullOrWhiteSpace(actorUsername))
+            throw new ArgumentException("Nieprawidłowa wersja lub limit czasu konfiguracji AI.", nameof(configuration));
+
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            await using var update = connection.CreateCommand(); update.Transaction = (SqliteTransaction)transaction;
+            update.CommandText = "UPDATE server_ai_config SET endpoint=$endpoint,model=$model,enabled=$enabled,timeout_seconds=$timeout,version=version+1 WHERE id=1 AND version=$version";
+            update.Parameters.AddWithValue("$endpoint", endpoint.ToString().TrimEnd('/'));
+            update.Parameters.AddWithValue("$model", configuration.Model.Trim());
+            update.Parameters.AddWithValue("$enabled", configuration.Enabled ? 1 : 0);
+            update.Parameters.AddWithValue("$timeout", configuration.TimeoutSeconds);
+            update.Parameters.AddWithValue("$version", expectedVersion);
+            if (await update.ExecuteNonQueryAsync(cancellationToken) != 1) { await transaction.RollbackAsync(cancellationToken); return false; }
+            await AddAuditAsync(connection, (SqliteTransaction)transaction, now, actorUsername, "ai.config_changed", "server", cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        }
+        catch { await transaction.RollbackAsync(cancellationToken); throw; }
+    }
+
     private async Task<AdminCredential?> FindAdminByIdAsync(string id, CancellationToken cancellationToken)
     {
         await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
@@ -272,12 +334,12 @@ public sealed class SqliteServerStore : IServerStore
         Enum.Parse<AdminRole>(reader.GetString(3)), reader.GetInt32(4) != 0);
 
     private static async Task AddAuditAsync(SqliteConnection connection, SqliteTransaction transaction, DateTimeOffset now,
-        string actorUsername, string action, string targetId, CancellationToken cancellationToken)
+        string actorUsername, string action, string? targetId, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "INSERT INTO admin_audit(timestamp,actor_username,action,target_id) VALUES($now,$actor,$action,$target)";
         command.Parameters.AddWithValue("$now", now.ToString("O")); command.Parameters.AddWithValue("$actor", actorUsername);
-        command.Parameters.AddWithValue("$action", action); command.Parameters.AddWithValue("$target", targetId);
+        command.Parameters.AddWithValue("$action", action); command.Parameters.AddWithValue("$target", targetId is null ? DBNull.Value : targetId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

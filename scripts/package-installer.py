@@ -24,7 +24,7 @@ def main():
     parser.add_argument('--dotnet', default='dotnet')
     parser.add_argument('--makensis', default='makensis')
     args = parser.parse_args()
-    version = ET.parse(ROOT / 'src/Sentinel.Desktop/Sentinel.Desktop.csproj').findtext('./PropertyGroup/Version')
+    version = ET.parse(ROOT / 'eng/ProductVersion.props').findtext('./PropertyGroup/VersionPrefix')
     if not version or not re.fullmatch(r'\d+\.\d+\.\d+', version):
         raise ValueError('Expected a numeric three-part application version')
     output = ROOT / 'artifacts/installer'

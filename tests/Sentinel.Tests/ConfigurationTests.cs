@@ -77,8 +77,9 @@ public sealed class ConfigurationTests : IDisposable
         var recommendation = new ConfigurationRecommendationEngine().Recommend(system, ProductVariant.User);
         Assert.False(recommendation.RequiresNetworkForBasicAnalysis);
         Assert.Contains("Lokalny silnik reguł", recommendation.AvailableModules);
-        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("Model AI", StringComparison.Ordinal));
-        Assert.Contains(recommendation.Notices, item => item.Contains("nie ma backendu/modelu", StringComparison.Ordinal));
+        Assert.Contains("Lokalna baza pełnotekstowa FTS5 (TXT, MD, DOCX)", recommendation.AvailableModules);
+        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("dobór modelu", StringComparison.Ordinal));
+        Assert.Contains(recommendation.Notices, item => item.Contains("zgodność z modelem", StringComparison.Ordinal));
     }
 
     [Fact]

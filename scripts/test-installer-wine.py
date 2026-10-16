@@ -1,4 +1,4 @@
-import pathlib,json,os,subprocess,hashlib,time,argparse,tempfile
+import pathlib,json,os,subprocess,hashlib,time,argparse,tempfile,xml.etree.ElementTree as ET
 parser=argparse.ArgumentParser(description='Test install/reinstall/uninstall in an already prepared, disposable Wine prefix.')
 parser.add_argument('--environment',type=pathlib.Path,required=True)
 parser.add_argument('--installer',type=pathlib.Path,required=True)
@@ -24,7 +24,8 @@ local=installed.parent.parent;profile=local.parent.parent
 assert (profile/'Desktop/Sentinel AI.lnk').is_file()
 assert (profile/'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Sentinel AI/Sentinel AI.lnk').is_file()
 registry=r'HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI'
-r=run('reg','query',registry);assert '0.2.0' in r.stdout;assert 'Odinstaluj.exe' in r.stdout
+product_version=ET.parse(pathlib.Path(__file__).resolve().parents[1]/'eng/ProductVersion.props').findtext('./PropertyGroup/VersionPrefix')
+r=run('reg','query',registry);assert product_version in r.stdout;assert 'Odinstaluj.exe' in r.stdout
 print(f'PASS: {len(manifest)} installed hashes, uninstaller, shortcuts and registration',flush=True)
 if args.mutex_helper:
  ready=base/'mutex.ready';release=base/'mutex.release'

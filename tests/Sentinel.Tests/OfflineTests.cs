@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Sentinel.Tests;
 
+[Collection("NetworkAudit")]
 public sealed class OfflineTests
 {
     private sealed class NetworkAudit : EventListener

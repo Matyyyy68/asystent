@@ -1,10 +1,10 @@
 # Sentinel AI
 
-Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. **Dostarczone: Etap 1 i zasadnicza implementacja Etapu 2.** Analiza regułowa oraz magazyn mają testy wykonywane na Linux; natywny odczyt UI Automation wymaga walidacji na interaktywnym Windows. AI, RAG i integracja z przeglądarką nie są jeszcze dostępne.
+Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. **Dostarczone: fundament i zasadnicza implementacja analizy lokalnej.** Opcjonalny lokalny provider Ollama oraz prywatna baza FTS5 dla TXT/Markdown/DOCX są dostępne; serwer ma centralne FTS5 i loopback Ollama. Natywny odczyt UI Automation wymaga walidacji na interaktywnym Windows. Brak wyszukiwania wektorowego, parsera PDF i integracji z przeglądarką.
 
 ## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.2.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client w tym buildzie zachowuje lokalne reguły, ale jawnie pokazuje brak parowania i synchronizacji; instalator nie instaluje Enterprise Server.
+Plik: `artifacts/installer/SentinelAI-0.3.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client w tym buildzie zachowuje lokalne reguły, ale jawnie pokazuje brak parowania i synchronizacji; instalator nie instaluje Enterprise Server. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.
@@ -20,7 +20,7 @@ Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
 
 Repozytorium zawiera odrębny projekt ASP.NET Core w `server/`: SQLite, health/readiness, zaproszenia, unikalne tożsamości urządzeń, cztery role administratorów, grupy, wersjonowane dziedziczone polityki, minimalną idempotentną historię zdarzeń i endpoint konfiguracji agenta. Instrukcje i ograniczenia są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i etapy są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
 
-Hostowany panel administratora jest dostępny pod `/admin/` przy uruchomionym API; zawiera dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta oraz audyt. Sekcje modeli AI, bazy wiedzy, diagnostyki, kopii i konfiguracji serwera informują o faktycznym braku odpowiedniego API i nie oferują fikcyjnych akcji. To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient nie pobiera jeszcze efektywnej polityki, nie wysyła historii offline i nie rejestruje się przez UI. Brakuje też ręcznej akceptacji urządzeń, rotacji poświadczeń oraz instalatora/usługi Windows.
+Hostowany panel administratora jest dostępny pod `/admin/` przy uruchomionym API; zawiera dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta, audyt, import/wyszukiwanie FTS5 oraz konfigurację i test lokalnego modelu Ollama serwera. Endpoint analizy agenta wymaga jawnej polityki `includeContext`, `aiProvider=ollama` i potwierdzenia klienta; serwer nie zapisuje treści. Diagnostyka wdrożenia, kopie/odtworzenie całej bazy i konfiguracja usług pozostają do wykonania. To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient nie pobiera jeszcze efektywnej polityki, nie wysyła kolejki offline i nie rejestruje się przez UI. Brakuje ręcznej akceptacji urządzeń, rotacji poświadczeń oraz instalatora/usługi Windows.
 
 ## Uruchomienie deweloperskie na Windows
 
@@ -59,7 +59,9 @@ Maskowanie statycznych etykiet jest heurystyczne: usuwa m.in. adresy, e-maile, d
 - Krótka korelacja presji czasu z późniejszą prośbą o logowanie w **tym samym oknie**, maksymalnie 2 min. Przechowuje wyłącznie czas i flagę sygnału, nigdy wcześniejsze wiadomości. Nie potwierdza związku wiadomości z nawigacją między aplikacjami.
 - Jawna punktacja; pojedynczy słaby sygnał nie daje wysokiego ryzyka. Wynik nie jest prawdopodobieństwem oszustwa.
 
-Treść nie może zmienić reguł, wywołać poleceń ani uzyskać narzędzi. W tej wersji nie ma modelu interpretującego instrukcje. Fałszywe alarmy i przeoczenia są możliwe; brak ostrzeżenia **nie potwierdza bezpieczeństwa**.
+Treść nie może zmienić reguł, wywołać poleceń ani uzyskać narzędzi. Opcjonalny model lokalny interpretuje kontekst po maskowaniu; odpowiedź jest walidowana, a reguły nie pozwalają modelowi obniżyć oceny. Fałszywe alarmy i przeoczenia są możliwe; brak ostrzeżenia **nie potwierdza bezpieczeństwa**.
+
+Opcjonalny lokalny model działa wyłącznie przez Ollama na `localhost`/loopback, wymaga wcześniejszej instalacji i wyraźnego włączenia w ustawieniach. Przycisk wykrywania pokazuje już zainstalowane modele; Sentinel AI ich nie pobiera. Do modelu trafia tekst po maskowaniu oraz maksymalnie pięć dopasowanych, lokalnych fragmentów wiedzy. Niedostępny model lub nieprawidłowa odpowiedź powodują powrót do reguł. Odpowiedź AI nie jest skalibrowanym prawdopodobieństwem ani gwarancją wykrycia.
 
 Syntetyczny przykład do ręcznego sprawdzenia:
 
@@ -90,8 +92,8 @@ Linux/Codex: `bash scripts/setup-cloud.sh` odtwarza oba rozwiązania w locked-mo
 
 ## Następne etapy
 
-Etap 3: IAIProvider, rzeczywista integracja lokalnego modelu lub serwera, walidacja odpowiedzi/fallback, import PDF/TXT/MD/DOCX, wyszukiwanie FTS5 i źródła RAG. Tabela FTS5 istnieje, ale import i wyszukiwanie nie są dostępne. Nie podawaj kluczy ani nie pobieraj modeli na potrzeby bieżącej wersji.
+Zaimplementowana część Etapu 3: provider Ollama loopback, walidacja strukturalnej odpowiedzi i fallback regułowy, prywatny indeks FTS5 dla TXT/MD/DOCX, import, wyszukiwanie, usuwanie, backup i źródła z fragmentów. Serwer udostępnia lokalną konfigurację/test Ollama i centralne FTS5; analiza serwerowa wymaga polityki oraz potwierdzenia klienta. Ograniczenia: bez PDF, embeddingów/semantyki, katalogu modeli i potwierdzonego doboru sprzętowego. Nie podawaj kluczy ani nie pobieraj modeli bez własnej świadomej decyzji.
 
-Etap 3 i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Etapy 4–5: rozszerzenie przeglądarki, autostart opt-in, powiadomienia Windows, bezpieczne przechowywanie przyszłych sekretów, podpisywanie instalatora zaufanym certyfikatem i testy na natywnym Windows. Brak blokowania, lokalnego/serwerowego AI/RAG, usługi serwerowej, synchronizacji klienta i aplikacji mobilnych.
+Pozostałe etapy i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Brak blokowania, semantycznego RAG, usługi Enterprise Server, synchronizacji klienta, rozszerzenia przeglądarki i aplikacji mobilnych.
 
 Architektura i punktacja: [ARCHITECTURE.md](ARCHITECTURE.md). Źródła wersji: [metadane .NET 10](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json), [NuGet](https://api.nuget.org/v3/index.json). Wersje i hashe pakietów: `packages.lock.json`. Informacje o licencji PSL: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
