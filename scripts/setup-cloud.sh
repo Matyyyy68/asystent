@@ -23,3 +23,4 @@ dotnet restore server/Sentinel.Server.sln --locked-mode --disable-parallel -m:1 
 dotnet build server/Sentinel.Server.sln -c Release --no-restore --disable-build-servers -m:1 -nr:false
 dotnet test server/Sentinel.Server.sln -c Release --no-build --no-restore --disable-build-servers -m:1 -nr:false
 python3 server/scripts/test-api.py
+python3 -m unittest scripts/test-restore-server-backup.py
