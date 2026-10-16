@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using Sentinel.Core;
+using Sentinel.Core.Configuration;
 namespace Sentinel.Desktop;
 public sealed class AsyncCommand(Func<Task> action, Action<Exception> error) : ICommand
 {
@@ -42,6 +43,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private string lastWarning = "Brak danych";
     public string LastWarning { get => lastWarning; private set { lastWarning = value; Changed(); } }
     public string VersionText => $"Wersja {typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "—"}";
+    private string productVariant = "Sentinel AI User";
+    public string ProductVariant { get => productVariant; private set { productVariant = value; Changed(); } }
     public event Action<string>? ThemeChanged;
     public SecurityEvent? SelectedEvent { get; set; }
     public string DataPath => store.DatabasePath;
@@ -73,7 +76,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OpenHistory = Command(() => { SelectedTabIndex = 2; return Task.CompletedTask; });
         OpenSettings = Command(() => { SelectedTabIndex = 3; return Task.CompletedTask; });
     }
-    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); }
+    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); var profile = await store.GetInstallationProfileAsync(); ProductVariant = profile.Variant == Sentinel.Core.Configuration.ProductVariant.User ? "Sentinel AI User" : "Sentinel AI Enterprise Client — synchronizacja niedostępna"; Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); }
     private async Task Reload()
     {
         var rows = await store.ReadAsync(); Events.Clear(); RecentEvents.Clear();

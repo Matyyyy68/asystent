@@ -7,6 +7,7 @@ using Sentinel.Core.Analysis;
 using Sentinel.Desktop.Context;
 using Microsoft.Win32;
 using System.IO.Pipes;
+using Sentinel.Core.Configuration;
 namespace Sentinel.Desktop;
 public partial class App : System.Windows.Application
 {
@@ -20,6 +21,8 @@ public partial class App : System.Windows.Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
         try
         {
+            var requestedProfile = ReadInitialProductProfile(e.Args);
+            var systemSnapshot = WindowsSystemProbe.Read();
             instanceMutex = new Mutex(false, @"Local\SentinelAI.Desktop", out bool firstInstance);
             if (!firstInstance)
             {
@@ -32,14 +35,14 @@ public partial class App : System.Windows.Application
             if (File.Exists(pointer)) directory = File.ReadAllText(pointer).Trim();
             else
             {
-                var setup = new FirstRunWindow(Path.Combine(bootstrap, "Data"));
+                var setup = new FirstRunWindow(Path.Combine(bootstrap, "Data"), systemSnapshot, requestedProfile);
                 if (setup.ShowDialog() != true) { Shutdown(); return; }
                 directory = setup.SelectedDirectory;
             }
             var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(directory))!);
             if (drive.DriveType == DriveType.Network || !drive.IsReady || drive.AvailableFreeSpace < 50 * 1024 * 1024)
                 throw new IOException("Wymagany lokalny, dostępny dysk z co najmniej 50 MB wolnego miejsca.");
-            var store = new LocalStore(directory); await store.InitializeAsync();
+            var store = new LocalStore(directory); await store.InitializeAsync(requestedProfile);
             await File.WriteAllTextAsync(pointer, directory);
             services = new ServiceCollection().AddSingleton(store).AddSingleton<IEventRepository>(store)
                 .AddSingleton<ISettingsRepository>(store)
@@ -64,6 +67,22 @@ public partial class App : System.Windows.Application
             System.Windows.MessageBox.Show($"Nie można uruchomić Sentinel AI ({ex.GetType().Name}). Sprawdź katalog, uprawnienia i bazę. Nie usuwaj uszkodzonej bazy bez kopii.", "Sentinel AI", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+    private static InstalledProductProfile ReadInitialProductProfile(string[] arguments)
+    {
+        if (arguments.Length > 0) return ProductProfileArguments.Parse(arguments);
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\SentinelAI");
+            var variant = key?.GetValue("ProductVariant") as string;
+            return variant switch
+            {
+                "EnterpriseClient" => new InstalledProductProfile(ProductVariant.EnterpriseClient).Validate(),
+                "User" or null => new InstalledProductProfile(ProductVariant.User),
+                _ => throw new InvalidDataException("Nieprawidłowy wariant produktu.")
+            };
+        }
+        catch (System.Security.SecurityException) { return new InstalledProductProfile(ProductVariant.User); }
     }
     private static async Task ActivateExistingInstanceAsync()
     {

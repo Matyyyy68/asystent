@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using System.Globalization;
 using System.Text.Json;
+using Sentinel.Core.Configuration;
 namespace Sentinel.Core;
 public sealed class LocalStore : IEventRepository, ISettingsRepository
 {
@@ -25,23 +26,34 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (key, value) in values) cmd.Parameters.AddWithValue(key, value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
-    public async Task InitializeAsync(CancellationToken ct = default)
+    public Task InitializeAsync(CancellationToken ct = default) => InitializeAsync(null, ct);
+    public async Task InitializeAsync(InstalledProductProfile? initialProfile, CancellationToken ct = default)
     {
+        initialProfile?.Validate();
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 1) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 2) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, risk INTEGER NOT NULL,
               category TEXT NOT NULL, application TEXT NOT NULL, explanation TEXT NOT NULL, recommendation TEXT NOT NULL, status INTEGER NOT NULL);
             CREATE VIRTUAL TABLE IF NOT EXISTS knowledge USING fts5(source UNINDEXED, content);
-            PRAGMA user_version=1;
+            CREATE TABLE IF NOT EXISTS installation_profile(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
+            INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
+            PRAGMA user_version=2;
             COMMIT;
-            """, ct);
+            """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
+    }
+    public async Task<InstalledProductProfile> GetInstallationProfileAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+        var json = await cmd.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("Brak profilu instalacji.");
+        var profile = JsonSerializer.Deserialize<InstalledProductProfile>(json) ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
+        try { return profile.Validate(); } catch (ArgumentException ex) { throw new InvalidDataException("Nieprawidłowy profil instalacji.", ex); }
     }
     public async Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default)
     {

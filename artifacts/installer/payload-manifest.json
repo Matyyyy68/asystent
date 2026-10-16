@@ -60,9 +60,14 @@
     "sha256": "4579f78dffc991340317264ee67934c8e4b5d9d1456192b59e55974dc9c9511f"
   },
   {
+    "path": "Microsoft.VisualBasic.Forms.dll",
+    "size": 247632,
+    "sha256": "bbde0ad7826182a0035f9425f4e554cc65ce05813ec21ee8b7ed1408036dd7f0"
+  },
+  {
     "path": "Microsoft.VisualBasic.dll",
-    "size": 17232,
-    "sha256": "10d93e64fced1cd163d2cea75575d23f4fa98550d1b8a67ffd80780c12fa08d8"
+    "size": 18728,
+    "sha256": "59cad18b9800b5bac3dd45527208962eae547faae13f94eb8cb2c5728c73b052"
   },
   {
     "path": "Microsoft.Win32.Primitives.dll",
@@ -196,23 +201,23 @@
   },
   {
     "path": "Sentinel.Core.dll",
-    "size": 409600,
-    "sha256": "a5e90cab44f66eeeab60f23be7f92cf9a7a07e9e74c2f38c355d7e351be8bfc4"
+    "size": 428544,
+    "sha256": "9dc16fee2cd16d7e23eeda3c08021ac29ee03fb2754fc24f1f33a94ecc01e480"
   },
   {
     "path": "Sentinel.Desktop.deps.json",
-    "size": 40616,
-    "sha256": "437a023edaec8115ed36dbddd6ca04853db39f1d89f5a4bc04c4e1765efd920a"
+    "size": 41782,
+    "sha256": "5afdf427034a162941decaf7cfc20fd71f11c17e57567fb4aab9dffe68c64a20"
   },
   {
     "path": "Sentinel.Desktop.dll",
-    "size": 61952,
-    "sha256": "afe3ca6ddba7fe1887f8696638334c7def5c4f6f17dd574bf934594aa8c883d7"
+    "size": 96256,
+    "sha256": "23407bea51b3effa8b1a9731b70b2ad17dcee0bfc644dfa336ed6b50c97b52c1"
   },
   {
     "path": "Sentinel.Desktop.exe",
-    "size": 162304,
-    "sha256": "c5b2720049c4be296d282c68766be0afa88234c94dd900e11961b3641b2b48bc"
+    "size": 162816,
+    "sha256": "67c55b4a4b6219be2b5a7d0edad820c7668e4cee1150a27d1d483dba66f71af2"
   },
   {
     "path": "Sentinel.Desktop.runtimeconfig.json",
@@ -325,6 +330,11 @@
     "sha256": "1be17f4c6bd354f1a5654d9dd30b52a11965d4ac42208d173c73cf9aecb3d8c5"
   },
   {
+    "path": "System.Design.dll",
+    "size": 23336,
+    "sha256": "a1cbfe621966be64e1d2b8683607c4466e43dc582330a24582b223d964fdaa10"
+  },
+  {
     "path": "System.Diagnostics.Contracts.dll",
     "size": 16168,
     "sha256": "9ee7cddce1f941d0c57ac48d35935c86de1b2044f46f9538fc3e3642d43c8f6b"
@@ -400,14 +410,19 @@
     "sha256": "34bcf5b207e6de21dae14b7062dffdb0afcf820302352f2838438aad3231d927"
   },
   {
+    "path": "System.Drawing.Design.dll",
+    "size": 15656,
+    "sha256": "e28ced52ab773ffff0c8f8e153c8f904c8c2e324dcfacd32f72d591c4b339853"
+  },
+  {
     "path": "System.Drawing.Primitives.dll",
     "size": 132904,
     "sha256": "4e50080f27ef47fec351e69a013c352bd0807a84e7fe4e069e2cd9d7b55d8ad1"
   },
   {
     "path": "System.Drawing.dll",
-    "size": 20264,
-    "sha256": "22a80405468bf2060942deadb320c366c439983a9672b847f51d586efa7d4d60"
+    "size": 20816,
+    "sha256": "fb7edbaf7eabe7d188ed5a688e9c02380f847075335429f800e1e8cfe83bfe56"
   },
   {
     "path": "System.Dynamic.Runtime.dll",
@@ -1085,6 +1100,26 @@
     "sha256": "499a724073b153254a9e371f94577588fc6a8c7a12622bff2a5af0f355a99505"
   },
   {
+    "path": "System.Windows.Forms.Design.Editors.dll",
+    "size": 16208,
+    "sha256": "b6cc35357d1158ff812bb5bec2a7fc401c7099a0619180ebced180e80265a3c9"
+  },
+  {
+    "path": "System.Windows.Forms.Design.dll",
+    "size": 6092584,
+    "sha256": "a4bb29d34a53d26476b8964a710831dba663455fc867429333ce1a0a54adec5e"
+  },
+  {
+    "path": "System.Windows.Forms.Primitives.dll",
+    "size": 3622736,
+    "sha256": "b0a2882da1816f0314082064b2cf5972c0d00ba8b6118e44c8e15827a9136d59"
+  },
+  {
+    "path": "System.Windows.Forms.dll",
+    "size": 13715240,
+    "sha256": "5c43a5b5b9e4c3c3055a86487cdcb545ac6ca26940ed0bc21940c5615ed1726a"
+  },
+  {
     "path": "System.Windows.Input.Manipulations.dll",
     "size": 141096,
     "sha256": "fb003d6c913ef9be24854e54eded6a0fcf463a344241ca60fbcd5eaff812cbe7"
@@ -1190,6 +1225,11 @@
     "sha256": "1569eafc8370e8f6ad29087beda0430ec04c08a339862341e20daedf9632a6ae"
   },
   {
+    "path": "WindowsFormsIntegration.dll",
+    "size": 214864,
+    "sha256": "e6e2f3252d98bce32c3dc2a3410b108c14afbe90973f05d0b32eb6c9c6074267"
+  },
+  {
     "path": "clretwrc.dll",
     "size": 317776,
     "sha256": "dc153acb6c0ae6dd205e4d7f4555dfb67ba45d25af39f8a1475121f6002f2f93"
@@ -1220,6 +1260,11 @@
     "sha256": "363b481c110ed2657d93211d52199955098d46655f50ca09473cc04a546f175f"
   },
   {
+    "path": "cs/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "f5cb70937521e3fa4db03b8e5a07ef7f0cea7442eb4db7454fd5415a6468f148"
+  },
+  {
     "path": "cs/PresentationCore.resources.dll",
     "size": 106792,
     "sha256": "95d0e93958b231e0b92cc0a1793121fa1dbebfaaf826cd4f7314587dcd644115"
@@ -1243,6 +1288,21 @@
     "path": "cs/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "8a22350f008dc8a90ea46ab6b5ad96cff84bdfd291f7ff67ce46dcf77ac84533"
+  },
+  {
+    "path": "cs/System.Windows.Forms.Design.resources.dll",
+    "size": 269136,
+    "sha256": "dded08f7840d7723153153d171a0fb0952b03a9ff274c5317a0944bdf8207617"
+  },
+  {
+    "path": "cs/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "0cf05400ec170660179e247646ed21fd5d69f9c880ee4818d3b96745639aa667"
+  },
+  {
+    "path": "cs/System.Windows.Forms.resources.dll",
+    "size": 369960,
+    "sha256": "6ba39af3cbe4f6354c510c3dad4327284a44acff6c2373a07bdc77141f7af04c"
   },
   {
     "path": "cs/System.Windows.Input.Manipulations.resources.dll",
@@ -1280,6 +1340,16 @@
     "sha256": "6c6ce14d04ab05ca0bec3c0bf13c33f108a266d2f36f8ae407031c7c59fcb15b"
   },
   {
+    "path": "cs/WindowsFormsIntegration.resources.dll",
+    "size": 15696,
+    "sha256": "17e7e7d183d91aed32464b86f31d93e68559617372f3077e1c4929112c369d48"
+  },
+  {
+    "path": "de/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25424,
+    "sha256": "593347aa41e07a0f9764f9086a0de6864f27cf83f06065755dd34702d0073fd1"
+  },
+  {
     "path": "de/PresentationCore.resources.dll",
     "size": 112936,
     "sha256": "4ba9929adae5b4b01056131a8212c96cbd79f2058ab8fc2e0a8fa99caced208f"
@@ -1303,6 +1373,21 @@
     "path": "de/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "22f5a576aa8f77ff3012cf7fb383ccb928d843804e0f6e769cb6fb398e49d7f7"
+  },
+  {
+    "path": "de/System.Windows.Forms.Design.resources.dll",
+    "size": 270160,
+    "sha256": "0aad3f51f054378f598e541567c10cba522fd8c8e3f127e780f2ecaefb084715"
+  },
+  {
+    "path": "de/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15696,
+    "sha256": "a0ddb0ae37e726b7c1ceae9da9a5863c597dee161b85d162ee7f62449277a3eb"
+  },
+  {
+    "path": "de/System.Windows.Forms.resources.dll",
+    "size": 378664,
+    "sha256": "27552265b8073f4aa76d8653123e234d9d8c70d58041de076f4418aa1d00b220"
   },
   {
     "path": "de/System.Windows.Input.Manipulations.resources.dll",
@@ -1340,9 +1425,19 @@
     "sha256": "f9f389093e1252be08a7569f7b99bd268845ed15a966d3599da9196f8577398c"
   },
   {
+    "path": "de/WindowsFormsIntegration.resources.dll",
+    "size": 15656,
+    "sha256": "ddab4e2a814d327da00a3330e174dca56936fb39f2ae619f8b209c1d1b301556"
+  },
+  {
     "path": "e_sqlite3.dll",
     "size": 1978880,
     "sha256": "b7385d722c83fb52142a00477a726723745916d22a555711ee89834c1111fb2e"
+  },
+  {
+    "path": "es/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "a5875afba7a7fea869c168a026337f6873d6794f47b1770b0e6c147461087a9d"
   },
   {
     "path": "es/PresentationCore.resources.dll",
@@ -1368,6 +1463,21 @@
     "path": "es/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18256,
     "sha256": "ab80359855e95a313eeac9ed409eb730447683f16a7e0b92ca47ac8cb8f3b7af"
+  },
+  {
+    "path": "es/System.Windows.Forms.Design.resources.dll",
+    "size": 269608,
+    "sha256": "dfd9a24f80d7e0a504a6961afea26b36f81d78a380eeb595f105b92d23ece990"
+  },
+  {
+    "path": "es/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "42fe100a6b12120294932ef2dfb7acb71e6b43e8ac42bf6d90a13ad043223f3e"
+  },
+  {
+    "path": "es/System.Windows.Forms.resources.dll",
+    "size": 370472,
+    "sha256": "d00838cb3a9e50b0fa5ed316f19871bda198dade9aa6fa81324ccbe840fa4cbf"
   },
   {
     "path": "es/System.Windows.Input.Manipulations.resources.dll",
@@ -1405,6 +1515,16 @@
     "sha256": "2ebd8c927879f47b3cb3495cd51fcfad0b9878ee86d4ad5700c1101f820732de"
   },
   {
+    "path": "es/WindowsFormsIntegration.resources.dll",
+    "size": 15656,
+    "sha256": "c53f1bf19135ee86e5a3743687bb0dc5c119b2f5e1550ab834316b8ae5c5f819"
+  },
+  {
+    "path": "fr/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25424,
+    "sha256": "228234c05df06c833fb89caf484faf8c4abd3b8f0f056f261274b3eceae7aa34"
+  },
+  {
     "path": "fr/PresentationCore.resources.dll",
     "size": 111912,
     "sha256": "a5864871567dce88a112c5cf92383d0c4e53d97c72ba83e30913e544390a467e"
@@ -1428,6 +1548,21 @@
     "path": "fr/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "66e9f7282e4be1bc37d482cd1a52ebe293ba0c4730430a2854df9b420ad91786"
+  },
+  {
+    "path": "fr/System.Windows.Forms.Design.resources.dll",
+    "size": 270632,
+    "sha256": "920d4e12f45cf4197ee4f5a2f11e5c8d8de68221243adb839ce043901ac791fc"
+  },
+  {
+    "path": "fr/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "aa7e34b41906737febbc9cb92fb90f4fa25509305a89900890dde558244907c7"
+  },
+  {
+    "path": "fr/System.Windows.Forms.resources.dll",
+    "size": 377640,
+    "sha256": "d5ff5399a30e93930adaf5860d2f8a04ab0b288a8ab47f0a7b6078e940748d5b"
   },
   {
     "path": "fr/System.Windows.Input.Manipulations.resources.dll",
@@ -1465,6 +1600,11 @@
     "sha256": "67b012c4ffb3534d79a9f6ce1687179df539485364f51c0199ccb9f6dda213e6"
   },
   {
+    "path": "fr/WindowsFormsIntegration.resources.dll",
+    "size": 15696,
+    "sha256": "36e63ddbf8b1441379b1160cdaa43c566b2ae686256d9ea128d616238b5340d8"
+  },
+  {
     "path": "hostfxr.dll",
     "size": 379728,
     "sha256": "2e6bf792d54303a54467102fd873a7d7a993f828e8d19c040e13e428e5f2d9c8"
@@ -1473,6 +1613,11 @@
     "path": "hostpolicy.dll",
     "size": 378704,
     "sha256": "90f9826f48e6416902199dee0fa1954536fe4c5191f5fd44b1bc6de623eb99c8"
+  },
+  {
+    "path": "it/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "ecd9ff6fc4f7ba7ea7abde875c5f24418377b1d07c1d87e582b5894ee2c9ccee"
   },
   {
     "path": "it/PresentationCore.resources.dll",
@@ -1498,6 +1643,21 @@
     "path": "it/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "35fba9187a412cceef41f7e467ae4e61c5a68cc81624b8e78245e2e14e737b18"
+  },
+  {
+    "path": "it/System.Windows.Forms.Design.resources.dll",
+    "size": 270632,
+    "sha256": "9ae7719f9a0aa425ccc5663a7b6ccc07e4784fe2bac19754a5fe4053262626f0"
+  },
+  {
+    "path": "it/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15696,
+    "sha256": "adeaa54811d0e57511cf9339e3fc0365d0908acc36c0497986b16fc4b97922eb"
+  },
+  {
+    "path": "it/System.Windows.Forms.resources.dll",
+    "size": 373032,
+    "sha256": "33ae4c3f4c35b30d0317cf7fef981b6f8ff30b84384b3d28ce925ad2f87e577a"
   },
   {
     "path": "it/System.Windows.Input.Manipulations.resources.dll",
@@ -1535,6 +1695,16 @@
     "sha256": "50747ea9d447bb035f2a4f9ae1a2dbbd58c4dc3d5e9363e64b9cea12906eb03f"
   },
   {
+    "path": "it/WindowsFormsIntegration.resources.dll",
+    "size": 15696,
+    "sha256": "46c11c6c0310900409f83bb03eeadb9c5605787e6b84f3b30ee28c7222b092cf"
+  },
+  {
+    "path": "ja/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25896,
+    "sha256": "5137be1db5d72092bb867542dfefae8a50b1eb225bc3b3c9e2b82b9743072bbf"
+  },
+  {
     "path": "ja/PresentationCore.resources.dll",
     "size": 121168,
     "sha256": "5f77834b2fecc02fb302a49d3e7f5a384b7eed8ba5773d9a0fbfdd140a3f6543"
@@ -1558,6 +1728,21 @@
     "path": "ja/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18728,
     "sha256": "1ab206246baab155218ee68393b1263764de8270687b425a9d2e125429d62698"
+  },
+  {
+    "path": "ja/System.Windows.Forms.Design.resources.dll",
+    "size": 276264,
+    "sha256": "f309073d601f7e3d0e7143c7bc4f8e24c52ae6d5e2e999af27c2c794b8d8433a"
+  },
+  {
+    "path": "ja/System.Windows.Forms.Primitives.resources.dll",
+    "size": 16168,
+    "sha256": "0bf725b7db661a1d5ca59bbf8fce183f6210438ffba7d6d9bd0c4533765e297d"
+  },
+  {
+    "path": "ja/System.Windows.Forms.resources.dll",
+    "size": 413992,
+    "sha256": "433995b27e6497d88020698f8d9eefd3560fffb90f8a22fbbbd94259bb5373d1"
   },
   {
     "path": "ja/System.Windows.Input.Manipulations.resources.dll",
@@ -1595,6 +1780,16 @@
     "sha256": "8d87e41af6df2161101cadbbfa997b17c932f323e479c1e3e7f0cdee1d625c78"
   },
   {
+    "path": "ja/WindowsFormsIntegration.resources.dll",
+    "size": 16168,
+    "sha256": "c4c9b142327d65262a75756fa4ef37cb86ec5a3331a8c0d1833616dc5d11a4b3"
+  },
+  {
+    "path": "ko/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "381e394cdc3d408e5e15179d595fa4449110d9e6f5158e9c78bb436b41655b5f"
+  },
+  {
     "path": "ko/PresentationCore.resources.dll",
     "size": 112936,
     "sha256": "47dc7e40187d5bf3630299984671f07179a350ac9eddaa56f5d26acf9d5b2c41"
@@ -1618,6 +1813,21 @@
     "path": "ko/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "9cb77d24dfda68963ba0983c2366a348716d6fe3216af47c4c1a96470c2d98ce"
+  },
+  {
+    "path": "ko/System.Windows.Forms.Design.resources.dll",
+    "size": 271656,
+    "sha256": "7228aec86c9a62229422c4da5d8aa841141c9096a5dcbbf9ba3206ab7b6fb39b"
+  },
+  {
+    "path": "ko/System.Windows.Forms.Primitives.resources.dll",
+    "size": 16168,
+    "sha256": "9ce8894a58ecc56a4bbe11e22bfc9076eb46d084c5a84e0d72538c0a907573e1"
+  },
+  {
+    "path": "ko/System.Windows.Forms.resources.dll",
+    "size": 375592,
+    "sha256": "59a34fb42f6adec82a3ccae5ada3b185733afe816217223893496783035312c0"
   },
   {
     "path": "ko/System.Windows.Input.Manipulations.resources.dll",
@@ -1655,6 +1865,11 @@
     "sha256": "81194aa56a0bbab04ece60e58145ddd3394c9ba0357e0101308750028f15a9ed"
   },
   {
+    "path": "ko/WindowsFormsIntegration.resources.dll",
+    "size": 15696,
+    "sha256": "09ff69e11d44503e900b27a448a5cb86a1e435eeb1d798c417853941b7b8d056"
+  },
+  {
     "path": "mscordaccore.dll",
     "size": 1356120,
     "sha256": "4e2109c88298f0a614aac82b23310b13835673a8e192a6a8b75c25459e591169"
@@ -1690,6 +1905,11 @@
     "sha256": "4f517955d84669b6c02c83fa5e20e5f9c80d58a0aa1f16967af45db5ccafbfdb"
   },
   {
+    "path": "pl/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "fddeb4486829abf54cdb25d187bb046a5412df757bd988e254cce0d9c62cdab0"
+  },
+  {
     "path": "pl/PresentationCore.resources.dll",
     "size": 111912,
     "sha256": "d86eb6070a14572bd2209d80981fdc176ede7ba59ac9451d9643dda68a229026"
@@ -1713,6 +1933,21 @@
     "path": "pl/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "d5bf09e0b428e3cb1cd3564746a45cdfe9d0a750ee52cb98b20210c9e6ad40b4"
+  },
+  {
+    "path": "pl/System.Windows.Forms.Design.resources.dll",
+    "size": 269096,
+    "sha256": "8009053641664c7ea46f486962cb5f98750874e80f17fefa4378367cda93ef19"
+  },
+  {
+    "path": "pl/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "f422336e5f8e2a68922bbe158011723d700ab964aec907b2516e7f803c1b534c"
+  },
+  {
+    "path": "pl/System.Windows.Forms.resources.dll",
+    "size": 370984,
+    "sha256": "33500c8c68d2b006aee2710dbdf906f923fcfd4d5a807d9c18a996c87fb49094"
   },
   {
     "path": "pl/System.Windows.Input.Manipulations.resources.dll",
@@ -1750,6 +1985,16 @@
     "sha256": "b57f515e3b031d377a53b873d80440081588d98806b1b161c066f684631c74b2"
   },
   {
+    "path": "pl/WindowsFormsIntegration.resources.dll",
+    "size": 15656,
+    "sha256": "57e23f5565f8017f87bc70ce885ab6a93f9fbe75aea81e649a5f1a004f2dfed6"
+  },
+  {
+    "path": "pt-BR/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "65945857265d89ed2de9ad2e873561e527206b98d855e1bb217f00b6b4bd0c45"
+  },
+  {
     "path": "pt-BR/PresentationCore.resources.dll",
     "size": 108368,
     "sha256": "bbba86aab6979998e32fe8fa447cebe16a8b9f98392b1999fa0a9f09193e33ad"
@@ -1773,6 +2018,21 @@
     "path": "pt-BR/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "b6d26b086d5da036260c55591e559bc928956968c03456b318fe2547ce51469a"
+  },
+  {
+    "path": "pt-BR/System.Windows.Forms.Design.resources.dll",
+    "size": 269136,
+    "sha256": "13389071e0e56c108551114a428ac8483e15abce3d060349c7a6eb016b568e2b"
+  },
+  {
+    "path": "pt-BR/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "2a76747f9660a063657d3559ee1d6de8cdb08d1e4a129ea8ce9d72e80e315394"
+  },
+  {
+    "path": "pt-BR/System.Windows.Forms.resources.dll",
+    "size": 363816,
+    "sha256": "f6f64c28b8dd3c2ac5dcc7eec1050ff3fff1c1b5f3d453e16fb246778d5219be"
   },
   {
     "path": "pt-BR/System.Windows.Input.Manipulations.resources.dll",
@@ -1810,6 +2070,16 @@
     "sha256": "00a8439f612c57302f114886ab942e786cc94d84dc4f2d24919911823d23892f"
   },
   {
+    "path": "pt-BR/WindowsFormsIntegration.resources.dll",
+    "size": 15656,
+    "sha256": "9def7a27fef1014781b503f0a10a756188a1cffd62a21d778d9c7d2badf97b05"
+  },
+  {
+    "path": "ru/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 26448,
+    "sha256": "68d236be344e632140a945079651b098be1cde3cccbf31ece772bb8530bf44dc"
+  },
+  {
     "path": "ru/PresentationCore.resources.dll",
     "size": 136488,
     "sha256": "fc41763c19294aa142c35030197d36a5ee9acb49de8684b1a7dcd934faa88a73"
@@ -1833,6 +2103,21 @@
     "path": "ru/System.Windows.Controls.Ribbon.resources.dll",
     "size": 19280,
     "sha256": "6fbc2025e4719922fc30914f8b54e1b876b1c61cc12056ae529d1d750270b2a1"
+  },
+  {
+    "path": "ru/System.Windows.Forms.Design.resources.dll",
+    "size": 285992,
+    "sha256": "9c5fb3da783ab7096bae1b308238a3338faf1db55ee09c914145f2c9382f4ba4"
+  },
+  {
+    "path": "ru/System.Windows.Forms.Primitives.resources.dll",
+    "size": 16168,
+    "sha256": "aea45490cf2aaa9b7b37c8cc73c333854ae133910d47e98ffa3e7ab9ca4e56f4"
+  },
+  {
+    "path": "ru/System.Windows.Forms.resources.dll",
+    "size": 482600,
+    "sha256": "31ed63b2bf113c6af21650834a70008fe337e823e094d25941c7a295c3d92241"
   },
   {
     "path": "ru/System.Windows.Input.Manipulations.resources.dll",
@@ -1870,6 +2155,16 @@
     "sha256": "9fa22a77452a62bf0d39b8b53f282282ff2d6c76f708b38234054f23ebb6c7ca"
   },
   {
+    "path": "ru/WindowsFormsIntegration.resources.dll",
+    "size": 16168,
+    "sha256": "8065efd7b33809bd749de4a7fb431d44b5d9b42d411016cd8e50249c32f442db"
+  },
+  {
+    "path": "tr/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 25384,
+    "sha256": "d575fd7dd1f406b9e755d202a3d818c7bdd375d3b5a36054d1c7310756e18697"
+  },
+  {
     "path": "tr/PresentationCore.resources.dll",
     "size": 106280,
     "sha256": "cbb39bb41e9173292e256139b8c3338b9d3e8056dc6b753c1c583a2920774e23"
@@ -1893,6 +2188,21 @@
     "path": "tr/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "c99ddc4d3d7e823fc4b552909dfd72aa1c8a5649ad39ce7ae4d2c689730592e7"
+  },
+  {
+    "path": "tr/System.Windows.Forms.Design.resources.dll",
+    "size": 268584,
+    "sha256": "26e192af325c747c5ad0c39b92339a177feb966a5cea0da7030a8c44ae52d3eb"
+  },
+  {
+    "path": "tr/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "a1f83f64e14d307b6af14ee5d36f5d5ba0c4270cc6aab192c9da0f042abd4ed8"
+  },
+  {
+    "path": "tr/System.Windows.Forms.resources.dll",
+    "size": 365904,
+    "sha256": "dd7d75450700195a89d2cfbfb51670ca163d38625265df0dc8e07f06a39eeddb"
   },
   {
     "path": "tr/System.Windows.Input.Manipulations.resources.dll",
@@ -1930,6 +2240,11 @@
     "sha256": "4ebc880f9a25a89d673bafbc7ccb8a5847a6ad76d2c7499cf8418f0ede98523c"
   },
   {
+    "path": "tr/WindowsFormsIntegration.resources.dll",
+    "size": 15656,
+    "sha256": "0b6641ba132facfaf347b544ce56cd9449bc7495a4ce12d89d8046891f99e65a"
+  },
+  {
     "path": "vcruntime140_cor3.dll",
     "size": 124544,
     "sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066"
@@ -1938,6 +2253,11 @@
     "path": "wpfgfx_cor3.dll",
     "size": 1956648,
     "sha256": "ad1c9dbbc2fcc2b274145727e8f04d5adf49a0c9ae4d1a3c33ec969fcd5b4bf1"
+  },
+  {
+    "path": "zh-Hans/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 24872,
+    "sha256": "02890d82dffdc9c60ee8a11813fa691d2914b158eb750fd60b2aaba7cd18ec67"
   },
   {
     "path": "zh-Hans/PresentationCore.resources.dll",
@@ -1963,6 +2283,21 @@
     "path": "zh-Hans/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "ee531000c8c37635911f142d778c16fa4d5cb67a883088d20cd2484c3420f499"
+  },
+  {
+    "path": "zh-Hans/System.Windows.Forms.Design.resources.dll",
+    "size": 263976,
+    "sha256": "a024bc5ef0f1803e9be8c438e3a645e66e21b2b5fe1b5b2b662f8ac09ee9ebae"
+  },
+  {
+    "path": "zh-Hans/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "439ed3153b219c07c9368b26281456eee90a70bb95a7ab54df5c114ab3d3170d"
+  },
+  {
+    "path": "zh-Hans/System.Windows.Forms.resources.dll",
+    "size": 323368,
+    "sha256": "5a4b488aab8864f51bee1d10370987f4179e21ba8c5eb29d680b924089347acd"
   },
   {
     "path": "zh-Hans/System.Windows.Input.Manipulations.resources.dll",
@@ -2000,6 +2335,16 @@
     "sha256": "3e1702f202843fb5fb5c4f5048939eaffebf19f3a5cd8fe1ae7b56b034e65336"
   },
   {
+    "path": "zh-Hans/WindowsFormsIntegration.resources.dll",
+    "size": 15696,
+    "sha256": "018d8c05576aa495021a1a9129815671966943d234f486ecdb57fe66b5ebc6c8"
+  },
+  {
+    "path": "zh-Hant/Microsoft.VisualBasic.Forms.resources.dll",
+    "size": 24912,
+    "sha256": "3651d9b81da928e1f251c26de535b08a997d7e65d360043d623e076b7c83ae69"
+  },
+  {
     "path": "zh-Hant/PresentationCore.resources.dll",
     "size": 100136,
     "sha256": "41dc7e9f3bf2fc03f09d6810be30c897d7dd7bbeafe81f848a9ca7f3264b61f0"
@@ -2023,6 +2368,21 @@
     "path": "zh-Hant/System.Windows.Controls.Ribbon.resources.dll",
     "size": 18216,
     "sha256": "1f3f3dc2a43f16a787c5317138caca03476c786823040481c00fcbfb449a7dcb"
+  },
+  {
+    "path": "zh-Hant/System.Windows.Forms.Design.resources.dll",
+    "size": 264488,
+    "sha256": "1069293fc2bd4d5f15f93ba543743795efaa0a07e05cc05b2b73fade4097732b"
+  },
+  {
+    "path": "zh-Hant/System.Windows.Forms.Primitives.resources.dll",
+    "size": 15656,
+    "sha256": "2fc938d91150c75252f47a376ece42654faa17aaf6c9444f9d18e5f5ee35816b"
+  },
+  {
+    "path": "zh-Hant/System.Windows.Forms.resources.dll",
+    "size": 329000,
+    "sha256": "907194be81dc61e3321c809ec2529696adfa2afbeb2113608849863bcb001b5e"
   },
   {
     "path": "zh-Hant/System.Windows.Input.Manipulations.resources.dll",
@@ -2058,5 +2418,10 @@
     "path": "zh-Hant/WindowsBase.resources.dll",
     "size": 79184,
     "sha256": "c53c3645227bf2d5b6788f5eabad936a03f2805a875bf0bd7da4564a8c852a46"
+  },
+  {
+    "path": "zh-Hant/WindowsFormsIntegration.resources.dll",
+    "size": 15656,
+    "sha256": "96e3c1fb97bb381966fe627a419615f2e8ecb85002367c67349de0508a7a8ed9"
   }
 ]

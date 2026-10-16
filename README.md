@@ -2,9 +2,9 @@
 
 Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. **Dostarczone: Etap 1 i zasadnicza implementacja Etapu 2.** Analiza regułowa oraz magazyn mają testy wykonywane na Linux; natywny odczyt UI Automation wymaga walidacji na interaktywnym Windows. AI, RAG i integracja z przeglądarką nie są jeszcze dostępne.
 
-## Gotowy instalator dla użytkownika
+## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.2.0-win-x64-Setup.exe`.
+Plik: `artifacts/installer/SentinelAI-0.2.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client w tym buildzie zachowuje lokalne reguły, ale jawnie pokazuje brak parowania i synchronizacji; instalator nie instaluje Enterprise Server.
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.
@@ -74,7 +74,7 @@ Wpisz adres w osobnym polu „Rzeczywisty adres docelowy”. Domena `.test` jest
 
 Zachowane funkcje Etapu 1: SQLite z wersjonowaniem schematu i transakcyjną inicjalizacją, retencja 1–365 dni, do 500 ostatnich zdarzeń w UI, eksport całej historii JSON, spójna kopia SQLite, oznaczanie fałszywego alarmu, usuwanie historii z potwierdzeniem i test powiadomienia. Zapis wyniku obejmuje wyłącznie aplikację, kategorię, ryzyko, opis reguł, niepewności i zalecenia. Analiza bez sygnałów nie dodaje zdarzenia. Zgłoszenie fałszywego alarmu nie wyłącza automatycznie reguły.
 
-Ustawienia zbierania wymagają przycisku „Zapisz ustawienia”; zmiana pauzy zapisuje się natychmiast. Włączone zbieranie i tryb zmian okien są odtwarzane po restarcie dopiero po pokazaniu okna aplikacji. Retencja jest stosowana przy starcie, zapisie ustawień i po ostrzeżeniu. Wyłączone powiadomienia nie ukrywają wyniku analizy na żądanie. Ostrzeżenia są wewnątrz aplikacji; nie ma jeszcze powiadomień systemowych ani zasobnika.
+Ustawienia zbierania wymagają przycisku „Zapisz ustawienia”; zmiana pauzy zapisuje się natychmiast. Włączone zbieranie i tryb zmian okien są odtwarzane po starcie, także jeśli główne okno pozostaje schowane w zasobniku. Retencja jest stosowana przy starcie, zapisie ustawień i po ostrzeżeniu. Wyłączone powiadomienia nie ukrywają wyniku analizy na żądanie. W zasobniku można otworzyć aplikację, sprawdzić stan i historię, przejść do ustawień lub zakończyć proces. Nie ma jeszcze powiadomień systemowych ani autostartu przy logowaniu.
 
 Eksport/kopie nie nadpisują istniejących plików. Uszkodzona baza lub nieznana przyszła wersja schematu powodują błąd bez automatycznego resetu. Aby zmienić katalog danych: zamknij aplikację, wykonaj kopię i popraw `%LOCALAPPDATA%/SentinelAI/data-path.txt`. Zmiana lokalizacji z UI nie jest jeszcze dostępna.
 
@@ -92,6 +92,6 @@ Linux/Codex: `bash scripts/setup-cloud.sh` odtwarza oba rozwiązania w locked-mo
 
 Etap 3: IAIProvider, rzeczywista integracja lokalnego modelu lub serwera, walidacja odpowiedzi/fallback, import PDF/TXT/MD/DOCX, wyszukiwanie FTS5 i źródła RAG. Tabela FTS5 istnieje, ale import i wyszukiwanie nie są dostępne. Nie podawaj kluczy ani nie pobieraj modeli na potrzeby bieżącej wersji.
 
-Etapy 4–5: rozszerzenie przeglądarki, autostart opt-in, powiadomienia Windows, opcjonalne przechwytywanie okna, bezpieczne przechowywanie przyszłych sekretów, podpisywanie instalatora zaufanym certyfikatem i testy na natywnym Windows. Brak blokowania, usługi systemowej, serwera, ONNX/NPU i aplikacji mobilnych.
+Etap 3 i ograniczenia wariantów są opisane w [audytcie produktu](docs/PRODUCT-AUDIT-AND-PLAN.md). Etapy 4–5: rozszerzenie przeglądarki, autostart opt-in, powiadomienia Windows, bezpieczne przechowywanie przyszłych sekretów, podpisywanie instalatora zaufanym certyfikatem i testy na natywnym Windows. Brak blokowania, lokalnego/serwerowego AI/RAG, usługi serwerowej, synchronizacji klienta i aplikacji mobilnych.
 
 Architektura i punktacja: [ARCHITECTURE.md](ARCHITECTURE.md). Źródła wersji: [metadane .NET 10](https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json), [NuGet](https://api.nuget.org/v3/index.json). Wersje i hashe pakietów: `packages.lock.json`. Informacje o licencji PSL: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

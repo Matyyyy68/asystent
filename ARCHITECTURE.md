@@ -62,6 +62,8 @@ Asynchroniczne kontrakty nie zmieniają faktu, że SQLite ma synchroniczne I/O. 
 
 ## Następne granice modułów
 
+Wariant instalacji jest oddzielony od przełączalnych preferencji. `Sentinel.Core.Configuration` zawiera `InstalledProductProfile`, walidator, fakty systemu i deterministyczny recommender. `LocalStore` utrwala profil osobno od ustawień użytkownika i migruje bazę v1 do v2. `Sentinel.Desktop.WindowsSystemProbe` odczytuje lokalnie Windows Registry, `GlobalMemoryStatusEx`, `EnumDisplayDevices`, stan sieci i wolne miejsce; nie odczytuje plików ani danych przeglądarki. Brak wiarygodnych danych pozostaje `null`/`Unknown`. Nazwa GPU nie oznacza wsparcia modelu. Aktualnie rekomendowane są wyłącznie lokalne reguły i SQLite, ponieważ katalog kompatybilnych modeli jest pusty.
+
 Etap 3: `IAIProvider` (typowany wynik, timeout, walidacja, narzędzia niedostępne, fallback), `IKnowledgeBaseProvider` (import, limitowana ekstrakcja, FTS5, cytowania) i oddzielny interfejs embeddingów. Model nie powinien być jedynym źródłem oceny, a treść dokumentów nie może stać się instrukcjami. Lokalny model nie wymaga klucza ani pobrania bez zgody; serwer wymaga jawnego wskazania przesyłanych danych, TLS i uwierzytelnienia. ONNX/GPU/NPU dopiero po weryfikacji konkretnego modelu i runtime.
 
 Etap 4: obsługiwane rozszerzenie przeglądarki, jawny autostart, natywne powiadomienia, opcjonalne Windows Graphics Capture. Brak keyloggera, ukrytej usługi i automatycznego blokowania.

@@ -23,6 +23,8 @@ ManifestSupportedOS all
 Name "Sentinel AI"
 OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\Sentinel AI"
+InstType "Sentinel AI User"
+InstType "Enterprise Client · tylko analiza lokalna w tym wydaniu"
 BrandingText "Sentinel AI • ${APP_VERSION}"
 VIProductVersion "${APP_VERSION}.0"
 VIAddVersionKey /LANG=1045 "ProductName" "Sentinel AI"
@@ -33,17 +35,23 @@ VIAddVersionKey /LANG=1045 "LegalCopyright" "Sentinel AI"
 ShowInstDetails nevershow
 ShowUninstDetails nevershow
 Var AppMutex
+Var SelectedVariant
+Var ExistingVariant
+Var DeleteUserData
 
 !define MUI_ABORTWARNING
+!define MUI_BGCOLOR "F5F7FA"
+!define MUI_TEXTCOLOR "172033"
 !define MUI_ICON "${NSISDIR}/Contrib/Graphics/Icons/modern-install-blue-full.ico"
 !define MUI_UNICON "${NSISDIR}/Contrib/Graphics/Icons/modern-uninstall-blue-full.ico"
 !define MUI_WELCOMEPAGE_TITLE "Zainstaluj Sentinel AI"
-!define MUI_WELCOMEPAGE_TEXT "Ten kreator zainstaluje Sentinel AI na Twoim koncie Windows.$\r$\n$\r$\nProgram pomoże Ci oceniać podejrzane wiadomości, adresy i prośby. Działa lokalnie i zawiera wszystkie potrzebne składniki.$\r$\n$\r$\nZamknij Sentinel AI przed rozpoczęciem. Nie potrzebujesz konta administratora.$\r$\n$\r$\nKliknij Dalej, aby kontynuować."
+!define MUI_WELCOMEPAGE_TEXT "Ten kreator zainstaluje Sentinel AI na Twoim koncie Windows.$\r$\n$\r$\nProgram ocenia podejrzane wiadomości i adresy przy użyciu lokalnych reguł. Podstawowa analiza działa offline. Model AI i baza wiedzy nie są dostępne w tym wydaniu.$\r$\n$\r$\nZamknij Sentinel AI przed rozpoczęciem. Nie potrzebujesz konta administratora.$\r$\n$\r$\nKliknij Dalej, aby kontynuować."
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE ValidateProductVariant
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_TITLE "Sentinel AI jest gotowy do uruchomienia"
-!define MUI_FINISHPAGE_TEXT "Znajdziesz program w menu Start pod nazwą Sentinel AI.$\r$\n$\r$\nPrzy pierwszym uruchomieniu kliknij Rozpocznij, aby przyjąć zalecany folder danych. Analiza okien pozostanie wyłączona, dopóki jej samodzielnie nie włączysz."
+!define MUI_FINISHPAGE_TEXT "Znajdziesz program w menu Start pod nazwą Sentinel AI.$\r$\n$\r$\nPrzy pierwszym uruchomieniu sprawdź lokalną konfigurację komputera. Analiza okien pozostanie wyłączona, dopóki jej samodzielnie nie włączysz."
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchApplication
 !define MUI_FINISHPAGE_RUN_TEXT "Uruchom Sentinel AI"
@@ -51,7 +59,7 @@ Var AppMutex
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Otwórz krótką instrukcję"
 !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
 !insertmacro MUI_PAGE_FINISH
-!define MUI_UNCONFIRMPAGE_TEXT_TOP "Sentinel AI zostanie usunięty z tego konta Windows.$\r$\n$\r$\nTwoja historia i ustawienia pozostaną zachowane. Będzie można użyć ich po ponownej instalacji."
+!define MUI_UNCONFIRMPAGE_TEXT_TOP "Sentinel AI zostanie usunięty z tego konta Windows. W osobnym pytaniu możesz zdecydować, czy usunąć też bazę danych. Domyślnie historia i ustawienia zostają zachowane."
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_UNPAGE_FINISH
@@ -94,6 +102,19 @@ Function .onInit
  SetRegView 64
  ; Deliberately use a private, fixed application location even with /D.
  StrCpy $INSTDIR "$LOCALAPPDATA\Programs\Sentinel AI"
+ ReadRegStr $ExistingVariant HKCU "Software\SentinelAI" "ProductVariant"
+ ${If} $ExistingVariant == ""
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI" "DisplayName"
+  ${If} $0 != ""
+   ; Products installed before the variant marker are safely treated as User.
+   StrCpy $ExistingVariant "User"
+  ${EndIf}
+ ${EndIf}
+ ${If} $ExistingVariant == "EnterpriseClient"
+  SetCurInstType 1
+ ${Else}
+  SetCurInstType 0
+ ${EndIf}
  ${IfNot} ${RunningX64}
   MessageBox MB_OK|MB_ICONSTOP "Sentinel AI wymaga 64-bitowego Windows 10 lub Windows 11." /SD IDOK
   SetErrorLevel 3
@@ -112,10 +133,15 @@ Function .onGUIEnd
 FunctionEnd
 Function .onInstSuccess
  Call UnlockApplication
+ ${If} $SelectedVariant == "user"
+  WriteRegStr HKCU "Software\SentinelAI" "ProductVariant" "User"
+ ${Else}
+  WriteRegStr HKCU "Software\SentinelAI" "ProductVariant" "EnterpriseClient"
+ ${EndIf}
 FunctionEnd
 Function LaunchApplication
  Call UnlockApplication
- ExecShell "open" "$INSTDIR\app\Sentinel.Desktop.exe"
+ ExecShell "open" "$INSTDIR\app\Sentinel.Desktop.exe" "--sentinel-variant=$SelectedVariant"
 FunctionEnd
 
 Section "Sentinel AI (wymagane)" SEC_APP
@@ -150,17 +176,57 @@ Section "Sentinel AI (wymagane)" SEC_APP
  installDone:
 SectionEnd
 
+Section "Sentinel AI User" SEC_PROFILE_USER
+ SectionIn 1 RO
+ StrCpy $SelectedVariant "user"
+SectionEnd
+
+Section "Enterprise Client (brak parowania i synchronizacji w tym wydaniu)" SEC_PROFILE_ENTERPRISE
+ SectionIn 2 RO
+ StrCpy $SelectedVariant "enterprise-client"
+SectionEnd
+
 Section "Skrót na pulpicie" SEC_DESKTOP
  CreateShortCut "$DESKTOP\Sentinel AI.lnk" "$INSTDIR\app\Sentinel.Desktop.exe"
 SectionEnd
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_APP} "Program i wszystkie potrzebne składniki. Skróty pojawią się w menu Start."
+ !insertmacro MUI_DESCRIPTION_TEXT ${SEC_PROFILE_USER} "Wariant dla osoby prywatnej. Analiza regułowa działa lokalnie i offline."
+ !insertmacro MUI_DESCRIPTION_TEXT ${SEC_PROFILE_ENTERPRISE} "Zapisuje trwały znacznik wariantu Enterprise, ale klient nie synchronizuje się jeszcze z serwerem. Wybierz ten wariant wyłącznie do testów integracyjnych."
  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} "Dodaje ikonę Sentinel AI na Twoim pulpicie."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
+
+Function ValidateProductVariant
+ SectionGetFlags ${SEC_PROFILE_USER} $0
+ IntOp $0 $0 & ${SF_SELECTED}
+ ${If} $0 != 0
+  StrCpy $SelectedVariant "user"
+ ${Else}
+  StrCpy $SelectedVariant "enterprise-client"
+ ${EndIf}
+ ${If} $ExistingVariant != ""
+  ${If} $ExistingVariant == "User"
+   ${If} $SelectedVariant != "user"
+    MessageBox MB_OK|MB_ICONSTOP "Wariant instalacji jest zachowywany podczas aktualizacji. Zmiana User/Enterprise nie jest obsługiwana przez ponowną instalację." /SD IDOK
+    Abort
+   ${EndIf}
+  ${ElseIf} $SelectedVariant != "enterprise-client"
+   MessageBox MB_OK|MB_ICONSTOP "Wariant instalacji jest zachowywany podczas aktualizacji. Zmiana User/Enterprise nie jest obsługiwana przez ponowną instalację." /SD IDOK
+   Abort
+  ${EndIf}
+ ${EndIf}
+FunctionEnd
 
 Function un.onInit
  SetShellVarContext current
  SetRegView 64
+ StrCpy $DeleteUserData "0"
+ IfSilent unSkipDataQuestion
+ MessageBox MB_YESNO|MB_ICONQUESTION "Czy usunąć lokalną historię Sentinel AI i ustawienia? Inne pliki w wybranym folderze pozostaną nietknięte." /SD IDNO IDYES unRemoveData
+ Goto unSkipDataQuestion
+ unRemoveData:
+  StrCpy $DeleteUserData "1"
+ unSkipDataQuestion:
  Call un.LockApplication
 FunctionEnd
 Function un.onGUIEnd
@@ -180,6 +246,24 @@ Section "Uninstall"
  Delete "$SMPROGRAMS\Sentinel AI\Odinstaluj.lnk"
  RMDir "$SMPROGRAMS\Sentinel AI"
  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"
+ ${If} $DeleteUserData == "1"
+  ClearErrors
+  FileOpen $0 "$LOCALAPPDATA\SentinelAI\data-path.txt" r
+  IfErrors unKeepData
+  FileRead $0 $1
+  FileClose $0
+  ${If} $1 != ""
+   ; Delete only the known SQLite database and sidecars. Never recurse into the selected directory.
+   Delete "$1\sentinel.db"
+   Delete "$1\sentinel.db-wal"
+   Delete "$1\sentinel.db-shm"
+   RMDir "$1"
+   Delete "$LOCALAPPDATA\SentinelAI\data-path.txt"
+   DeleteRegKey HKCU "Software\SentinelAI"
+  ${EndIf}
+ ${EndIf}
+ unKeepData:
+ ; ProductVariant and LocalAppData data are retained for safe reinstalls.
  Delete "$INSTDIR\Odinstaluj.exe"
  RMDir "$INSTDIR"
 SectionEnd

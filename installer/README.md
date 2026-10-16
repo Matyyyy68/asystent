@@ -1,6 +1,6 @@
-# Instalator Sentinel AI 0.2.0
+# Instalator Sentinel AI User 0.2.0
 
-`artifacts/installer/SentinelAI-0.2.0-win-x64-Setup.exe` to samodzielny instalator x64 NSIS 3.11, z polskim kreatorem. Użytkownik uruchamia go dwuklikiem. Nie potrzebuje SDK, Python, NSIS ani połączenia z Internetem podczas instalacji.
+`artifacts/installer/SentinelAI-0.2.0-win-x64-Setup.exe` to samodzielny instalator x64 NSIS 3.11 z polskim kreatorem. Można wybrać User albo Enterprise Client. W tym wydaniu wariant Enterprise Client jest lokalnym trybem awaryjnym bez parowania i synchronizacji; UI sygnalizuje tę granicę. Nie ma instalacji Enterprise Server. Użytkownik uruchamia EXE dwuklikiem. Nie potrzebuje SDK, Python, NSIS ani połączenia z Internetem podczas instalacji.
 
 ## Zachowanie
 
@@ -10,7 +10,7 @@
 - Zawiera runtime .NET i Windows Desktop dla x64, SQLite oraz teksty licencyjne runtime.
 - Kreator pierwszego uruchomienia proponuje `%LOCALAPPDATA%\SentinelAI\Data`; dane użytkownika są poza katalogiem programu.
 - App i installer używają mutexu `Local\SentinelAI.Desktop`. Instalator wymaga zamknięcia programu; nie zabija procesu.
-- Ponowna instalacja odświeża pliki programu. Odinstalowanie usuwa wyłącznie pliki z manifestu pakietu, skróty i wpis rejestru. Nie wykonuje rekursywnego kasowania całego katalogu, nie usuwa prywatnych plików ani historii.
+- Ponowna instalacja odświeża pliki programu i domyślnie zachowuje wariant. Próba zmiany wariantu przy aktualizacji jest blokowana. Odinstalowanie domyślnie zachowuje historię; osobne pytanie pozwala jawnie usunąć wyłącznie `sentinel.db` i pliki SQLite sidecar ze wskazanego katalogu. Inne pliki nie są kasowane, a katalog jest usuwany tylko jeśli pozostaje pusty.
 - Wersja aplikacji i plik EXE mają metadane 0.2.0. Paczka zawiera sumę SHA-256 i manifest każdego pliku.
 - Nie ma autostartu, aktualizatora, dodatku przeglądarki ani zmian ustawień zabezpieczeń.
 
