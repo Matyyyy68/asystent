@@ -4,6 +4,10 @@
 
 Publiczna witryna jest pierwszym miejscem dla użytkownika produktu: objaśnia rzeczywiste funkcje, prywatność i sposób rozpoczęcia pracy. Link „Panel zespołu” prowadzi do istniejącego, uwierzytelnianego panelu administratora pod `/admin/`. To nie jest jeszcze portal samoobsługowy klientów — serwer nie obsługuje kont klienta, zgłoszeń serwisowych ani formularza kontaktowego. Oficjalny adres kontaktowy należy dodać, gdy zostanie ustalony. Witryna nie wysyła treści do zewnętrznych usług i nie używa zewnętrznych fontów, skryptów, analityki ani plików cookie.
 
+## Publikacja przez GitHub Pages
+
+Workflow `.github/workflows/pages.yml` buduje statyczną kopię witryny i dołącza aktualny instalator oraz sumę SHA-256, a następnie publikuje je przez GitHub Pages. Przy pierwszym uruchomieniu właściciel repozytorium musi jednorazowo wejść w **Settings → Pages → Build and deployment** i wybrać **GitHub Actions**. Standardowy token workflow może publikować witrynę, ale nie ma uprawnień administracyjnych wymaganych do utworzenia ustawień Pages. Kolejne zmiany na `main` wdrażają się automatycznie.
+
 Makiety interfejsu pokazują dane ilustracyjne i są oznaczone jako podgląd. Funkcje i twierdzenia na stronie odpowiadają aktualnej dokumentacji produktu; nie przedstawiają Sentinel AI jako certyfikowanego antywirusa ani nie obiecują wykrywania wszystkich zagrożeń. Link do instalatora wskazuje bieżący plik wersjonowany w repozytorium.
 
 ## Zasady projektu
