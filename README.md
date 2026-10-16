@@ -20,7 +20,7 @@ Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
 
 Repozytorium zawiera odrębny projekt ASP.NET Core w `server/`: SQLite, health/readiness, zaproszenia, unikalne tożsamości urządzeń, cztery role administratorów, grupy, wersjonowane dziedziczone polityki, minimalną idempotentną historię zdarzeń i endpoint konfiguracji agenta. Instrukcje i ograniczenia są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i etapy są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
 
-To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient nie pobiera jeszcze efektywnej polityki, nie wysyła historii offline i nie rejestruje się przez UI. Nie ma jeszcze panelu, ręcznej akceptacji urządzeń, rotacji poświadczeń, AI/RAG, instalatora/usługi Windows, backup/restore ani integracji klienta.
+Hostowany panel administratora jest dostępny pod `/admin/` przy uruchomionym API; zawiera dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta oraz audyt. Sekcje modeli AI, bazy wiedzy, diagnostyki, kopii i konfiguracji serwera informują o faktycznym braku odpowiedniego API i nie oferują fikcyjnych akcji. To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient nie pobiera jeszcze efektywnej polityki, nie wysyła historii offline i nie rejestruje się przez UI. Brakuje też ręcznej akceptacji urządzeń, rotacji poświadczeń oraz instalatora/usługi Windows.
 
 ## Uruchomienie deweloperskie na Windows
 

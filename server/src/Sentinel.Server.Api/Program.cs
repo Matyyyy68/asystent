@@ -7,7 +7,11 @@ using Sentinel.Server.Api;
 using Sentinel.Server.Core;
 using Sentinel.Server.Infrastructure;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
+});
 var configuredUrls = builder.Configuration["urls"] ?? builder.Configuration["ASPNETCORE_URLS"];
 if (string.IsNullOrWhiteSpace(configuredUrls))
     builder.WebHost.UseUrls("http://127.0.0.1:5080");
@@ -64,7 +68,11 @@ app.Use(async (context, next) =>
         ? parsed.ToString("D") : Guid.NewGuid().ToString("D");
     context.Response.Headers["X-Correlation-ID"] = correlationId;
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
     if (context.Request.Path.StartsWithSegments("/api/v1/admin/auth")) context.Response.Headers.CacheControl = "no-store";
+    if (context.Request.Path.StartsWithSegments("/admin")) context.Response.Headers.CacheControl = "no-store";
     await next();
 });
 app.UseRateLimiter();
@@ -74,6 +82,14 @@ app.MapGet("/readyz", async (IServerStore repository, CancellationToken ct) =>
     await repository.CheckReadyAsync(ct)
         ? Results.Ok(new { status = "ready", apiVersion = "v1" })
         : Results.Problem(title: "Magazyn danych niedostępny", statusCode: StatusCodes.Status503ServiceUnavailable));
+var adminUiRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot", "admin");
+app.MapGet("/admin", () => Results.File(Path.Combine(adminUiRoot, "index.html"), "text/html; charset=utf-8"));
+app.MapGet("/admin/{asset}", (string asset) => asset switch
+{
+    "app.css" => Results.File(Path.Combine(adminUiRoot, "app.css"), "text/css; charset=utf-8"),
+    "app.js" => Results.File(Path.Combine(adminUiRoot, "app.js"), "text/javascript; charset=utf-8"),
+    _ => Results.NotFound()
+});
 
 var admin = app.MapGroup("/api/v1/admin");
 app.MapPost("/api/v1/admin/auth/login", async (AdminLoginBody body, HttpContext http, IServerStore repository, AdminPasswordHasher hasher, CancellationToken ct) =>
@@ -133,6 +149,11 @@ allAdmins.MapGet("/devices/{id}/policy", async (string id, IServerStore reposito
 {
     var effective = await repository.GetEffectivePolicyAsync(id, ct);
     return effective is null ? Results.NotFound() : Results.Ok(effective);
+});
+allAdmins.MapGet("/devices/{id}/policy/override", async (string id, IServerStore repository, CancellationToken ct) =>
+{
+    var policy = await repository.ReadDevicePolicyAsync(id, ct);
+    return policy is null ? Results.NotFound() : Results.Ok(policy);
 });
 allAdmins.MapGet("/groups/{id}/policy", async (string id, IServerStore repository, CancellationToken ct) =>
 {

@@ -21,7 +21,7 @@ flowchart LR
     API[Sentinel.Server.Api / REST v1]
     SCore[Sentinel.Server.Core / kontrakty domeny]
     Infra[Sentinel.Server.Infrastructure / SQLite]
-    Admin[Planowany hostowany panel administracyjny]
+    Admin[Hostowany panel administracyjny]
     AI[Planowany IServerAIProvider / Ollama]
     KB[Planowana baza wiedzy RAG]
     API --> SCore --> Infra
@@ -57,7 +57,7 @@ W produkcji trzeba uruchamiać usługę pod dedykowanym kontem o minimalnych upr
 2. **Etap B1 — fundament API i urządzeń (zaimplementowany):** host API, SQLite serwera, health/readiness, zaproszenia ograniczone limitem i czasem, rejestracja z unikalnym poświadczeniem, lista/odwołanie urządzeń, uwierzytelniony heartbeat oraz testy trwałości i unieważniania.
 3. **Etap B2a — tożsamość administracyjna (zaimplementowany):** bootstrap administratora, PBKDF2, sesje, cztery role, limit logowania, unieważnianie sesji i audyt.
 4. **Etap B2b — flota, polityki i historia zdarzeń (częściowo zaimplementowany):** zarządzane grupy, przypisywanie urządzeń, polityki globalne/grupowe/urządzeń, dziedziczenie, wersjonowanie, walidacja i audyt są zaimplementowane. Uwierzytelniony endpoint agenta zwraca efektywną konfigurację. API przyjmuje minimalne, idempotentne metadane zdarzeń, pozwala zmieniać status incydentu i usuwa stare dane zgodnie z retencją. Pozostają: bezpieczne zatwierdzanie urządzeń w trybie ręcznym oraz synchronizacja kolejki zdarzeń z klienta i stosowanie pobranej konfiguracji.
-5. **Etap C — panel:** hostowany panel operacyjny z ochroną żądań przeglądarkowych; wyświetla tylko rzeczywisty stan z API.
+5. **Etap C — panel (częściowo zaimplementowany):** hostowany panel operacyjny z ochroną żądań przeglądarkowych; dostępne są dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta i audyt. Wyświetla tylko rzeczywisty stan z API. Brakuje backendu dla modeli AI, bazy wiedzy, kopii i administracji serwerem.
 6. **Etap D — klient-serwer:** klient rejestruje się zaproszeniem, chroni poświadczenia w Windows Credential Manager/DPAPI, pobiera walidowaną politykę, synchronizuje ograniczoną kolejkę z retry/backoff/jitter i działa lokalnie offline.
 7. **Etap E — UX klienta:** tray, jednoznaczny stan modułów, opt-in autostart, ciche domyślne zachowanie, ograniczone i deduplikowane powiadomienia.
 8. **Etap F — AI i wiedza:** `IServerAIProvider`, rzeczywiste testy Ollama, limity zasobów i timeouty; odseparowany import, walidacja typów/rozmiaru, wersjonowanie i wyszukiwanie RAG z cytowaniami. Niedostępny model nie zatrzymuje ochrony regułowej.
@@ -65,7 +65,7 @@ W produkcji trzeba uruchamiać usługę pod dedykowanym kontem o minimalnych upr
 
 ## Bieżący zakres i uruchomienie
 
-Ten etap dostarcza audyt A, fundament B1, tożsamość B2a oraz część B2b, a nie całą architekturę docelową. Działają indywidualne konta administratorów, cztery role, sesje, bootstrap, limit logowania, audyt operacji, rejestracja, odwołanie zaproszeń/urządzeń, heartbeat, status online obliczany jako komunikacja w ostatnich dwóch minutach, health/readiness, trwała baza SQLite oraz API zarządzania grupami, politykami i historią zdarzeń. Polityka jest częściowa, dziedziczona w kolejności urządzenie → grupa → globalnie → bezpieczne wartości domyślne, wersjonowana, walidowana i audytowana; uwierzytelniony endpoint agenta udostępnia jej efektywną wersję. Włączenie trybu serwerowego/hybrydowego lub wysyłania kontekstu wymaga osobnego potwierdzenia administratora systemu. Historia przyjmuje tylko identyfikator reguły i kategorię/ryzyko, ma idempotencję i domyślną retencję 90 dni. Nie ma jeszcze panelu administracyjnego ani klienta stosującego pobraną politykę i synchronizującego kolejkę zdarzeń, a ręczna akceptacja urządzeń, AI/RAG, instalator usługi, backup/restore i rotacja poświadczeń urządzeń pozostają do implementacji.
+Ten etap dostarcza audyt A, fundament B1, tożsamość B2a, część B2b oraz ograniczony hostowany panel administracyjny. Działają indywidualne konta administratorów, cztery role, sesje, bootstrap, limit logowania, audyt operacji, rejestracja, odwołanie zaproszeń/urządzeń, heartbeat, status online obliczany jako komunikacja w ostatnich dwóch minutach, health/readiness, trwała baza SQLite oraz API zarządzania grupami, politykami i historią zdarzeń. Polityka jest częściowa, dziedziczona w kolejności urządzenie → grupa → globalnie → bezpieczne wartości domyślne, wersjonowana, walidowana i audytowana; uwierzytelniony endpoint agenta udostępnia jej efektywną wersję. Włączenie trybu serwerowego/hybrydowego lub wysyłania kontekstu wymaga osobnego potwierdzenia administratora systemu. Historia przyjmuje tylko identyfikator reguły i kategorię/ryzyko, ma idempotencję i domyślną retencję 90 dni. Panel udostępnia dashboard, urządzenia, grupy/zaproszenia, polityki, zdarzenia, konta i audyt. Klient nie stosuje jeszcze pobranej polityki ani nie synchronizuje kolejki zdarzeń; ręczna akceptacja urządzeń, AI/RAG, instalator usługi, backup/restore i rotacja poświadczeń urządzeń pozostają do implementacji.
 
 Uruchomienie lokalne (domyślnie loopback):
 

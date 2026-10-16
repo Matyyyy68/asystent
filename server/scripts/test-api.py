@@ -58,6 +58,14 @@ try:
         raise TimeoutError("Server did not become ready")
 
     assert request("/healthz")["status"] == "healthy"
+    with urllib.request.urlopen(address + "/admin/", timeout=3) as response:
+        page = response.read().decode("utf-8")
+        assert response.status == 200 and "Panel administracyjny" in page
+        assert response.headers.get("Content-Security-Policy", "").find("script-src 'self'") >= 0
+        assert response.headers.get("X-Frame-Options") == "DENY"
+    for asset, expected_marker in (("app.css", "--orange"), ("app.js", "sectionTitles")):
+        with urllib.request.urlopen(address + "/admin/" + asset, timeout=3) as response:
+            assert response.status == 200 and expected_marker.encode() in response.read()
     request("/api/v1/admin/devices", expected=401)
     request("/api/v1/admin/auth/login", "POST", {"username": "it-admin", "password": "incorrect-password"}, expected=401)
     system_session = request("/api/v1/admin/auth/login", "POST", {"username": "it-admin", "password": admin_password})["accessToken"]

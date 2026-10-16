@@ -22,12 +22,27 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
     public ObservableCollection<SecurityEvent> Events { get; } = [];
+    public ObservableCollection<SecurityEvent> RecentEvents { get; } = [];
     private string message = "";
     public string Message { get => message; private set { message = value; Changed(); } }
     private int retentionDays = 30;
     public int RetentionDays { get => retentionDays; set { retentionDays = value; Changed(); } }
     private bool notifications = true;
     public bool Notifications { get => notifications; set { notifications = value; Changed(); } }
+    private string theme = "System";
+    public string Theme { get => theme; set { theme = value; Changed(); } }
+    private bool startMinimized;
+    public bool StartMinimized { get => startMinimized; set { startMinimized = value; Changed(); } }
+    private int selectedTabIndex;
+    public int SelectedTabIndex { get => selectedTabIndex; set { selectedTabIndex = value; Changed(); } }
+    private string eventCount = "Brak danych";
+    public string EventCount { get => eventCount; private set { eventCount = value; Changed(); } }
+    private string threatCount = "Brak danych";
+    public string ThreatCount { get => threatCount; private set { threatCount = value; Changed(); } }
+    private string lastWarning = "Brak danych";
+    public string LastWarning { get => lastWarning; private set { lastWarning = value; Changed(); } }
+    public string VersionText => $"Wersja {typeof(MainViewModel).Assembly.GetName().Version?.ToString(3) ?? "—"}";
+    public event Action<string>? ThemeChanged;
     public SecurityEvent? SelectedEvent { get; set; }
     public string DataPath => store.DatabasePath;
     public MonitoringViewModel Monitoring { get; }
@@ -38,11 +53,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public ICommand Clear { get; }
     public ICommand Export { get; }
     public ICommand Backup { get; }
+    public ICommand OpenHistory { get; }
+    public ICommand OpenSettings { get; }
     private AsyncCommand Command(Func<Task> action) => new(action, ex => Message = $"Operacja nie powiodła się ({ex.GetType().Name}). Dane nie zostały wysłane.");
     public MainViewModel(LocalStore store, MonitoringViewModel monitoring)
     {
         this.store = store; Monitoring = monitoring; Monitoring.HistoryChanged = Reload;
-        Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications }); await store.SaveSettingsAsync(settings); Monitoring.ApplySettings(settings); await store.ApplyRetentionAsync(RetentionDays); await Reload(); Message = "Ustawienia zapisane; retencja zastosowana."; });
+        Save = Command(async () => { var settings = Monitoring.CreateSettings((await store.LoadSettingsAsync()) with { RetentionDays = RetentionDays, Notifications = Notifications, Theme = Theme, StartMinimized = StartMinimized }); await store.SaveSettingsAsync(settings); Monitoring.ApplySettings(settings); await store.ApplyRetentionAsync(RetentionDays); await Reload(); ThemeChanged?.Invoke(Theme); Message = "Ustawienia zapisane; retencja zastosowana."; });
         Refresh = Command(Reload);
         TestNotification = Command(async () =>
         {
@@ -53,7 +70,17 @@ public sealed class MainViewModel : INotifyPropertyChanged
         Clear = Command(async () => { if (System.Windows.MessageBox.Show("Usunąć całą historię?", "Sentinel AI", System.Windows.MessageBoxButton.YesNo) != System.Windows.MessageBoxResult.Yes) return; await store.DeleteHistoryAsync(); await Reload(); Message = "Historia usunięta."; });
         Export = Command(async () => { var d = new Microsoft.Win32.SaveFileDialog { Filter = "JSON|*.json", FileName = "sentinel-events.json", OverwritePrompt = true }; if (d.ShowDialog() == true) { if (System.IO.File.Exists(d.FileName)) { Message = "Wybierz nową nazwę pliku eksportu."; return; } await store.ExportAsync(d.FileName); Message = "Eksport zakończony."; } });
         Backup = Command(async () => { var d = new Microsoft.Win32.SaveFileDialog { Filter = "SQLite|*.db", FileName = "sentinel-backup.db" }; if (d.ShowDialog() == true) { await store.BackupAsync(d.FileName); Message = "Kopia bazy utworzona."; } });
+        OpenHistory = Command(() => { SelectedTabIndex = 2; return Task.CompletedTask; });
+        OpenSettings = Command(() => { SelectedTabIndex = 3; return Task.CompletedTask; });
     }
-    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); }
-    private async Task Reload() { var rows = await store.ReadAsync(); Events.Clear(); foreach (var row in rows) Events.Add(row); }
+    public async Task InitializeAsync() { var s = await store.LoadSettingsAsync(); Monitoring.ApplySettings(s, false); RetentionDays = s.RetentionDays; Notifications = s.Notifications; Theme = s.Theme; StartMinimized = s.StartMinimized; await store.ApplyRetentionAsync(s.RetentionDays); await Reload(); }
+    private async Task Reload()
+    {
+        var rows = await store.ReadAsync(); Events.Clear(); RecentEvents.Clear();
+        foreach (var row in rows) Events.Add(row);
+        foreach (var row in rows.Take(3)) RecentEvents.Add(row);
+        EventCount = Events.Count == 0 ? "0" : Events.Count.ToString(System.Globalization.CultureInfo.CurrentCulture);
+        ThreatCount = Events.Count(e => e.Risk >= RiskLevel.High).ToString(System.Globalization.CultureInfo.CurrentCulture);
+        LastWarning = Events.FirstOrDefault(e => e.Risk >= RiskLevel.High)?.Timestamp.ToLocalTime().ToString("g") ?? "Brak ostrzeżeń";
+    }
 }

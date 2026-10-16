@@ -29,7 +29,12 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
     private string details = "Nie wykonano analizy. Wyniki reguł nie gwarantują bezpieczeństwa.";
     public string Details { get => details; private set { details = value; Changed(); } }
     public bool Paused => applied.Paused;
-    public string ProtectionStatus => Paused ? "Pauza — kontekst nie jest zbierany" : autoActive ? "Aktywne: analiza przy zmianie okna (UI Automation)" : "Aktywne: analiza wyłącznie na żądanie (UI Automation)";
+    public string ProtectionStatus => Paused ? "Analiza wstrzymana" : autoActive ? "Analiza automatyczna aktywna" : "Analiza dostępna na żądanie";
+    public string ProtectionDescription => Paused
+        ? "Analiza lokalna jest wstrzymana. Włącz ją, aby sprawdzić aktywne okno; możesz też wkleić treść do analizy ręcznej."
+        : autoActive
+            ? "Analiza lokalna działa przy zmianie aktywnego okna. Sprawdza dostępne etykiety, pomijając pola edycyjne i hasła. Nie zastępuje ochrony antywirusowej."
+            : "Analiza lokalna jest dostępna na żądanie. Automatyczna analiza zmiany aktywnego okna jest wyłączona. Nie jest to stała ochrona antywirusowa.";
     public string PauseLabel => Paused ? "Włącz analizę okien" : "Wstrzymaj zbieranie";
     private int interval = 10;
     public int MinimumIntervalSeconds { get => interval; set { interval = value; Changed(); } }
@@ -106,12 +111,12 @@ public sealed class MonitoringViewModel : INotifyPropertyChanged, IDisposable
             try { events.Start(); autoActive = true; }
             catch (System.ComponentModel.Win32Exception) { Message = "Nie udało się włączyć zdarzeń Windows; dostępna pozostaje analiza na żądanie."; }
         }
-        Changed(nameof(Paused)); Changed(nameof(ProtectionStatus)); Changed(nameof(PauseLabel));
+        Changed(nameof(Paused)); Changed(nameof(ProtectionStatus)); Changed(nameof(ProtectionDescription)); Changed(nameof(PauseLabel));
     }
     private void ForegroundChanged(object? sender, EventArgs e)
     {
-        if (Application.Current.Dispatcher.HasShutdownStarted || Interlocked.Exchange(ref eventPending, 1) != 0) return;
-        Application.Current.Dispatcher.BeginInvoke(async () =>
+        if (System.Windows.Application.Current.Dispatcher.HasShutdownStarted || Interlocked.Exchange(ref eventPending, 1) != 0) return;
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(async () =>
         {
             try { if (!Paused && autoActive) await CaptureAsync(false); }
             catch (Exception ex) { ReportError(ex); }

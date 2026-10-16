@@ -23,6 +23,8 @@ Wrażliwa polityka włączająca tryb `server`/`hybrid` lub `includeContext` wym
 
 ## API v1
 
+Panel działa pod `http://127.0.0.1:5080/admin/` i jest hostowany przez ten sam proces API. Zawiera dashboard, urządzenia i grupy, zaproszenia, polityki, zdarzenia, konta administratorów i audyt. Widoczne działania odpowiadają roli. Token logowania pozostaje wyłącznie w pamięci karty; po odświeżeniu wymagane jest ponowne logowanie. Dostęp sieciowy wymaga HTTPS. Panel nie udaje, że AI, baza wiedzy, kopie lub aktualizacje działają, bo backend nie udostępnia jeszcze tych funkcji.
+
 - `GET /healthz` — proces działa.
 - `GET /readyz` — serwer może otworzyć bazę.
 - `POST /api/v1/admin/invitations` — tworzy jednorazowo ujawniony losowy kod rejestracji. JSON: `{ "group": "Testowe", "expiresAt": "<ISO-8601 UTC>", "maximumRegistrations": 1 }`. Maksymalna ważność to 30 dni, limit użyć 1–1000.
@@ -31,6 +33,7 @@ Wrażliwa polityka włączająca tryb `server`/`hybrid` lub `includeContext` wym
 - `GET /api/v1/admin/groups`, `POST /api/v1/admin/groups` — lista i tworzenie grup. Zaproszenie może wskazywać wyłącznie istniejącą grupę.
 - `PUT /api/v1/admin/devices/{id}/group` — przypisuje urządzenie do istniejącej grupy.
 - `GET/PUT /api/v1/admin/policies/global`, `GET/PUT /api/v1/admin/groups/{id}/policy`, `PUT /api/v1/admin/devices/{id}/policy` — czytanie i wersjonowane ustawianie polityk. `GET /api/v1/admin/devices/{id}/policy` zwraca efektywną politykę, wersje i źródła pól.
+- `GET /api/v1/admin/devices/{id}/policy/override` — dokument nadpisania polityki urządzenia i jego wersja do edycji w panelu.
 - `DELETE /api/v1/admin/devices/{id}` — odcina i unieważnia tożsamość urządzenia (Administrator systemu/bezpieczeństwa).
 - `GET /api/v1/admin/users`, `POST /api/v1/admin/users`, `PUT /api/v1/admin/users/{id}/disabled`, `PUT /api/v1/admin/users/{id}/role` — zarządzanie kontami (Administrator systemu).
 - `GET /api/v1/admin/audit?limit=100` — ostatnie wpisy dziennika (Administrator systemu/bezpieczeństwa).

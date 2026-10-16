@@ -4,4 +4,7 @@
     <ProjectReference Include="../Sentinel.Server.Core/Sentinel.Server.Core.csproj" />
     <ProjectReference Include="../Sentinel.Server.Infrastructure/Sentinel.Server.Infrastructure.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

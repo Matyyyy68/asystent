@@ -57,6 +57,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (s.MinimumIntervalSeconds is < 3 or > 300) throw new ArgumentOutOfRangeException(nameof(s), "Odstęp: 3–300 sekund.");
         if (s.ExcludedApplications is null || s.ExcludedWindowTitles is null || s.ExcludedApplications.Length > 2000 || s.ExcludedWindowTitles.Length > 2000)
             throw new ArgumentException("Nieprawidłowa lista wykluczeń.");
+        if (s.Theme is not ("System" or "Light" or "Dark")) throw new ArgumentException("Nieprawidłowy motyw.");
     }
     public async Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {

@@ -11,7 +11,9 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     bool ExcludeBrowsers = false,
     bool ExcludeMessaging = false,
     bool CollectStaticText = true,
-    bool MonitorForegroundChanges = false);
+    bool MonitorForegroundChanges = false,
+    string Theme = "System",
+    bool StartMinimized = false);
 public interface IEventRepository
 {
     Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);
