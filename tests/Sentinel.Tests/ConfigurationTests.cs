@@ -28,6 +28,18 @@ public sealed class ConfigurationTests : IDisposable
     }
 
     [Fact]
+    public async Task EnterpriseServerCanBeConfiguredWithoutChangingInstalledVariant()
+    {
+        var store = new LocalStore(directory);
+        await store.InitializeAsync(new InstalledProductProfile(ProductVariant.EnterpriseClient));
+        await store.UpdateEnterpriseServerAsync("https://sentinel.example");
+        var profile = await store.GetInstallationProfileAsync();
+        Assert.Equal(ProductVariant.EnterpriseClient, profile.Variant);
+        Assert.Equal("https://sentinel.example", profile.EnterpriseServerUri);
+        await Assert.ThrowsAsync<ArgumentException>(() => store.UpdateEnterpriseServerAsync("http://sentinel.example"));
+    }
+
+    [Fact]
     public async Task VersionOneDatabaseMigratesWithoutLosingSettingsOrHistory()
     {
         var store = new LocalStore(directory);
@@ -83,13 +95,14 @@ public sealed class ConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void EnterpriseRecommendationDoesNotClaimSynchronizationExists()
+    public void EnterpriseRecommendationSeparatesAvailablePairingFromMissingPolicyEnforcement()
     {
         var system = new SystemSnapshot("Windows", null, "X64", null, null, null, null, null, null,
             NpuAvailability.Unknown, null, [], true, true);
         var recommendation = new ConfigurationRecommendationEngine().Recommend(system, ProductVariant.EnterpriseClient);
-        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("synchronizacji polityk", StringComparison.Ordinal));
-        Assert.Contains(recommendation.Notices, item => item.Contains("nie może jeszcze połączyć", StringComparison.Ordinal));
+        Assert.Contains(recommendation.AvailableModules, item => item.Contains("Parowanie z serwerem Enterprise", StringComparison.Ordinal));
+        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("Egzekwowanie pobranych polityk", StringComparison.Ordinal));
+        Assert.Contains(recommendation.Notices, item => item.Contains("nie jest jeszcze egzekwowana", StringComparison.Ordinal));
     }
 
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }

@@ -47,10 +47,15 @@ public partial class App : System.Windows.Application
             var store = new LocalStore(directory); await store.InitializeAsync(requestedProfile);
             var knowledge = new LocalKnowledgeBase(directory); await knowledge.InitializeAsync();
             var ai = new OllamaLocalProvider(new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan });
+            var enterpriseHttp = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(15) };
             await File.WriteAllTextAsync(pointer, directory);
             services = new ServiceCollection().AddSingleton(store).AddSingleton<IEventRepository>(store)
                 .AddSingleton(knowledge).AddSingleton<IKnowledgeBaseProvider>(knowledge).AddSingleton<KnowledgeViewModel>()
                 .AddSingleton<IAIProvider>(ai).AddSingleton<AnalysisOrchestrator>()
+                .AddSingleton(enterpriseHttp)
+                .AddSingleton<Sentinel.Core.Enterprise.EnterpriseAgentClient>()
+                .AddSingleton<Sentinel.Core.Enterprise.IDeviceCredentialStore, WindowsDeviceCredentialStore>()
+                .AddSingleton<EnterpriseViewModel>()
                 .AddSingleton<ISettingsRepository>(store)
                 .AddSingleton<WindowsContextProvider>()
                 .AddSingleton<IContextProvider>(s => s.GetRequiredService<WindowsContextProvider>())

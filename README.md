@@ -4,13 +4,13 @@ Lokalny klient bezpieczeństwa dla Windows 10/11 x64, .NET 10 LTS, WPF i MVVM. *
 
 ## Sentinel AI User — instalator dla użytkownika
 
-Plik: `artifacts/installer/SentinelAI-0.3.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client w tym buildzie zachowuje lokalne reguły, ale jawnie pokazuje brak parowania i synchronizacji; instalator nie instaluje Enterprise Server. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
+Plik: `artifacts/installer/SentinelAI-0.4.0-win-x64-Setup.exe`. Kreator pozwala wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS i ręcznie wysyła minimalne metadane; lokalne reguły działają offline. Pobrane polityki nie są jeszcze egzekwowane, a instalator nie instaluje Enterprise Server. Wersje wszystkich aplikacji są utrzymywane centralnie w `eng/ProductVersion.props`; szczegóły: [VERSIONING.md](VERSIONING.md).
 
 1. Otwórz instalator dwuklikiem i przejdź przez polski kreator.
 2. Po instalacji uruchom Sentinel AI z menu Start lub pulpitu.
 3. Przy pierwszym starcie kliknij **Rozpocznij**, aby użyć zalecanego prywatnego folderu danych. Możesz też wybrać inny folder.
 
-Instalator zawiera .NET; nie wymaga administratora, dodatkowych pobrań ani komend. Instaluje program dla bieżącego użytkownika. Odinstalowanie z ustawień Windows zachowuje historię i ustawienia. Krótka instrukcja jest dostępna w menu Start → Sentinel AI → Pomoc oraz w `artifacts/installer/Pierwsze-kroki.html`.
+Instalator zawiera .NET; nie wymaga administratora, dodatkowych pobrań ani komend. Instaluje program dla bieżącego użytkownika. Odinstalowanie domyślnie zachowuje historię i ustawienia, a poświadczenie Enterprise usuwa zawsze. Krótka instrukcja jest dostępna w menu Start → Sentinel AI → Pomoc oraz w `artifacts/installer/Pierwsze-kroki.html`.
 
 Bieżący EXE nie jest podpisany zaufanym certyfikatem wydawcy. Windows może wyświetlić ostrzeżenie o nieznanym wydawcy. Nie dodano wyłączania zabezpieczeń ani wyjątków antywirusa.
 
@@ -20,7 +20,7 @@ Szczegóły budowania i walidacji: [installer/README.md](installer/README.md).
 
 Repozytorium zawiera odrębny projekt ASP.NET Core w `server/`: SQLite, health/readiness, zaproszenia, unikalne tożsamości urządzeń, cztery role administratorów, grupy, wersjonowane dziedziczone polityki, minimalną idempotentną historię zdarzeń i endpoint konfiguracji agenta. Instrukcje i ograniczenia są w [server/README.md](server/README.md); audyt, diagram, granice prywatności, decyzje bezpieczeństwa i etapy są w [server/ARCHITECTURE.md](server/ARCHITECTURE.md).
 
-Hostowany panel administratora jest dostępny pod `/admin/` przy uruchomionym API; zawiera dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta, audyt, import/wyszukiwanie FTS5 oraz konfigurację i test lokalnego modelu Ollama serwera. Endpoint analizy agenta wymaga jawnej polityki `includeContext`, `aiProvider=ollama` i potwierdzenia klienta; serwer nie zapisuje treści. Diagnostyka wdrożenia, kopie/odtworzenie całej bazy i konfiguracja usług pozostają do wykonania. To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient nie pobiera jeszcze efektywnej polityki, nie wysyła kolejki offline i nie rejestruje się przez UI. Brakuje ręcznej akceptacji urządzeń, rotacji poświadczeń oraz instalatora/usługi Windows.
+Hostowany panel administratora jest dostępny pod `/admin/` przy uruchomionym API; zawiera dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta, audyt, import/wyszukiwanie FTS5 oraz konfigurację i test lokalnego modelu Ollama serwera. Endpoint analizy agenta wymaga jawnej polityki `includeContext`, `aiProvider=ollama` i potwierdzenia klienta; serwer nie zapisuje treści. Diagnostyka wdrożenia, kopie/odtworzenie całej bazy i konfiguracja usług pozostają do wykonania. To nadal nie jest gotowy serwer produkcyjny ani kompletne wdrożenie klient-serwer. Klient może pobrać efektywną politykę i ręcznie wysłać kolejkę metadanych, ale nie egzekwuje polityki ani nie synchronizuje się automatycznie. Brakuje ręcznej akceptacji urządzeń, rotacji poświadczeń oraz instalatora/usługi Windows.
 
 ## Uruchomienie deweloperskie na Windows
 

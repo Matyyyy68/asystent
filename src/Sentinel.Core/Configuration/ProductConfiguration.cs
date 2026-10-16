@@ -97,8 +97,10 @@ public sealed class ConfigurationRecommendationEngine
             notices.Add("Wykryto lokalnie inne składniki ochrony. Sentinel AI ich nie wyłączy ani nie zmieni ich ustawień.");
         if (variant == ProductVariant.EnterpriseClient)
         {
-            unavailable.Add("Zarządzanie Enterprise — klient nie ma jeszcze synchronizacji polityk, rejestracji ani kolejki zdarzeń.");
-            notices.Add("Wariant Enterprise Client nie może jeszcze połączyć się z serwerem w tym wydaniu.");
+            available.Add("Parowanie z serwerem Enterprise przez HTTPS i chronione poświadczenie Windows");
+            available.Add("Ręczne wysyłanie ograniczonych metadanych zdarzeń i heartbeat");
+            unavailable.Add("Egzekwowanie pobranych polityk, automatyczna synchronizacja w tle, zatwierdzanie urządzeń i rotacja poświadczeń");
+            notices.Add("Połączenie Enterprise jest dostępne ręcznie; pobrana polityka nie jest jeszcze egzekwowana przez klienta.");
             if (system.NetworkAvailable == false) notices.Add("Nie wykryto połączenia sieciowego. Lokalna analiza reguł nadal działa offline.");
         }
         return new(variant, available, unavailable, "Lokalne reguły + opcjonalny Ollama loopback", false,

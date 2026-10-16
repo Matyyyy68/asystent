@@ -25,7 +25,7 @@
    <TextBlock x:Name="DirectoryLabel" TextWrapping="Wrap" Margin="4,12"/>
    <Button Content="Wybierz inny folder…" Click="ChooseDirectory" HorizontalAlignment="Left"/>
   </StackPanel></Border>
-  <TextBlock Text="Aktywne są lokalne reguły i historia. Analiza okien pozostanie wyłączona, dopóki samodzielnie jej nie włączysz. Wklejoną wiadomość lub adres możesz sprawdzić od razu. Model AI i baza wiedzy nie są dostępne w tej wersji." TextWrapping="Wrap" Margin="4,12"/>
+  <TextBlock Text="Aktywne są lokalne reguły i historia. Analiza okien pozostanie wyłączona, dopóki samodzielnie jej nie włączysz. Wklejoną wiadomość lub adres możesz sprawdzić od razu. W ustawieniach możesz dodać materiały bezpieczeństwa oraz opcjonalnie podłączyć lokalny model Ollama." TextWrapping="Wrap" Margin="4,12"/>
   <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
    <Button Content="Anuluj" IsCancel="True"/>
    <Button Content="Rozpocznij" IsDefault="True" Click="Continue" FontWeight="SemiBold"/>

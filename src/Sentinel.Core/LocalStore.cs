@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using System.Globalization;
 using System.Text.Json;
 using Sentinel.Core.Configuration;
+using Sentinel.Core.Enterprise;
 namespace Sentinel.Core;
 public sealed class LocalStore : IEventRepository, ISettingsRepository
 {
@@ -33,7 +34,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 2) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 3) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -41,8 +42,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
               category TEXT NOT NULL, application TEXT NOT NULL, explanation TEXT NOT NULL, recommendation TEXT NOT NULL, status INTEGER NOT NULL);
             CREATE VIRTUAL TABLE IF NOT EXISTS knowledge USING fts5(source UNINDEXED, content);
             CREATE TABLE IF NOT EXISTS installation_profile(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS enterprise_event_queue(event_id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL,
+              category TEXT NOT NULL, risk_level INTEGER NOT NULL, rule_code TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0);
             INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
-            PRAGMA user_version=2;
+            PRAGMA user_version=3;
             COMMIT;
             """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
         // Prove the database can be closed and reopened before declaring readiness.
@@ -54,6 +57,18 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var json = await cmd.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("Brak profilu instalacji.");
         var profile = JsonSerializer.Deserialize<InstalledProductProfile>(json) ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
         try { return profile.Validate(); } catch (ArgumentException ex) { throw new InvalidDataException("Nieprawidłowy profil instalacji.", ex); }
+    }
+    public async Task UpdateEnterpriseServerAsync(string serverAddress, CancellationToken ct = default)
+    {
+        var server = new InstalledProductProfile(ProductVariant.EnterpriseClient, serverAddress).Validate();
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var read = c.CreateCommand(); read.Transaction = transaction; read.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+        var currentJson = await read.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("Brak profilu instalacji.");
+        var current = JsonSerializer.Deserialize<InstalledProductProfile>(currentJson) ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
+        if (current.Variant != ProductVariant.EnterpriseClient) throw new InvalidOperationException("Adres Enterprise jest dostępny tylko dla wariantu Enterprise Client.");
+        using var write = c.CreateCommand(); write.Transaction = transaction; write.CommandText = "UPDATE installation_profile SET json=$json WHERE id=1";
+        write.Parameters.AddWithValue("$json", JsonSerializer.Serialize(current with { EnterpriseServerUri = server.EnterpriseServerUri }));
+        await write.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
     }
     public async Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default)
     {
@@ -90,7 +105,44 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await Execute(c, "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status) VALUES($t,$r,$c,$a,$e,$n,$s)", cancellationToken,
             ("$t", item.Timestamp.ToUniversalTime().ToString("O")), ("$r", (int)item.Risk), ("$c", item.Category), ("$a", item.Application),
             ("$e", item.Explanation), ("$n", item.Recommendation), ("$s", (int)item.Status));
-        using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT last_insert_rowid()"; return (long)(await cmd.ExecuteScalarAsync(cancellationToken))!;
+        using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT last_insert_rowid()"; var id = (long)(await cmd.ExecuteScalarAsync(cancellationToken))!;
+        if (item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
+        {
+            var category = item.Category.ToLowerInvariant() switch
+            {
+                var value when value.Contains("url", StringComparison.Ordinal) => "url",
+                var value when value.Contains("document", StringComparison.Ordinal) => "document",
+                var value when value.Contains("attachment", StringComparison.Ordinal) => "attachment",
+                var value when value.Contains("sender", StringComparison.Ordinal) => "sender",
+                var value when value.Contains("login", StringComparison.Ordinal) => "login",
+                _ => "message"
+            };
+            var ruleCode = "local." + category;
+            await Execute(c, "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code) VALUES($id,$time,$category,$risk,$rule)", cancellationToken,
+                ("$id", Guid.NewGuid().ToString("D")), ("$time", item.Timestamp.ToUniversalTime().ToString("O")),
+                ("$category", category), ("$risk", (int)item.Risk), ("$rule", ruleCode));
+        }
+        return id;
+    }
+    public async Task<IReadOnlyList<PendingEnterpriseEvent>> ReadPendingEnterpriseEventsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var c = await Open(ct); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT event_id,occurred_at,category,risk_level,rule_code FROM enterprise_event_queue WHERE sent=0 ORDER BY occurred_at LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", limit); using var reader = await cmd.ExecuteReaderAsync(ct); var rows = new List<PendingEnterpriseEvent>();
+        while (await reader.ReadAsync(ct)) rows.Add(new(Guid.Parse(reader.GetString(0)), DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture), reader.GetString(2), reader.GetInt32(3), reader.GetString(4)));
+        return rows;
+    }
+    public async Task MarkEnterpriseEventsSentAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventIds); var ids = eventIds.Take(101).ToArray(); if (ids.Length > 100) throw new ArgumentOutOfRangeException(nameof(eventIds));
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var id in ids)
+        {
+            using var command = c.CreateCommand(); command.Transaction = transaction; command.CommandText = "UPDATE enterprise_event_queue SET sent=1 WHERE event_id=$id";
+            command.Parameters.AddWithValue("$id", id.ToString("D")); await command.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
     }
     public async Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default)
     {
@@ -108,11 +160,12 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await Execute(c, "UPDATE events SET status=$s WHERE id=$id", cancellationToken, ("$s", (int)status), ("$id", id));
     }
     public async Task DeleteHistoryAsync(CancellationToken cancellationToken = default)
-    { await using var c = await Open(cancellationToken); await Execute(c, "DELETE FROM events; VACUUM;", cancellationToken); }
+    { await using var c = await Open(cancellationToken); await Execute(c, "DELETE FROM events; DELETE FROM enterprise_event_queue; VACUUM;", cancellationToken); }
     public async Task ApplyRetentionAsync(int days, CancellationToken ct = default)
     {
         Validate(new AppSettings(days)); await using var c = await Open(ct);
-        await Execute(c, "DELETE FROM events WHERE timestamp < $cutoff", ct, ("$cutoff", DateTimeOffset.UtcNow.AddDays(-days).ToString("O")));
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-days).ToString("O");
+        await Execute(c, "DELETE FROM events WHERE timestamp < $cutoff; DELETE FROM enterprise_event_queue WHERE occurred_at < $cutoff", ct, ("$cutoff", cutoff));
     }
     public async Task ExportAsync(string path, CancellationToken ct = default)
     {

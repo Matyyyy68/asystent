@@ -32,7 +32,7 @@ flowchart LR
   Queue -->|HTTPS, tożsamość urządzenia, API v1| API
 ```
 
-Kod serwera jest odseparowany od WPF. Na tym etapie nie ma uzasadnienia dla współdzielonego projektu: klient nie konsumuje jeszcze żadnych kontraktów API, a zależność od implementacji serwera byłaby niepożądana. Po ustabilizowaniu schematów można dodać mały projekt DTO/protokół lub generować klienta z OpenAPI, bez referencji klienta do `Server.Core`.
+Kod serwera jest odseparowany od WPF. Klient ma niewielką implementację transportu REST w `Sentinel.Core` i nie referuje `Server.Core`; kontrakty JSON są walidowane na granicy HTTP. Po ustabilizowaniu schematów można generować klienta z OpenAPI, bez zależności klienta od implementacji serwera.
 
 Serwer używa obecnego celu `net10.0`, zgodnego z istniejącym repozytorium i wspieranym wydaniem LTS .NET. `Sentinel.Server.Api` to ASP.NET Core Minimal API; `Sentinel.Server.Infrastructure` izoluje SQLite. SQLite jest jedynym działającym dostawcą danych w tym etapie. Nie deklarujemy obsługi PostgreSQL ani SQL Server.
 
@@ -65,7 +65,7 @@ W produkcji trzeba uruchamiać usługę pod dedykowanym kontem o minimalnych upr
 
 ## Bieżący zakres i uruchomienie
 
-Ten etap dostarcza audyt A, fundament B1, tożsamość B2a, część B2b, panel administracyjny oraz część UX klienta. Działają konta/role/sesje, audyt, rejestracja z zaproszeniem, heartbeat, health/readiness, SQLite, API grup/polityk/minimalnych metadanych zdarzeń, centralna baza FTS5, konfiguracja/test serwerowego Ollama i zgoda polityki dla endpointu analizy agenta. Klient zachowuje lokalne reguły i SQLite offline, ma tryb tray i trwały profil wariantu. `EnterpriseClient` nie jest jeszcze zintegrowanym agentem: nie rejestruje się w UI, nie pobiera polityk ani nie synchronizuje kolejki zdarzeń. Lokalne User ma provider Ollama i FTS5 dla TXT/MD/DOCX, ale nie ma automatycznego doboru sprzętowego, lokalnego modelu w paczce ani semantycznego RAG. Nadal brakuje ręcznej akceptacji, rotacji, instalatora usługi Windows, pełnego backup/restore, PDF i embeddingów.
+Ten etap dostarcza audyt A, fundament B1, tożsamość B2a, część B2b, panel administracyjny oraz część UX klienta. Działają konta/role/sesje, audyt, rejestracja z zaproszeniem, heartbeat, health/readiness, SQLite, API grup/polityk/minimalnych metadanych zdarzeń, centralna baza FTS5, konfiguracja/test serwerowego Ollama i zgoda polityki dla endpointu analizy agenta. `EnterpriseClient` umożliwia parowanie przez HTTPS, chroni token przez DPAPI, pobiera efektywną politykę i ręcznie synchronizuje kolejkę ograniczonych metadanych. Nadal brakuje egzekwowania polityki i automatycznego retry. Klient zachowuje lokalne reguły i działa offline. Lokalne User ma provider Ollama i FTS5 dla TXT/MD/DOCX, ale nie ma automatycznego doboru sprzętowego, lokalnego modelu w paczce ani semantycznego RAG. Nadal brakuje ręcznej akceptacji, rotacji, instalatora usługi Windows, pełnego backup/restore, PDF i embeddingów.
 
 Uruchomienie lokalne (domyślnie loopback):
 

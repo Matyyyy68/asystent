@@ -96,6 +96,19 @@
      </StackPanel></Border>
     </StackPanel></ScrollViewer>
    </TabItem>
+   <TabItem Header="Firma">
+    <TabItem.Style><Style TargetType="TabItem"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding IsEnterprise}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TabItem.Style>
+    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel DataContext="{Binding Enterprise}" Margin="12">
+     <TextBlock Text="Połączenie z firmą" FontSize="23" FontWeight="SemiBold"/><TextBlock Text="Podstawowa analiza nadal działa lokalnie. Administrator musi przekazać Ci adres HTTPS i jednorazowy kod zaproszenia. Podczas parowania serwer otrzyma nazwę tego komputera i wersję aplikacji." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="4,0,4,12"/>
+     <Border Style="{StaticResource Card}"><StackPanel>
+      <TextBlock Text="Adres serwera HTTPS" Style="{StaticResource SectionTitle}"/><TextBox Text="{Binding ServerAddress, UpdateSourceTrigger=PropertyChanged}" MaxLength="2048"/>
+      <TextBlock Text="Jednorazowy kod od administratora" Style="{StaticResource SectionTitle}" Margin="4,12,4,4"/><TextBox Text="{Binding InvitationCode, UpdateSourceTrigger=PropertyChanged}" MaxLength="100"/>
+      <WrapPanel Margin="0,12,0,4"><Button Content="Połącz urządzenie" Command="{Binding Pair}" Style="{StaticResource PrimaryButton}"/><Button Content="Sprawdź połączenie i synchronizuj" Command="{Binding Synchronize}" IsEnabled="{Binding IsPaired}"/></WrapPanel>
+      <TextBlock Text="{Binding DeviceStatus}" Style="{StaticResource SectionTitle}" Margin="4,8,4,4"/><TextBlock Text="{Binding Status}" Style="{StaticResource MutedText}" TextWrapping="Wrap"/>
+      <TextBlock Text="Przekazywane są wyłącznie kategoria, poziom ryzyka i kod reguły. Ta wersja pobiera politykę, ale jeszcze jej nie egzekwuje; nie wysyła tekstu, URL ani zrzutów." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="4,12,4,4"/>
+     </StackPanel></Border>
+    </StackPanel></ScrollViewer>
+   </TabItem>
   </TabControl>
   <Border Grid.Row="2" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource BorderBrushSoft}" BorderThickness="1" CornerRadius="12" Padding="10,7" Margin="4,10,4,0"><TextBlock Text="{Binding Message}" Style="{StaticResource MutedText}" AutomationProperties.LiveSetting="Polite"/></Border>
  </Grid>

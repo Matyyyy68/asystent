@@ -47,6 +47,7 @@ if args.mutex_helper:
   finally:
    release.write_text('release');helper.wait(timeout=10)
 data=local/'SentinelAI/Data';data.mkdir(parents=True,exist_ok=True);(data/'keep.txt').write_text('synthetic user data')
+credential=local/'SentinelAI/enterprise-credential.bin';credential.write_bytes(b'synthetic protected credential')
 private=installed/'app/my-notes.txt';private.write_text('private non-package file')
 run(installer,'/S');assert (data/'keep.txt').read_text()=='synthetic user data';assert private.read_text()=='private non-package file'
 print('PASS: reinstall preserves data',flush=True)
@@ -55,6 +56,7 @@ deadline=time.monotonic()+25
 while (installed/'app/Sentinel.Desktop.exe').exists() and time.monotonic()<deadline: time.sleep(.2)
 assert all(not (installed/'app'/item['path']).exists() for item in manifest)
 assert (data/'keep.txt').read_text()=='synthetic user data';assert private.read_text()=='private non-package file'
+assert not credential.exists()
 assert not (profile/'Desktop/Sentinel AI.lnk').exists()
 assert not (profile/'AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Sentinel AI').exists()
 run('reg','query',registry,expected=1)

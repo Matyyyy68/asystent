@@ -1,6 +1,6 @@
-# Instalator Sentinel AI User 0.3.0
+# Instalator Sentinel AI 0.4.0
 
-`artifacts/installer/SentinelAI-0.3.0-win-x64-Setup.exe` to samodzielny instalator x64 NSIS 3.11 z polskim kreatorem. Można wybrać User albo Enterprise Client. W tym wydaniu wariant Enterprise Client jest lokalnym trybem awaryjnym bez parowania i synchronizacji; UI sygnalizuje tę granicę. Nie ma instalacji Enterprise Server. Użytkownik uruchamia EXE dwuklikiem. Nie potrzebuje SDK, Python, NSIS ani połączenia z Internetem podczas instalacji.
+`artifacts/installer/SentinelAI-0.4.0-win-x64-Setup.exe` to samodzielny instalator x64 NSIS 3.11 z polskim kreatorem. Można wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, chroni poświadczenie DPAPI i ręcznie wysyła metadane zdarzeń; nadal nie egzekwuje pobranych polityk ani nie synchronizuje się automatycznie. Nie ma instalacji Enterprise Server. Użytkownik uruchamia EXE dwuklikiem. Nie potrzebuje SDK, Python, NSIS ani połączenia z Internetem podczas instalacji.
 
 ## Zachowanie
 
@@ -10,7 +10,7 @@
 - Zawiera runtime .NET i Windows Desktop dla x64, SQLite oraz teksty licencyjne runtime.
 - Kreator pierwszego uruchomienia proponuje `%LOCALAPPDATA%\SentinelAI\Data`; dane użytkownika są poza katalogiem programu.
 - App i installer używają mutexu `Local\SentinelAI.Desktop`. Instalator wymaga zamknięcia programu; nie zabija procesu.
-- Ponowna instalacja odświeża pliki programu i domyślnie zachowuje wariant. Próba zmiany wariantu przy aktualizacji jest blokowana. Odinstalowanie domyślnie zachowuje dane; osobne pytanie pozwala jawnie usunąć wyłącznie `sentinel.db`, `knowledge.db` i ich pliki SQLite sidecar ze wskazanego katalogu. Inne pliki nie są kasowane, a katalog jest usuwany tylko jeśli pozostaje pusty.
+- Ponowna instalacja odświeża pliki programu i domyślnie zachowuje wariant. Próba zmiany wariantu przy aktualizacji jest blokowana. Odinstalowanie domyślnie zachowuje historię; osobne pytanie pozwala jawnie usunąć wyłącznie `sentinel.db`, `knowledge.db` i ich pliki SQLite sidecar ze wskazanego katalogu. Poświadczenie Enterprise jest usuwane zawsze. Inne pliki nie są kasowane, a katalog jest usuwany tylko jeśli pozostaje pusty.
 - Wersja aplikacji, serwera i instalatora pochodzi z `eng/ProductVersion.props`. Paczka zawiera sumę SHA-256 i manifest każdego pliku.
 - Nie ma autostartu, aktualizatora, dodatku przeglądarki ani zmian ustawień zabezpieczeń.
 
@@ -39,7 +39,7 @@ Skrypt odtwarza zależności w locked-mode, kompiluje Release, wykonuje testy, p
 Wykonano:
 
 - kompilację Release: 0 błędów, 0 ostrzeżeń;
-- 91 testów aplikacji i 15 testów serwera;
+- 99 testów aplikacji i 15 testów serwera;
 - kontrolę architektury PE x64, sumy EXE i hashy wszystkich plików aplikacji wyodrębnionych z instalatora;
 - instalację i ponowną instalację w osobnym profilu Wine 10, kontrolę plików, skrótów i wpisu odinstalowania;
 - odinstalowanie i potwierdzenie zachowania syntetycznej historii oraz dodatkowego prywatnego pliku w katalogu programu;

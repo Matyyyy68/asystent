@@ -23,8 +23,8 @@ ManifestSupportedOS all
 Name "Sentinel AI"
 OutFile "${OUTPUT_EXE}"
 InstallDir "$LOCALAPPDATA\Programs\Sentinel AI"
-InstType "Sentinel AI User"
-InstType "Enterprise Client · tylko analiza lokalna w tym wydaniu"
+InstType "Dla mnie (ochrona na tym komputerze)"
+InstType "Dla organizacji (mam kod od administratora)"
 BrandingText "Sentinel AI • ${APP_VERSION}"
 VIProductVersion "${APP_VERSION}.0"
 VIAddVersionKey /LANG=1045 "ProductName" "Sentinel AI"
@@ -181,7 +181,7 @@ Section "Sentinel AI User" SEC_PROFILE_USER
  StrCpy $SelectedVariant "user"
 SectionEnd
 
-Section "Enterprise Client (brak parowania i synchronizacji w tym wydaniu)" SEC_PROFILE_ENTERPRISE
+Section "Enterprise Client (połączenie z serwerem firmowym)" SEC_PROFILE_ENTERPRISE
  SectionIn 2 RO
  StrCpy $SelectedVariant "enterprise-client"
 SectionEnd
@@ -193,7 +193,7 @@ SectionEnd
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_APP} "Program i wszystkie potrzebne składniki. Skróty pojawią się w menu Start."
  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_PROFILE_USER} "Wariant dla osoby prywatnej. Analiza regułowa działa lokalnie i offline."
- !insertmacro MUI_DESCRIPTION_TEXT ${SEC_PROFILE_ENTERPRISE} "Zapisuje trwały znacznik wariantu Enterprise, ale klient nie synchronizuje się jeszcze z serwerem. Wybierz ten wariant wyłącznie do testów integracyjnych."
+ !insertmacro MUI_DESCRIPTION_TEXT ${SEC_PROFILE_ENTERPRISE} "Wybierz ten wariant tylko wtedy, gdy administrator przekazał Ci adres serwera i jednorazowy kod zaproszenia."
  !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} "Dodaje ikonę Sentinel AI na Twoim pulpicie."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
@@ -247,6 +247,9 @@ Section "Uninstall"
  Delete "$SMPROGRAMS\Sentinel AI\Odinstaluj.lnk"
  RMDir "$SMPROGRAMS\Sentinel AI"
  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"
+ ; The server credential is not user history and must not survive uninstall.
+ Delete "$LOCALAPPDATA\SentinelAI\enterprise-credential.bin"
+ Delete "$LOCALAPPDATA\SentinelAI\enterprise-credential.bin.new"
  ${If} $DeleteUserData == "1"
   ClearErrors
   FileOpen $0 "$LOCALAPPDATA\SentinelAI\data-path.txt" r
