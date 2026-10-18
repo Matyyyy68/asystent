@@ -47,7 +47,7 @@ public sealed class AIProviderTests
         var model = Assert.Single(await provider.ListModelsAsync("http://[::1]:11434"));
         Assert.Equal("synthetic:latest", model.Name);
         Assert.Equal(1_073_741_824, model.SizeBytes);
-        Assert.Contains("1.0 GB plik", model.DisplayName);
+        Assert.Contains($"{1d:0.0} GB plik", model.DisplayName);
         Assert.Contains("Q4_K_M", model.DisplayName);
     }
 

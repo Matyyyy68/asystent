@@ -6,6 +6,8 @@ const warnedTargets = new Map();
 let port = null;
 let nextId = 0;
 let hostAvailable = null;
+let integrationEnabled = true;
+chrome.storage.local.get('integrationEnabled').then(data => { integrationEnabled = data.integrationEnabled !== false; });
 
 function connect() {
   if (port) return port;
@@ -45,7 +47,7 @@ function request(type, url = null) {
       resolve(null);
     }, 3000);
     pending.set(id, { resolve, timeout });
-    try { channel.postMessage({ id, type, url }); }
+    try { channel.postMessage({ id, type, url, browser: navigator.userAgent.includes('Edg/') ? 'edge' : 'chrome', enabled: integrationEnabled }); }
     catch {
       clearTimeout(timeout);
       pending.delete(id);
@@ -56,7 +58,7 @@ function request(type, url = null) {
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((event) => {
-  if (event.frameId !== 0 || !/^https?:\/\//i.test(event.url)) return;
+  if (!integrationEnabled || event.frameId !== 0 || !/^https?:\/\//i.test(event.url)) return;
   const allow = oneTimeAllow.get(event.tabId);
   if (allow) {
     oneTimeAllow.delete(event.tabId);
@@ -90,7 +92,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [token, target] of warnedTargets) if (target.tabId === tabId) warnedTargets.delete(token);
 });
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('warning.html')].some(url => sender.url?.startsWith(url))) return false;
+  if (message?.type === 'toggle') {
+    integrationEnabled = message.enabled === true;
+    chrome.storage.local.set({ integrationEnabled });
+    request('status');
+    sendResponse({ enabled: integrationEnabled });
+    return false;
+  }
   if (message?.type === "details" && typeof message.token === "string") {
     const target = warnedTargets.get(message.token);
     sendResponse(target ? { risk: target.risk, indicators: target.indicators, rulesVersion: target.rulesVersion } : null);
@@ -98,6 +108,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "status") {
     request("status").then((result) => sendResponse({
+      enabled: integrationEnabled,
       available: result?.available === true,
       rulesVersion: result?.rulesVersion ?? null
     }));

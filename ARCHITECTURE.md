@@ -1,77 +1,23 @@
-# Sentinel AI — architektura Etapów 1–2
-
-## Komponenty
-
-.NET 10 LTS, WPF, MVVM, Microsoft.Extensions.DependencyInjection i Microsoft.Data.Sqlite. Sentinel.Core nie zależy od Windows; Sentinel.Desktop dostarcza user32/UI Automation i interfejs. Modele, reguły i magazyn mogą zostać wykorzystane w przyszłym kliencie mobilnym i serwerze. Nie implementujemy jeszcze tych klientów.
+# Architektura Sentinel AI User 0.14
 
 ```mermaid
 flowchart LR
-    W[Zdarzenie zmiany okna / ręczny odczyt] --> M[MonitoringViewModel]
-    M --> C[ContextCollector: pauza i limit]
-    C --> D[IContextProvider: metadane okna]
-    D --> P[ContextPolicy: proces, tytuł i kategorie]
-    P --> U[WindowsContextProvider: statyczne UIA]
-    U --> F[PrivacyFilter: maskowanie i limit tekstu]
-    F --> E[ThreatAnalysisEngine]
-    I[Ręcznie podany tekst i URL] --> E
-    PSL[Offline Public Suffix List] --> A[UrlAnalyzer]
-    A --> E
-    E --> T[Typowana ThreatAssessment]
-    T --> V[Wynik i powiadomienie WPF]
-    T --> H[Minimalne metadane]
-    H --> S[LocalStore / SQLite]
+  R[React UI] -->|contextBridge IPC, metody na liście| E[Electron main]
+  E -->|JSON Lines v1, stdio| P[Sentinel.Engine .NET]
+  P --> C[Sentinel.Core reguły]
+  P --> S[(SQLite historia i reputacja)]
+  P --> D[Windows DNS cache i TCP snapshot]
+  X[Chrome/Edge MV3] -->|Native Messaging| H[Sentinel.UrlHost]
+  H --> C
+  H --> S
 ```
 
-- `MainViewModel`: ustawienia wspólne i historia; nie pozyskuje kontekstu.
-- `MonitoringViewModel`: jawny start/pauza, obsługa zdarzeń, prezentacja oceny i zapis metadanych. Nie przechowuje w historii danych wejściowych. Pauza nie blokuje analizy świadomie wklejonego tekstu.
-- `IContextProvider`: źródło metadanych i kontekstu. `IForegroundEventSource` jest oddzielnym, opcjonalnym źródłem zdarzeń.
-- `ContextCollector`: pojedynczy odczyt, monotoniczny limit częstotliwości, polityka wykluczeń przed ekstrakcją i maskowanie na granicy źródła. Źródło nie powinno dostawać żądań ekstrakcji dla wykluczonych okien.
-- `WindowsContextProvider`: user32 do aktywnego okna i procesu, UI Automation do statycznych etykiet. Odczyt jest na osobnym wątku MTA, nie na wątku UI. Sprawdza zgodność aktywnego okna i PID przed i po odczycie. Pomija poddrzewa haseł, Edit i ComboBox. Brak TextPattern, ValuePattern, keyboard hooków, screenshotów i dostępu do plików innych aplikacji.
-- `ThreatAnalysisEngine`: reguły PL/EN, jawna agregacja, bounded pamięć 32 okien przez 2 min. Nie zawiera klienta HTTP ani wykonawcy poleceń. Niezaufana treść nie steruje przepływem programu.
-- `UrlAnalyzer` / `DomainNames`: czysta analiza HTTP/HTTPS, IDN, PSL, granic domen, wybranych podobieństw marek i jawnych danych nawigacji. Nigdy nie rozwiązuje DNS ani nie pobiera stron.
-- `LocalStore`: ustawienia, historia, retencja, eksport, backup i schemat FTS5. Ten ostatni nie stanowi jeszcze RAG.
+Electron uruchamia jeden proces silnika i zachowuje go po schowaniu okna w zasobniku. IPC nie wystawia portu HTTP; renderer ma tylko wymienione metody, izolowany kontekst i brak Node. Zamknięcie przez menu zasobnika kończy silnik. Rozszerzenie uruchamia osobny host przez Chromium, akceptujący tylko wpisany w manifeście origin i opcjonalny argument okna Windows. Serwer Enterprise pozostaje odrębny.
 
-## Zaufanie do źródeł
+`Sentinel.Core` liczy reguły i reputację. `Sentinel.Engine` obsługuje lokalny IPC, odczyt cache DNS, widok TCP, ustawienia i historię. `Sentinel.UrlHost` analizuje URL przekazany przez rozszerzenie. `desktop/` zawiera React, Electron i markowe zasoby instalatora. `website/` jest statyczną witryną.
 
-`NavigationSignal` wymaga jawnie podanego celu: obecnie może dostarczyć go użytkownik. W przyszłości dostarczy go obsługiwane rozszerzenie. Tekst linku i obserwowany cel przekierowania mają oddzielne pola. Sam napis URL w UIA nie ustanawia nawigacji. W bieżącym UI nie ma pola udającego obserwację przekierowania; porównanie potwierdzonych przekierowań istnieje w API i testach dla przyszłego źródła.
+Reputacja CERT Polska: tylko aktywne domeny, normalizacja IDN, dokładne dopasowanie hosta, bez blokowania adresu IP współdzielonego przez inne usługi. Import ma limit rozmiaru, walidację, deduplikację i transakcję SQLite z kopią poprzedniego zestawu. Po 48 godzinach dane nie są używane do oznaczania domen jako znanego zagrożenia. Pobranie z jedynego dozwolonego adresu, bez automatycznych przekierowań i z timeoutem.
 
-Korelacja czasowa łączy wyłącznie sygnały tego samego okna/PID i nie udaje potwierdzenia relacji między wiadomością a stroną. Przy zmianie okna opcjonalnie analizowany jest jego stan, nie wszystkie późniejsze zmiany treści. Bez rozszerzenia przeglądarki pełny ciąg wiadomość → link → logowanie nie jest wiarygodnie dostępny.
+Cache DNS jest pobierany stałym poleceniem PowerShell `Get-DnsClientCache` co 15 sekund po włączeniu. To odczyt cache, nie monitor każdego zapytania. Wykryte domeny są oceniane względem lokalnej listy; ostrzeżenia mają deduplikację 10 minut. TCP to bieżąca lista połączeń na żądanie, bez przypisania do procesu. Żadna z tych warstw nie filtruje ruchu. Zaplanowane WFP wymaga osobnego projektu z uprawnieniami, badaniem ryzyka blokady i podpisywaniem, dlatego nie jest aktywne.
 
-## Limity i agregacja
-
-Domyślnie pauza; minimum 10 s między odczytami, konfigurowalne 3–300 s. Odczyt ręczny daje 3 s na przełączenie okna. UIA: 250 węzłów, głębokość 12, 16 000 znaków, 2 s budżetu i 3 s oczekiwania. Limit czasu nie może przerwać dowolnego wywołania COM; zablokowany dostawca zajmuje najwyżej jeden pracownik i kolejne odczyty zwracają Busy do jego zakończenia. Nie eskalujemy uprawnień.
-
-| Sygnał | Punkty |
-| --- | ---: |
-| HTTP, IP, IDN, niestandardowy port, wybrany nietypowy TLD | po 1 |
-| Userinfo, presja czasu, prośba o logowanie/przelew, prośba o instalację, zmiana domeny przez potwierdzone przekierowanie | po 2 |
-| Niezgodność widocznego adresu z celem | 3 |
-| Podobieństwo marki, ryzykowny skrypt, wyłączenie zabezpieczeń | po 4 |
-
-Sygnały są deduplikowane po identyfikatorze. Wynik: 0 Informacja; 1–2 Niskie; 3–6 Umiarkowane; 7–11 Wysokie przy co najmniej 2 sygnałach; od 12 Krytyczne przy co najmniej 3. Jedyny silny sygnał daje najwyżej Umiarkowane. To heurystyka, nie skalibrowane prawdopodobieństwo. Wysoki poziom oznacza potrzebę ostrożności, nie potwierdzone oszustwo. Słownik marek i zamienników Unicode jest ograniczony. Brak reputacji online i uczenia na feedbacku.
-
-## Dane i trwałość
-
-SQLite v1 zawiera settings, events i pusty indeks knowledge FTS5. Zmiana struktury ustawień JSON zachowuje zgodność z Etapem 1; brakujące pola otrzymują bezpieczne wartości domyślne. Schemat tworzy się w transakcji; nieznane przyszłe wersje są odrzucane bez resetu. Przyszłe migracje modyfikujące dane wymagają kopii. Backup używa SQLite Backup API. Eksport i backup nie nadpisują istniejących plików. Retencja działa przy uruchomieniu, zapisie ustawień i zapisie ostrzeżenia; nie ma procesu działającego po zamknięciu aplikacji.
-
-Utrwalane są wyłącznie czas, poziom, kategoria, nazwa procesu, statyczne opisy reguł, niepewności, zalecenia i status obsługi. Nie zapisujemy URL, tytułów okien, tekstu kontrolek, formularzy, zrzutów ani surowych wyjątków. Sam magazyn `AddAsync` nie jest granicą DLP: przyszłe źródła muszą korzystać z bezpiecznej projekcji oceny, a nie przesyłać dowolną treść do pól zdarzenia. Wyjście przyszłego AI wymaga dodatkowej walidacji i redakcji przed zapisem.
-
-Wykluczenia kategorii są mapą znanych nazw procesów, nie klasyfikatorem poufności. Maskowanie jest heurystyczne i nie gwarantuje rozpoznania wszystkich sekretów w zwykłym tekście. Kontrolki wejściowe są pomijane przed odczytem nazw. Baza jest nieszyfrowana; użytkownik wybiera lokalny prywatny katalog z odpowiednimi ACL. Nie przechowujemy sekretów; DPAPI/Credential Manager należy dodać wraz z rzeczywistą funkcją wymagającą kluczy.
-
-Asynchroniczne kontrakty nie zmieniają faktu, że SQLite ma synchroniczne I/O. Przy dużych bazach należy przenieść operacje magazynu na ograniczoną kolejkę roboczą. Interfejs pokazuje 500 rekordów, eksport obejmuje całą zachowaną historię. Aplikacja nie działa w tle po zamknięciu.
-
-## Następne granice modułów
-
-Wariant instalacji jest oddzielony od przełączalnych preferencji. `Sentinel.Core.Configuration` zawiera `InstalledProductProfile`, walidator, fakty systemu i deterministyczny recommender. `LocalStore` utrwala profil osobno od ustawień użytkownika i migruje bazę v1 do v2. `Sentinel.Desktop.WindowsSystemProbe` odczytuje lokalnie Windows Registry, `GlobalMemoryStatusEx`, `EnumDisplayDevices`, stan sieci i wolne miejsce; nie odczytuje plików ani danych przeglądarki. Brak wiarygodnych danych pozostaje `null`/`Unknown`. Nazwa GPU nie oznacza wsparcia modelu. Aktualnie rekomendowane są wyłącznie lokalne reguły i SQLite, ponieważ katalog kompatybilnych modeli jest pusty.
-
-Etap 3 częściowo dostarczony: `IAIProvider` ma lokalny Ollama provider (loopback only, timeout, typowana walidacja, brak narzędzi, fallback), a `IKnowledgeBaseProvider` ma import TXT/MD/DOCX i FTS5 w osobnej bazie. Wyszukiwanie pozostaje pełnotekstowe bez embeddingów; brak PDF, provider serwerowy i doboru modeli do GPU/NPU. Model nie jest jedynym źródłem oceny, a treść dokumentów nie może stać się instrukcjami. Model nie jest pobierany bez zgody; serwer wymaga jawnego wskazania przesyłanych danych, TLS i uwierzytelnienia.
-
-Etap 4: obsługiwane rozszerzenie przeglądarki, jawny autostart, natywne powiadomienia, opcjonalne Windows Graphics Capture. Brak keyloggera, ukrytej usługi i automatycznego blokowania.
-
-Etap 5: instalator, podpisywanie, aktualizacje i walidacja na Windows. Przyszły serwer firmowy: kontrolowane API, TLS, uwierzytelnianie i autoryzacja urządzeń/użytkowników, polityki, audyt, limity oraz działanie klienta przy rozłączeniu. Brak niezabezpieczonego serwera LAN.
-
-## Weryfikacja
-
-Testy Core używają syntetycznych danych, rzeczywistego SQLite i podstawianego źródła okien. Obejmują trwałość i zgodność ustawień, migracje, uszkodzoną bazę, retencję i kopie; PSL/wildcards/exception/private suffixes, IDN i IP; oszustwa/tekst legalny, injection, długie dane, maskowanie i korelację; pauzę, wykluczenia, częstotliwość, współbieżność i anulowanie. Test sieciowy weryfikuje działanie audytora na loopback bez kontekstu, następnie brak zarządzanych zdarzeń HTTP/DNS/socket podczas analizy. Nie jest to systemowy audyt całego procesu ani test przyszłego modelu AI.
-
-Na Linux kompilujemy WPF z EnableWindowsTargeting. Nie możemy uruchomić user32/UIA ani okna; manualna procedura jest w docs/WINDOWS-VALIDATION.md. Nie przedstawiamy testu podstawionego źródła jako dowodu działania natywnych API Windows.
+Treść ręcznej analizy nie jest zapisywana, a przeglądarka zapisuje tylko reguły i wynik. Cache DNS może powodować zapis domeny, jeśli pasuje do listy. Brak automatycznego wysyłania tych danych do chmury. AI Ollama ze starego WPF jest w `Sentinel.Core`, ale nowy klient go nie uruchamia. Zakres dalszych prac: [Known limitations](docs/KNOWN-LIMITATIONS.md).

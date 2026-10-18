@@ -1,3 +1,5 @@
+> Dokument historyczny wersji WPF 0.13. Aktualny klient i instrukcje: README.md oraz docs/USER-VALIDATION.md.
+
 # Witryna i kierunek interfejsu Sentinel AI
 
 ## Założenie

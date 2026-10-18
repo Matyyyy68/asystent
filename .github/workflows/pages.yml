@@ -1,44 +1,40 @@
-name: Deploy public website
-
+name: Build and publish Sentinel website
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/pages.yml'
-      - 'eng/ProductVersion.props'
-      - 'artifacts/installer/**'
-      - 'scripts/build-pages.py'
-      - 'server/src/Sentinel.Server.Api/wwwroot/**'
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: github-pages
-  cancel-in-progress: true
-
+  cancel-in-progress: false
 jobs:
   deploy:
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      # Pages must be enabled once in repository settings. GITHUB_TOKEN can
-      # deploy but cannot create the repository Pages configuration.
-      - name: Read GitHub Pages configuration
-        uses: actions/configure-pages@v5
-      - name: Build static website and include the current installer
-        run: python3 scripts/build-pages.py _site
-      - name: Upload website
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          path: _site
-      - name: Publish to GitHub Pages
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - uses: actions/configure-pages@v5
+        id: pages
+      - run: npm ci
+        working-directory: website
+      - run: npm run lint
+        working-directory: website
+      - run: npm test
+        working-directory: website
+      - run: npm run build
+        working-directory: website
+        env:
+          PAGES_BASE: ${{ steps.pages.outputs.base_path }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/dist
+      - uses: actions/deploy-pages@v4
         id: deployment
-        uses: actions/deploy-pages@v4

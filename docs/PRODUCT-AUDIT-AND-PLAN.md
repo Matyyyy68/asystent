@@ -1,3 +1,5 @@
+> Dokument historyczny wersji WPF 0.13. Aktualny klient i instrukcje: README.md oraz docs/USER-VALIDATION.md.
+
 # Audyt wariantów User i Enterprise
 
 Stan audytu: 2026-10-16, commit bazowy `b5f38cb`.

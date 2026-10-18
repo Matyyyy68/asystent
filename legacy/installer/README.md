@@ -1,3 +1,5 @@
+> Dokument historyczny wersji WPF 0.13. Aktualny klient i instrukcje: README.md oraz docs/USER-VALIDATION.md.
+
 # Instalator Sentinel AI 0.4.0
 
 `artifacts/installer/SentinelAI-0.4.0-win-x64-Setup.exe` to samodzielny instalator x64 NSIS 3.11 z polskim kreatorem. Można wybrać User albo Enterprise Client. Enterprise Client paruje się jednorazowym kodem przez HTTPS, chroni poświadczenie DPAPI i ręcznie wysyła metadane zdarzeń; nadal nie egzekwuje pobranych polityk ani nie synchronizuje się automatycznie. Nie ma instalacji Enterprise Server. Użytkownik uruchamia EXE dwuklikiem. Nie potrzebuje SDK, Python, NSIS ani połączenia z Internetem podczas instalacji.

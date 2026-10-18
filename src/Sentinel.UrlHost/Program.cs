@@ -27,7 +27,7 @@ public static class Program
                 NativeHostRegistration.Unregister();
                 return 0;
             }
-            if (args.Length != 0) return 2;
+            if (!IsAllowedLaunch(args)) return 2;
             await ServeAsync(Console.OpenStandardInput(), Console.OpenStandardOutput());
             return 0;
         }
@@ -38,9 +38,25 @@ public static class Program
         }
     }
 
+    public static bool IsAllowedLaunch(string[] args) => args.Length is 1 or 2
+        && args[0] == "chrome-extension://nakmencmekkefmcddpihiiohjgabfemg/"
+        && (args.Length == 1 || (args[1].StartsWith("--parent-window=", StringComparison.Ordinal)
+            && ulong.TryParse(args[1][16..], out _)));
+
     public static async Task ServeAsync(Stream input, Stream output, CancellationToken cancellationToken = default, bool enableHostSideEffects = true)
     {
-        var processor = new UrlRequestProcessor();
+        DomainReputation? reputation = null;
+        if (enableHostSideEffects)
+        {
+            var pointer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI", "data-path.txt");
+            if (File.Exists(pointer))
+            {
+                var directory = (await File.ReadAllTextAsync(pointer, cancellationToken)).Trim();
+                if (Path.IsPathFullyQualified(directory) && !directory.StartsWith('\\') && File.Exists(Path.Combine(directory, "reputation.db")))
+                    reputation = new DomainReputation(directory);
+            }
+        }
+        var processor = new UrlRequestProcessor(reputation);
         var history = new BrowserHistoryRecorder();
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -50,12 +66,16 @@ public static class Program
             if (payload is null) return;
             BrowserResponse response;
             string requestId = "invalid";
+            string browser = "unknown";
+            bool browserEnabled = true;
             try
             {
                 var request = JsonSerializer.Deserialize<BrowserRequest>(payload, JsonOptions)
                     ?? throw new InvalidDataException("Puste żądanie.");
                 requestId = request.Id;
                 response = processor.Process(request);
+                browser = request.Browser;
+                browserEnabled = request.Enabled;
             }
             catch (Exception ex) when (ex is JsonException or InvalidDataException or ArgumentException)
             {
@@ -68,7 +88,7 @@ public static class Program
             {
                 try
                 {
-                    await BrowserStatusMarker.TouchAsync(cancellationToken);
+                    await BrowserStatusMarker.TouchAsync(browser, browserEnabled, cancellationToken);
                     await BrowserDesktopNotifier.NotifyAsync(3, cancellationToken);
                 }
                 catch (Exception ex)

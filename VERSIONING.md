@@ -1,15 +1,17 @@
 # Wersjonowanie Sentinel AI
 
-Wszystkie aplikacje, które są budowane i publikowane z tego repozytorium, używają jednej wersji produktu z `eng/ProductVersion.props`. Obejmuje to klienta Windows, API Enterprise i pliki assembly powiązanych modułów. Installer pobiera tę samą wartość podczas pakowania; nazwa EXE, metadane PE, wpis Windows Uninstall i widoczna wersja klienta muszą się zgadzać.
+Wersja produktu jest utrzymywana w `eng/ProductVersion.props`. Obejmuje aktywne projekty .NET, klienta Windows (Electron), host Native Messaging i instalator. Rozszerzenie przeglądarki ma osobną wersję techniczną w `browser-extension/manifest.json`.
 
-Przy wydaniu aplikacji zwiększ `VersionPrefix` według Semantic Versioning (`MAJOR.MINOR.PATCH`). Nie wpisuj numeru niezależnie w plikach projektów ani w skryptach. Zależności NuGet mają własne wersje i nadal są przypinane osobno w projektach oraz `packages.lock.json`.
+Przy wydaniu zwiększ `VersionPrefix` według Semantic Versioning (`MAJOR.MINOR.PATCH`). Nie wpisuj numeru produktu niezależnie w projektach ani skryptach. Zależności NuGet i npm mają własne wersje.
 
-Walidacja wydania:
+Walidacja wydania na Windows:
 
-```bash
-dotnet build Sentinel.sln -c Release --no-restore
-dotnet test Sentinel.sln -c Release --no-build --no-restore
-bash scripts/build-installer-cloud.sh
+```powershell
+dotnet build Sentinel.sln -c Release
+dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release
+node scripts/check-product.cjs
+node scripts/test-engine.cjs
+./scripts/build-user.ps1 -Installer
 ```
 
-Skrypt budowania odczytuje wersję ze wspólnego pliku i weryfikuje architekturę, sumę EXE, manifest payloadu, runtime oraz licencje. Nie publikuj aplikacji ani instalatora z niezgodnymi numerami wersji.
+Pakiet instalacyjny trafia do `artifacts/desktop`. Skrypt sprawdza wersję, uruchamia testy i buduje renderer, host, silnik oraz instalator NSIS. NSIS nadaje sandboxowi Chromium uprawnienia odczytu i wykonania w katalogu programu, bez rozszerzania ich na dane użytkownika. Instalator nie jest podpisany cyfrowo; przed publiczną dystrybucją wymagany jest proces podpisywania i walidacja instalacji na docelowych systemach Windows.

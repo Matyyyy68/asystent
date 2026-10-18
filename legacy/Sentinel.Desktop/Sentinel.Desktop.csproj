@@ -10,7 +10,7 @@
     <Description>Lokalny asystent bezpieczeństwa</Description>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Sentinel.Core/Sentinel.Core.csproj"/>
+    <ProjectReference Include="../../src/Sentinel.Core/Sentinel.Core.csproj"/>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
   </ItemGroup>
 </Project>

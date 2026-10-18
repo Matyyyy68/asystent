@@ -1,3 +1,5 @@
+> Dokument historyczny wersji WPF 0.13. Aktualny klient i instrukcje: README.md oraz docs/USER-VALIDATION.md.
+
 # Natywna walidacja Windows — procedura jeszcze niewykonana na hoście Linux
 
 Wymagany interaktywny Windows 10/11 x64, konto zwykłego użytkownika i .NET SDK z global.json. Nie uruchamiaj testu na rzeczywistych danych logowania. Użyj syntetycznego pliku TXT i Notatnika. Warianty edytora/stron różnie eksponują UI Automation: brak odczytu jest ograniczeniem, nie dowodem bezpieczeństwa.
