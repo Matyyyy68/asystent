@@ -4,7 +4,7 @@
 
 - Wydano poprawki audytu, monitoringu Enterprise i przywracania kopii serwera z Windows.
 - Zweryfikowano 146/146 testów klienta, 19/19 testów API serwera, 2/2 testy restore backupu, testy witryny/lint/build oraz `--self-test` instalatora.
-- Instalator `Sentinel.AI.Setup.0.15.1.exe` będzie opublikowany jako prerelease wraz z plikiem SHA-256 przez workflow GitHub po wypchnięciu tagu `v0.15.1`.
+- Opublikowano prerelease [v0.15.1](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.1) z instalatorem 262475379 B oraz plikiem `.sha256`; workflow GitHub przeszedł build i self-test. SHA-256 instalatora: `B428155C0BA41306CAED43A5BF5B52BBAB7D0A490E4868A8E639540145ED38AA`.
 
 ## 2026-10-19 — audyt i lokalny kontrakt zdarzeń v1
 
