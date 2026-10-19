@@ -4,21 +4,21 @@ $repo = Split-Path $PSScriptRoot -Parent
 Push-Location $repo
 try {
   dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release
-  if ($LASTEXITCODE) { throw 'Testy nie przeszły' }
+  if ($LASTEXITCODE) { throw 'Tests failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {
     dotnet publish "src/$project/$project.csproj" -c Release -r win-x64 --self-contained true -o artifacts/engine
-    if ($LASTEXITCODE) { throw "Build $project nie powiódł się" }
+    if ($LASTEXITCODE) { throw "Build $project failed" }
   }
   node scripts/test-engine.cjs
-  if ($LASTEXITCODE) { throw 'Test IPC nie przeszedł' }
+  if ($LASTEXITCODE) { throw 'IPC test failed' }
   Push-Location desktop
   try {
     npm.cmd ci
-    if ($LASTEXITCODE) { throw 'npm ci nie powiodło się' }
+    if ($LASTEXITCODE) { throw 'npm ci failed' }
     node node_modules/electron/install.js
-    if ($LASTEXITCODE) { throw 'Pobranie środowiska Electron nie powiodło się' }
+    if ($LASTEXITCODE) { throw 'Electron runtime download failed' }
     npm.cmd run build
-    if ($LASTEXITCODE) { throw 'Build UI nie powiódł się' }
-    if ($Installer) { npm.cmd run package; if ($LASTEXITCODE) { throw 'Build instalatora nie powiódł się' } }
+    if ($LASTEXITCODE) { throw 'Build UI failed' }
+    if ($Installer) { npm.cmd run package; if ($LASTEXITCODE) { throw 'Installer build failed' } }
   } finally { Pop-Location }
 } finally { Pop-Location }

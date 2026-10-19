@@ -24,5 +24,6 @@
     <EmbeddedResource Include="../../media/illustrations/installer/installing.png" LogicalName="installer-installing.png" />
     <EmbeddedResource Include="../../media/illustrations/installer/complete.png" LogicalName="installer-complete.png" />
     <EmbeddedResource Include="../../media/illustrations/installer/error.png" LogicalName="installer-error.png" />
+    <EmbeddedResource Include="../../media/illustrations/installer/cancel.png" LogicalName="installer-cancel.png" />
   </ItemGroup>
 </Project>

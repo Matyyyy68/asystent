@@ -11,7 +11,7 @@ const files = fs.readdirSync(root, { recursive: true })
   .map(file => path.join(root, file)).sort();
 assert.equal(files.length, 63, `Expected 63 distinct illustration files; found ${files.length}`);
 const installerProject = fs.readFileSync(path.resolve(root, '../../installer/Sentinel.Setup/Sentinel.Setup.csproj'), 'utf8');
-for (const name of ['welcome', 'prepare', 'configure', 'installing', 'complete', 'error']) {
+for (const name of ['welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel']) {
   assert.ok(installerProject.includes(`LogicalName="installer-${name}.png"`), `Installer is missing embedded ${name} illustration`);
   assert.ok(fs.existsSync(path.join(root, 'installer', `${name}.png`)), `Installer illustration not found: ${name}`);
 }
@@ -70,4 +70,4 @@ for (const file of files) {
   assert.ok(!hashes.has(hash), `${file}: exact duplicate of ${hashes.get(hash)}`);
   hashes.set(hash, file);
 }
-console.log(`PASS: ${files.length} unique RGBA PNG illustrations; real alpha, expected dimensions, and six installer resources verified.`);
+console.log(`PASS: ${files.length} unique RGBA PNG illustrations; real alpha, expected dimensions, and seven installer resources verified.`);

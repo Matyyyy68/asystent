@@ -65,7 +65,7 @@ app.whenReady().then(() => {
       const assessment = await win.webContents.executeJavaScript('window.sentinel.call("analyze", {text:"Pilnie zaloguj się i podaj hasło",url:"https://paypal.com.evil.test/login"})');
       if (!['High','Critical'].includes(assessment.risk)) throw new Error('Nieprawidłowa ocena');
       await new Promise(resolve => setTimeout(resolve, 1500));
-      fs.writeFileSync(path.join(process.env.SENTINEL_DATA_ROOT, 'desktop.png'), (await win.webContents.capturePage()).toPNG());
+      fs.writeFileSync(path.join(process.env.SENTINEL_DATA_ROOT, 'smoke-test.passed'), 'renderer and engine checks passed');
       console.log('PASS: Electron renderer → isolated preload → IPC → .NET → SQLite');
       quitting = true; app.quit();
     } catch (error) { console.error(error); quitting = true; app.exit(1); }

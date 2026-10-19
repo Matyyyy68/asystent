@@ -8,20 +8,21 @@ New-Item -ItemType Directory -Force $out | Out-Null
 Push-Location (Join-Path $repo 'desktop')
 try {
   npm.cmd run build
-  if ($LASTEXITCODE) { throw 'Budowa aplikacji nie powiodła się.' }
-  foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error')) {
+  if ($LASTEXITCODE) { throw 'Application build failed.' }
+  foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel')) {
     if (!(Test-Path (Join-Path $repo "desktop/dist/media/illustrations/installer/$asset.png"))) {
       throw "Brak ilustracji instalatora w paczce aplikacji: $asset.png"
     }
   }
   npx.cmd electron-builder --win dir
-  if ($LASTEXITCODE) { throw 'Budowa plików aplikacji nie powiodła się.' }
+  if ($LASTEXITCODE) { throw 'Electron packaging failed.' }
 } finally { Pop-Location }
 if (Test-Path $payload) { Remove-Item $payload -Force }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($unpacked, $payload, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 $hash = (Get-FileHash $payload -Algorithm SHA256).Hash
 dotnet publish (Join-Path $PSScriptRoot 'Sentinel.Setup/Sentinel.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PayloadZip="$payload" -p:PayloadSha256="$hash" -o $out
-if ($LASTEXITCODE) { throw 'Budowa własnego instalatora nie powiodła się.' }
+if ($LASTEXITCODE) { throw 'Installer publish failed.' }
 $installer = Join-Path $out 'Sentinel.AI.Setup.exe'
 $namedInstaller = Join-Path $out "Sentinel.AI.Setup.$version.exe"
 Move-Item -Force $installer $namedInstaller
@@ -29,3 +30,6 @@ $finalHash = (Get-FileHash $namedInstaller -Algorithm SHA256).Hash
 Set-Content -NoNewline -Encoding ascii "$namedInstaller.sha256" "$finalHash  Sentinel.AI.Setup.$version.exe`n"
 Write-Host "Instalator: $namedInstaller"
 Write-Host "SHA-256: $finalHash"
+& $namedInstaller --self-test
+if ($LASTEXITCODE) { throw 'Installer self-test failed.' }
+Write-Host 'Autotest instalatora: PASS'

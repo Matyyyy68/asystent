@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-10-19 — naprawa i walidacja instalatora
+
+- Naprawiono brak uprawnień `ALL APPLICATION PACKAGES` dla katalogu aplikacji; instalator teraz sprawdza wynik `icacls`, wymagany do uruchomienia sandboxa Chromium.
+- Pasek postępu liczy rzeczywiście skopiowane bajty, anulowanie przerywa ekstrakcję i usuwa staging, a aktualizacja zachowuje pliki użytkownika spoza pakietu.
+- Dodano log etapów instalacji, błędów ACL i rejestracji hosta oraz możliwość otwarcia logu z komunikatu błędu. Błędy hosta nie są już ignorowane.
+- Odinstalowanie usuwa pliki aplikacji z pakietu, pozostawia dodatkowe pliki użytkownika i usuwa wyłącznie skróty wskazujące na instalację Sentinel AI.
+- Test `--self-test` wykonuje instalację w katalogu tymczasowym, ustawia ACL i uruchamia aplikację w izolowanym profilu, sprawdzając renderer, IPC i silnik .NET. Smoke test nie zależy od zrzutu ekranu GPU.
+
 ## 2026-10-19 — biblioteka ilustracji Sentinel AI
 
 - Zastąpiono starsze ilustracje z niepożądanymi tłami zestawem 63 nowych, minimalistycznych grafik PNG RGBA w siedmiu kategoriach.
