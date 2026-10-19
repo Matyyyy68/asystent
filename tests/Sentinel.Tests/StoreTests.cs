@@ -8,6 +8,13 @@ public sealed class StoreTests : IDisposable
     private async Task<LocalStore> Store() { var s = new LocalStore(dir); await s.InitializeAsync(); return s; }
     private static SecurityEvent Event(DateTimeOffset? time = null) => new(0,time ?? DateTimeOffset.UtcNow,RiskLevel.Information,"Test","Synthetic","Synthetic test only","No action",EventStatus.New);
     [Fact] public async Task SettingsSurviveReopening() { var s = await Store(); await s.SaveSettingsAsync(new(7,false)); var next = await Store(); Assert.Equal(new AppSettings(7,false), await next.LoadSettingsAsync()); }
+    [Fact] public async Task ContinuousTcpMonitoringOptInSurvivesReopening()
+    {
+        var store = await Store();
+        var settings = new AppSettings(Paused: false, MonitorNetworkConnections: true);
+        await store.SaveSettingsAsync(settings);
+        Assert.True((await (await Store()).LoadSettingsAsync()).MonitorNetworkConnections);
+    }
     [Fact] public async Task EventsAndFeedbackPersist() { var s = await Store(); var id = await s.AddAsync(Event()); await s.SetStatusAsync(id,EventStatus.FalsePositive); var next = await Store(); Assert.Equal(EventStatus.FalsePositive,Assert.Single(await next.ReadAsync()).Status); }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -204,6 +211,7 @@ public sealed class StoreTests : IDisposable
         await cmd.ExecuteNonQueryAsync();
         var settings = await s.LoadSettingsAsync();
         Assert.True(settings.Paused); Assert.False(settings.MonitorForegroundChanges);
+        Assert.False(settings.MonitorNetworkConnections);
         Assert.Equal(10, settings.MinimumIntervalSeconds); Assert.Contains("bitwarden",settings.ExcludedApplications);
     }
     [Theory] [InlineData(0)] [InlineData(301)]

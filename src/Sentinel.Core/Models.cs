@@ -21,7 +21,8 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     string LocalAIModel = "",
     int LocalAITimeoutSeconds = 30,
     bool StartWithWindows = false,
-    int DnsPollIntervalSeconds = 15);
+    int DnsPollIntervalSeconds = 15,
+    bool MonitorNetworkConnections = false);
 public interface IEventRepository
 {
     Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);

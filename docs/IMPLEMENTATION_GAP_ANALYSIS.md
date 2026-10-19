@@ -1,7 +1,7 @@
 # Audyt luk i plan realizacji Sentinel AI
 
 **Data audytu:** 2026-10-19  
-**Audytowany stan:** prerelease `0.15.7`, w tym build/test/self-test instalatora Windows w GitHub Actions.
+**Audytowany stan:** kandydat `0.15.8` (optymalizacje monitoringu TCP); publikacja wymaga potwierdzenia przez GitHub Actions.
 **Zakres:** opublikowane prerelease `0.15.1`, `0.15.3`–`0.15.7`, nieopublikowany kandydat `0.15.2`, osobny katalog `server/`, rozszerzenie MV3, instalator, witryna i dostępne testy Windows.
 **Wniosek:** projekt jest działającym prototypem ochrony lokalnej, nie produkcyjnym antywirusem ani monitorem całego ruchu. Nie wykrywa wszystkich zagrożeń, nie filtruje ani nie blokuje ruchu.
 
@@ -18,7 +18,7 @@ flowchart LR
   P --> DB[(SQLite: historia, ustawienia, reputacja)]
   P -->|co 5 s po opt-in| PROC[Snapshot procesów: PID/nazwa]
   P -->|co 15/60 s po zgodzie| DNS[Get-DnsClientCache]
-  P -->|na żądanie| TCP[Snapshot TCP/UDP z PID gdy dostępny]
+  P -->|ręcznie lub TCP opt-in co 10 s| TCP[Metadane TCP/UDP z PID gdy dostępny]
   H --> C
   H --> DB
   SUI[Panel admina] --> API[Serwer Enterprise: osobny proces]
@@ -26,7 +26,7 @@ flowchart LR
   API --> AI[Opcjonalne Ollama loopback]
 ```
 
-Przepływ rzeczywiście działający: użytkownik wkleja tekst/URL → lokalne reguły domeny i tekstu → opcjonalne dopasowanie do świeżej lokalnej listy CERT → zapis metadanych zdarzenia do SQLite → UI/historia. Drugi przepływ: jawne włączenie obserwacji → Electron wywołuje `collect` według ustawionego odstępu → silnik uruchamia PowerShell i odczytuje do 2000 wpisów cache DNS → dokładne dopasowanie do lokalnej listy → deduplikacja i zapis ostrzeżenia. Błąd odczytu jest obecnie skracany do nazwy typu wyjątku w stanie DNS. TCP jest osobnym, ręcznym snapshotem.
+Przepływ rzeczywiście działający: użytkownik wkleja tekst/URL → lokalne reguły domeny i tekstu → opcjonalne dopasowanie do świeżej lokalnej listy CERT → zapis metadanych zdarzenia do SQLite → UI/historia. Drugi przepływ: jawne włączenie obserwacji → Electron wywołuje `collect` według ustawionego odstępu → silnik odczytuje do 2000 wpisów cache DNS → dokładne dopasowanie do lokalnej listy → deduplikacja i zapis ostrzeżenia. Błąd odczytu jest obecnie skracany do nazwy typu wyjątku w stanie DNS. Tabele TCP/UDP czyta natywne Windows IP Helper; UDP to ręczny snapshot, a osobny TCP observer (domyślnie wyłączony) co 10 s zapisuje wyłącznie lokalne metadane nowych zewnętrznych połączeń `Established`/`SynSent`. Połączenia krótsze niż interwał mogą zostać pominięte.
 
 ## B. Macierz funkcjonalności
 
@@ -37,7 +37,7 @@ Przepływ rzeczywiście działający: użytkownik wkleja tekst/URL → lokalne r
 | F03 Ręczna analiza treści i URL | `DONE_AND_VERIFIED` | `ThreatAnalysisEngine`, `UrlAnalyzer`, `scripts/test-engine.cjs`; reguły deterministyczne, heurystyki ograniczone, bez sieciowego sprawdzania celu | lokalne reguły i PSL | P1 / M | Testy reguł, prywatności i URL; mierzone false positive/negative |
 | F04 Feed CERT Polska | `DONE_AND_VERIFIED` | `DomainReputation`; import transakcyjny, IDN, duplikaty, rollback, 48 h; test Windows/network pobrał 125344 domeny | internet tylko po kliknięciu | P1 / M | Feed poprawny, atomowy, świeży; brak wysyłania analizowanego URL |
 | F05 Cache DNS | `PARTIALLY_IMPLEMENTED` | `Sentinel.Engine/Program.cs`: okresowe `Get-DnsClientCache`, limit 2000, bez PID/czasu zapytania; pominięcia DoH/DoT/VPN/cache | Windows PowerShell, feed | P1 / L | Zmierzone opóźnienie/pominięcia, kontrolowane testowe domeny, degradacja widoczna |
-| F06 TCP/UDP i przypisanie procesu | `PARTIALLY_IMPLEMENTED` | na żądanie PowerShell `Get-NetTCPConnection` (do 800) i `Get-NetUDPEndpoint` (do 200) z PID/nazwą procesu, jeśli dostępna; brak ciągłego strumienia, historii, reputacji i krótkich połączeń | Windows PowerShell, IP Helper/ETW dla zdarzeń | P1 / L | Stabilne snapshoty/zdarzenia i jawne ograniczenia; test bez ruchu blokującego |
+| F06 TCP/UDP i przypisanie procesu | `PARTIALLY_IMPLEMENTED` | Natywny IP Helper snapshot do 800 TCP/200 UDP z PID/nazwą; opt-in TCP poll co 10 s zapisuje lokalne metadane nowych zewnętrznych połączeń. Brak gwarantowanego strumienia, reputacji, UDP historii i krótkich połączeń | Windows IP Helper; ETW dla pełniejszych zdarzeń wymaga oceny | P1 / L | Stabilne snapshoty/zdarzenia i jawne ograniczenia; kontrolowany test nie-loopback PASS |
 | F07 Monitorowanie procesów/zdarzeń Windows | `PARTIALLY_IMPLEMENTED` | próbki `Process.GetProcesses()` co 5 s wykrywają PID/nazwę pojawiające się i znikające między próbkami; pauza, wykluczenia i limit 100 zdarzeń/próbkę. WMI `Win32_ProcessStartTrace` w bieżącym koncie zwróciło `Access denied`; brak ścieżki, podpisu, trwałości, krótkich procesów i gwarancji ciągłości | Windows; WMI/ETW wymagają oceny uprawnień | P1 / L | Bezpieczny test procesu, PID, start/stop, kontrola wydajności i jawna informacja o pominięciach |
 | F08 Monitorowanie plików i reputacja | `PARTIALLY_IMPLEMENTED` | Na jawne żądanie UI wybiera pojedynczy plik ≤256 MiB; otwiera go tylko do odczytu, liczy SHA-256 i sprawdza Authenticode przez moduł Windows PowerShell Security. Zwraca status `Valid`/`NotSigned`/inny/`Unknown` i ewentualnego podpisującego; wynik nigdy nie jest werdyktem bezpieczeństwa. IPC sprawdza syntetyczny niepodpisany skrypt. Brak feedu reputacji, pobranych plików i monitoringu ścieżek | użytkownik wskazuje plik, Windows PowerShell Security | P2 / M | limit i błędy dostępu, podpisany fixture na czystym Windows, reputacja audytowanego źródła lub jawny `NO_RESULT` |
 | F09 Browser URL | `PARTIALLY_IMPLEMENTED` | rozszerzenie `onBeforeNavigate` dla głównej nawigacji Chrome/Edge, Native Messaging i reguły; warning może pojawić się po rozpoczęciu ładowania; ręczna instalacja; test prawdziwej przeglądarki nie wykonany | Chrome/Edge, rozszerzenie ręczne | P1 / M | test kart na czystym profilu, wyłącznie domeny `.test`, brak claim blokowania |
@@ -59,7 +59,7 @@ Przepływ rzeczywiście działający: użytkownik wkleja tekst/URL → lokalne r
 
 | Źródło / ruch | Metoda teraz | Ciągłość | Uprawnienia | Ograniczenia i wynik | Status |
 |---|---|---|---|---|---|
-| TCP | Windows PowerShell `Get-NetTCPConnection`, do 800 wierszy, po kliknięciu | snapshot | odczyt tabeli w bieżącym koncie; PID/nazwa mogą być niedostępne | brak krótkich połączeń, reputacji i historii; nie pokazuje payloadu | `PARTIALLY_IMPLEMENTED` |
+| TCP | Windows IP Helper `GetExtendedTcpTable`, do 800 wierszy; ręczny snapshot plus opcjonalny observer co 10 s | polling przyrostów (domyślnie wyłączony) | zwykłe konto; PID/nazwa mogą być niedostępne | nowe zewnętrzne połączenia `Established`/`SynSent`; krótkie połączenia mogą umknąć; brak reputacji; payload nie jest czytany | `PARTIALLY_IMPLEMENTED` |
 | UDP | `Get-NetUDPEndpoint`, do 200 punktów końcowych, po kliknięciu | snapshot punktów lokalnych, bez zdalnego endpointu | odczyt w bieżącym koncie; PID/nazwa mogą być niedostępne | nie śledzi datagramów ani ich zawartości; brak reputacji i historii | `PARTIALLY_IMPLEMENTED` |
 | DNS cache | PowerShell `Get-DnsClientCache`, maks. 2000 wpisów | próbkowanie co 15/60 s po opt-in | zwykły użytkownik w przetestowanej sesji | nie jest strumieniem zapytań; cache, DoH/DoT, VPN, IP i krótki TTL pominięte; bez PID | `PARTIALLY_IMPLEMENTED` |
 | DNS ETW / zdarzenia | kanał `Microsoft-Windows-DNS-Client/Operational` wyłączony na maszynie audytu | brak dostępnych zdarzeń do weryfikacji | włączenie kanału to zmiana konfiguracji Windows; wymaga testu na kontrolowanej maszynie | Microsoft opisuje Query Completed (3008); kanał nie został włączony ani nie zmieniano ustawień systemu; DoH/obcy resolver nadal ogranicza widoczność ([Microsoft WEF profile](https://learn.microsoft.com/en-au/windows/security/threat-protection/use-windows-event-forwarding-to-assist-intrusion-detection)) | `BLOCKED` dla weryfikacji w obecnym środowisku |
@@ -79,7 +79,7 @@ Wspólny model zdarzeń i źródła danych poprzedzają korelację oraz centraln
 
 | Plan | Zakres | Status 2026-10-19 |
 |---|---|---|
-| [PLAN-001: monitoring TCP/procesów](implementation-plans/PLAN-001-network-and-process-monitoring.md) | zdarzenia TCP/UDP i bezpieczna korelacja PID | `IN_PROGRESS` — snapshot TCP/UDP oraz start/zniknięcie procesu są testowane z kontrolowanymi loopback/child fixtures; krótkie zdarzenia, ciągłość i korelacja pozostają |
+| [PLAN-001: monitoring TCP/procesów](implementation-plans/PLAN-001-network-and-process-monitoring.md) | zdarzenia TCP/UDP i bezpieczna korelacja PID | `IN_PROGRESS` — natywny snapshot i opt-in TCP poll co 10 s; kontrolowany nie-loopback test potwierdza zapis nowego połączenia; krótkie zdarzenia, ciągłość i korelacja pozostają |
 | [PLAN-002: DNS i reputacja](implementation-plans/PLAN-002-dns-and-threat-intelligence.md) | źródła DNS, freshness, diagnostyka i feed | `IN_PROGRESS` — polling działa; pusty feed nie jest świeży; event log Windows jest wyłączony, IP feeds i testy kontrolowanego Windows pozostają |
 | [PLAN-003: pliki](implementation-plans/PLAN-003-file-monitoring.md) | weryfikacja i reputacja plików | `NOT_STARTED` |
 | [PLAN-004: detection/event schema](implementation-plans/PLAN-004-event-schema-and-detection.md) | model, korelacja, confidence, false-positive workflow | `IN_PROGRESS` — migracja v6, process metadata, provenance i false-positive UI; adapter Enterprise i korelacja pozostają |

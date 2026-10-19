@@ -1,6 +1,8 @@
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { createServer } = require('node:http');
+const net = require('node:net');
+const os = require('node:os');
 const { createSocket } = require('node:dgram');
 const { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -11,7 +13,7 @@ const child = spawn(path.resolve('artifacts/engine/Sentinel.Engine.exe'), [], { 
   env: { ...process.env, SENTINEL_DATA_ROOT: root }, stdio: ['pipe','pipe','inherit'] });
 const lines = createInterface({ input: child.stdout });
 const pending = new Map(); let id = 0;
-let ollamaServer, ollamaPayload, udpSocket;
+let ollamaServer, ollamaPayload, udpSocket, tcpMonitorServer, tcpMonitorClient;
 lines.on('line', line => { const response = JSON.parse(line); pending.get(response.id)?.(response); pending.delete(response.id); });
 function call(method, data = {}) { return new Promise(resolve => { const key = String(++id); pending.set(key, resolve); child.stdin.write(JSON.stringify({ ...data, id: key, version: 1, method }) + '\n'); }); }
 const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.error('Engine timeout'); }, 90000);
@@ -24,6 +26,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.storage.knowledge.recordCount, 0);
   assert.equal(initialStatus.result.enterprise.variant, 'User');
   assert.equal(initialStatus.result.enterprise.paired, false);
+  assert.equal(initialStatus.result.settings.monitorNetworkConnections, false, 'continuous TCP monitoring must default to off');
   assert.equal((await call('enterprisePair', { server: 'https://sentinel.example', invitationCode: 'test-code', shareSecurityMetadata: false })).ok, false,
     'Enterprise pairing must require explicit metadata consent');
   assert.equal((await call('enterpriseConsent', { enabled: true })).ok, false,
@@ -54,6 +57,11 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   udpSocket = createSocket('udp4'); await new Promise(resolve => udpSocket.bind(0, '127.0.0.1', resolve));
   await call('pause', { paused: false });
   const warmup = await call('collect'); assert.equal(warmup.ok, true, warmup.error);
+  const snapshotStarted = performance.now();
+  const connectionSnapshot = await call('connections'); assert.equal(connectionSnapshot.ok, true, connectionSnapshot.error);
+  assert.ok(performance.now() - snapshotStarted < 5000, 'IP Helper connection snapshot exceeded 5 seconds');
+  assert.ok(connectionSnapshot.result.some(c => c.protocol === 'TCP' && c.localPort === ollamaServer.address().port && c.processId === process.pid), 'IP Helper TCP table must attribute the controlled loopback listener to this test process');
+  assert.ok(connectionSnapshot.result.some(c => c.protocol === 'UDP' && c.localPort === udpSocket.address().port && c.processId === process.pid), 'IP Helper UDP table must attribute the controlled endpoint to this test process');
   const monitoredProcess = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { windowsHide: true, stdio: 'ignore' });
   await new Promise((resolve, reject) => { monitoredProcess.once('spawn', resolve); monitoredProcess.once('error', reject); });
   const sampleStarted = performance.now(); const startSample = await call('collect');
@@ -64,6 +72,32 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const processExited = new Promise(resolve => monitoredProcess.once('exit', resolve)); monitoredProcess.kill(); await processExited;
   await call('collect'); processHistory = (await call('history')).result;
   assert.ok(processHistory.some(e => e.processId === monitoredProcess.pid && e.category === 'Proces zniknął z migawki'), 'process disappearance must be recorded');
+  const enabledSettings = await call('settings', { retentionDays: 30, notifications: true, dnsPollIntervalSeconds: 15, monitorNetworkConnections: true });
+  assert.equal(enabledSettings.ok, true, enabledSettings.error);
+  const tcpBaseline = await call('collect'); assert.equal(tcpBaseline.ok, true, tcpBaseline.error);
+  assert.match(tcpBaseline.result.tcpConnections, /baza początkowa|działa/);
+  assert.equal((await call('status')).result.settings.monitorNetworkConnections, true);
+  if (process.argv.includes('--tcp-live')) {
+    const address = Object.values(os.networkInterfaces()).flat().find(item => item.family === 'IPv4' && !item.internal && !item.address.startsWith('169.254.'))?.address;
+    assert.ok(address, 'a non-loopback IPv4 interface is required for the controlled TCP monitor test');
+    tcpMonitorServer = net.createServer(socket => socket.on('data', () => {}));
+    await new Promise((resolve, reject) => { tcpMonitorServer.once('error', reject); tcpMonitorServer.listen(0, address, resolve); });
+    tcpMonitorClient = net.createConnection({ host: address, port: tcpMonitorServer.address().port });
+    await new Promise((resolve, reject) => { tcpMonitorClient.once('connect', resolve); tcpMonitorClient.once('error', reject); });
+    await new Promise(resolve => setTimeout(resolve, 10_500));
+    const tcpDelta = await call('collect'); assert.equal(tcpDelta.ok, true, tcpDelta.error);
+    const tcpHistory = (await call('history')).result;
+    assert.ok(tcpHistory.some(event => event.source === 'tcp-connection-snapshot' && event.explanation.includes(address)),
+      'enabled monitor must persist the controlled non-loopback TCP connection with its remote IP');
+    tcpMonitorClient.end(); await new Promise(resolve => tcpMonitorServer.close(resolve)); tcpMonitorClient = null; tcpMonitorServer = null;
+    console.log('PASS: opt-in TCP connection delta recorded the controlled non-loopback listener');
+  }
+  await call('pause', { paused: true });
+  const tcpPaused = await call('collect'); assert.equal(tcpPaused.ok, true, tcpPaused.error);
+  assert.match(tcpPaused.result.tcpConnections, /wstrzymana/);
+  const disabledSettings = await call('settings', { retentionDays: 30, notifications: true, dnsPollIntervalSeconds: 15, monitorNetworkConnections: false });
+  assert.equal(disabledSettings.ok, true, disabledSettings.error);
+  assert.equal((await call('status')).result.settings.monitorNetworkConnections, false);
   console.log(`PASS: process snapshot and child lifecycle; sample IPC+DB=${sampleDurationMs.toFixed(1)}ms`);
   await call('clearHistory'); await call('pause', { paused: true });
   if (process.argv.includes('--windows-live')) {
@@ -134,5 +168,5 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   await call('clearHistory'); assert.equal((await call('history')).result.length, 0);
   console.log('PASS: engine IPC, process start/stop snapshots, AI loopback mock, private knowledge, false-positive and privacy');
  } catch (error) { console.error(error); process.exitCode = 1; }
- finally { clearTimeout(timeout); if (udpSocket) udpSocket.close(); if (ollamaServer) await new Promise(resolve => ollamaServer.close(resolve)); child.stdin.end(); child.on('exit', () => rmSync(root, { recursive: true, force: true })); }
+ finally { clearTimeout(timeout); if (tcpMonitorClient) tcpMonitorClient.destroy(); if (tcpMonitorServer) await new Promise(resolve => tcpMonitorServer.close(resolve)); if (udpSocket) udpSocket.close(); if (ollamaServer) await new Promise(resolve => ollamaServer.close(resolve)); child.stdin.end(); child.on('exit', () => rmSync(root, { recursive: true, force: true })); }
 })();

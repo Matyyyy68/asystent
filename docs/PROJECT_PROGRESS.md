@@ -1,7 +1,7 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-19  
-**Etap:** audyt bazowy wykonany; wydanie testowe 0.15.7 opublikowane; pusta baza reputacji jest oznaczana jako nieaktualna; pozostałe plany realizowane.
+**Etap:** audyt bazowy wykonany; kandydat 0.15.8 dodaje opt-in monitoring TCP; 0.15.7 pozostaje ostatnim opublikowanym wydaniem do czasu weryfikacji CI.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest jeszcze w pełni zamknięty; 4 plany mają wdrożone i przetestowane etapy. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
@@ -45,6 +45,9 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## W trakcie / zablokowane
 
+- **Kandydat 0.15.8:** 155/155 testów .NET, Engine IPC z kontrolowanym nie-loopback TCP testem, `check-product`, UI lint i produkcyjny build PASS. IP Helper zastąpił PowerShell w odczycie endpointów. Observer TCP jest domyślnie wyłączony, próbuje co 10 s wykrywać nowe zewnętrzne połączenia `Established`/`SynSent` i zapisuje lokalnie tylko metadane. CI / instalator / Pages dla 0.15.8 jeszcze niezweryfikowane.
+- Zaktualizowano README, witrynę, audyt luk i PLAN-001; krótkie połączenia nadal mogą umknąć, a UDP pozostaje ręcznym snapshotem.
+
 - W trakcie: szczegółowe wdrożenia planów 001–010; PLAN-001 ma snapshot TCP/UDP, próbkowane zdarzenia procesu i test awarii/odzyskania źródła; PLAN-004/005 mają wdrożone i przetestowane etapy, a PLAN-007 ma eksport, kopie/restore obu baz, diagnostykę, limit importu wiedzy i testy współbieżności. Limity bazy historii/dysku, brak miejsca i ACL nadal wymagają pracy.
 - Wymaga czystej maszyny Windows: pełny GUI instalatora, upgrade/rollback/uninstall, autostart po restarcie i ręczna instalacja rozszerzeń Chrome/Edge.
 - Dodatkowa kontrola źródła DNS: `Microsoft-Windows-DNS-Client/Operational` jest wyłączony na bieżącej maszynie, więc zdarzenia DNS (w tym Query Completed 3008) nie mogą być tu zweryfikowane bez zmiany systemowej; nie włączano kanału.
@@ -54,5 +57,5 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## Następny konkretny krok
 
-Kontynuować [PLAN-001](implementation-plans/PLAN-001-network-and-process-monitoring.md): ocenić bezpieczną korelację PID z migawką TCP/UDP i przetestować wpływ polling-u na utratę krótkich zdarzeń oraz zasoby. Nie włączać ETW ani kanałów systemowych bez kontrolowanego środowiska Windows i jawnej konfiguracji.
+Zweryfikować wydanie 0.15.8 w Windows CI i Pages, a następnie wykonać soak test observera TCP i przejść do limitów historii/dysku/ACL z PLAN-007. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
 

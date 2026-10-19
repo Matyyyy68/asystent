@@ -2,7 +2,7 @@
 
 Rozwojowa aplikacja Windows 10/11 x64. React + TypeScript + Electron jest jedynym wspieranym interfejsem. Osobny proces .NET 10 używa lokalnych reguł i SQLite. Nie wymaga konta ani serwera Enterprise. Kod WPF zachowano wyłącznie w `legacy/` jako archiwum migracji; nie jest częścią bieżącego rozwiązania ani instalatora.
 
-**Stan: wersja do testów technicznych, nie gotowy produkt ochronny.** Aplikacja analizuje wklejoną wiadomość lub URL, sprawdza dokładną domenę na jawnie pobranej liście CERT Polska, odczytuje cache DNS Windows po włączeniu obserwacji i udostępnia metadane TCP na żądanie. Ostrzega, nie blokuje ruchu. DNS nie obejmuje DoH, VPN, pełnych URL, połączeń po IP ani niezawodnego przypisania do procesu. WFP i kontrola pobranych plików nie są wdrożone; skan pliku na żądanie oblicza wyłącznie SHA-256. Brak wykrycia nie potwierdza bezpieczeństwa. Sentinel nie zastępuje Windows Defender.
+**Stan: wersja do testów technicznych, nie gotowy produkt ochronny.** Aplikacja analizuje wklejoną wiadomość lub URL, sprawdza dokładną domenę na jawnie pobranej liście CERT Polska i odczytuje cache DNS Windows po włączeniu obserwacji. Opcjonalny, domyślnie wyłączony monitoring TCP próbuje co 10 sekund wykrywać nowe połączenia `Established`/`SynSent` i zapisuje lokalnie ich metadane (IP, port, PID i nazwę procesu, jeśli dostępne). Może pominąć krótkie połączenia; nie rejestruje payloadu ani nie blokuje ruchu. DNS nie obejmuje DoH, VPN, pełnych URL ani połączeń po IP; UDP pozostaje ręcznym snapshotem endpointów. WFP i kontrola pobranych plików nie są wdrożone; skan pliku na żądanie oblicza wyłącznie SHA-256. Brak wykrycia nie potwierdza bezpieczeństwa. Sentinel nie zastępuje Windows Defender.
 
 ## Wymagania i budowanie
 

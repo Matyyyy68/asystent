@@ -27,6 +27,8 @@ await store.ApplyRetentionAsync(settings.RetentionDays);
 var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
 var reputation = new DomainReputation(directory);
 var processMonitor = new ProcessSnapshotMonitor();
+var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationToken =>
+    (IReadOnlyCollection<ConnectionSnapshot>)await ReadConnectionSnapshotAsync(cancellationToken));
 using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
@@ -114,30 +116,10 @@ async Task RecordDetectionAsync(SecurityEvent item, string category, string rule
 DateTimeOffset? lastDnsRead = null;
 DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
-async Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
+Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
 {
-    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Snapshot TCP/UDP wymaga Windows.");
-    const string script = "$ErrorActionPreference='Stop'; $processes=@{}; Get-Process | ForEach-Object {$processes[[int]$_.Id]=$_.ProcessName}; " +
-        "$tcp=@(Get-NetTCPConnection -ErrorAction Stop | Select-Object -First 800 | ForEach-Object {[pscustomobject]@{protocol='TCP';localAddress=$_.LocalAddress;localPort=[int]$_.LocalPort;remoteAddress=$_.RemoteAddress;remotePort=[int]$_.RemotePort;state=[string]$_.State;processId=[int]$_.OwningProcess;processName=$processes[[int]$_.OwningProcess]}}); " +
-        "$udp=@(Get-NetUDPEndpoint -ErrorAction Stop | Select-Object -First 200 | ForEach-Object {[pscustomobject]@{protocol='UDP';localAddress=$_.LocalAddress;localPort=[int]$_.LocalPort;remoteAddress='';remotePort=$null;state='Endpoint';processId=[int]$_.OwningProcess;processName=$processes[[int]$_.OwningProcess]}}); " +
-        "ConvertTo-Json -InputObject @($tcp+$udp) -Compress -Depth 3";
-    using var process = new System.Diagnostics.Process { StartInfo = new System.Diagnostics.ProcessStartInfo
-    {
-        FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
-        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
-    } };
-    process.StartInfo.ArgumentList.Add("-NoProfile"); process.StartInfo.ArgumentList.Add("-NonInteractive");
-    process.StartInfo.ArgumentList.Add("-Command"); process.StartInfo.ArgumentList.Add(script);
-    process.Start();
-    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-    timeout.CancelAfter(TimeSpan.FromSeconds(8));
-    var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-    var errors = process.StandardError.ReadToEndAsync(timeout.Token);
-    try { await process.WaitForExitAsync(timeout.Token); }
-    catch { process.Kill(entireProcessTree: true); throw; }
-    var jsonText = await output; await errors;
-    if (process.ExitCode != 0 || jsonText.Length > 1_500_000) throw new InvalidDataException("Snapshot TCP/UDP niedostępny lub przekroczył limit.");
-    return JsonSerializer.Deserialize<ConnectionSnapshot[]>(jsonText, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+    cancellationToken.ThrowIfCancellationRequested();
+    return Task.FromResult(WindowsConnectionTableReader.Read());
 }
 object ReadRuntimeMetrics()
 {
@@ -199,7 +181,7 @@ while (await Console.In.ReadLineAsync() is { } line)
         {
             case "status":
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
-                    dns = dnsState, lastDnsRead, processes = processMonitor.State,
+                    dns = dnsState, lastDnsRead, processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
@@ -211,6 +193,8 @@ while (await Console.In.ReadLineAsync() is { } line)
             case "collect":
                 var detections = new List<string>();
                 var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
+                var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
+                    settings.ExcludedApplications);
                 if (settings.Paused) dnsState = "Obserwacja wstrzymana";
                 else if (OperatingSystem.IsWindows() && (lastDnsAttempt is not { } previousDnsAttempt || DateTimeOffset.UtcNow - previousDnsAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
                 {
@@ -256,7 +240,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
                     ? await SyncEnterpriseAsync(force: false) : null;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState,
-                    processChanges, processes = processMonitor.State, enterpriseSync };
+                    processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State, enterpriseSync };
                 break;
             case "history": result = await store.ReadAsync(); break;
             case "eventStatus":
@@ -357,7 +341,8 @@ while (await Console.In.ReadLineAsync() is { } line)
             case "settings":
                 var updatedSettings = settings with { RetentionDays = request.GetProperty("retentionDays").GetInt32(),
                     Notifications = request.GetProperty("notifications").GetBoolean(),
-                    DnsPollIntervalSeconds = request.TryGetProperty("dnsPollIntervalSeconds", out var interval) ? interval.GetInt32() : settings.DnsPollIntervalSeconds };
+                    DnsPollIntervalSeconds = request.TryGetProperty("dnsPollIntervalSeconds", out var interval) ? interval.GetInt32() : settings.DnsPollIntervalSeconds,
+                    MonitorNetworkConnections = request.TryGetProperty("monitorNetworkConnections", out var monitorNetwork) ? monitorNetwork.GetBoolean() : settings.MonitorNetworkConnections };
                 await store.SaveSettingsAsync(updatedSettings);
                 settings = updatedSettings;
                 await store.ApplyRetentionAsync(settings.RetentionDays);
@@ -413,6 +398,3 @@ while (await Console.In.ReadLineAsync() is { } line)
             ? ex.Message : "Operacja nie powiodła się: " + ex.GetType().Name }, json));
     }
 }
-
-sealed record ConnectionSnapshot(string Protocol, string LocalAddress, int LocalPort, string? RemoteAddress,
-    int? RemotePort, string State, int ProcessId, string? ProcessName);

@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-10-19 — kandydat 0.15.8
+
+- Dodano jawny opt-in dla próbkowania TCP co 10 s. Natywny IP Helper zastępuje PowerShell przy snapshotach; nowe zewnętrzne połączenia `Established`/`SynSent` zapisują lokalnie tylko metadane, bez payloadu. Monitoring domyślnie pozostaje wyłączony, a krótkie połączenia mogą zostać pominięte.
+- UI, README i strona opisują działanie oraz ograniczenia. Test live w Windows potwierdza wykrycie kontrolowanego nie-loopback połączenia. Testy .NET: 155/155; build silnika, IPC, lint UI i produkcyjny build UI PASS.
+
 ## 2026-10-19 — wydanie testowe 0.15.7
 
 - Pusta tabela domen nie jest już raportowana jako świeży feed, nawet jeśli pozostał aktualny znacznik pobrania. Dopasowanie domen pozostaje wyłączone w takim stanie.
