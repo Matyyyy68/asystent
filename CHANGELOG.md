@@ -1,9 +1,9 @@
 # CHANGELOG
 
-## 2026-10-19 — kandydat wydania 0.15.7
+## 2026-10-19 — wydanie testowe 0.15.7
 
 - Pusta tabela domen nie jest już raportowana jako świeży feed, nawet jeśli pozostał aktualny znacznik pobrania. Dopasowanie domen pozostaje wyłączone w takim stanie.
-- Dodano regresyjny test pustej bazy reputacji; pełny zestaw .NET przechodzi 152/152, `check-product`, TypeScript/lint i produkcyjny build UI PASS. Windows CI i publikacja prerelease v0.15.7 pozostają do wykonania.
+- Dodano regresyjny test pustej bazy reputacji; pełny zestaw .NET przechodzi 152/152, `check-product`, TypeScript/lint i produkcyjny build UI PASS. Windows CI wykonał build, testy, self-test i opublikował prerelease [v0.15.7](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.7). Instalator ma 262481011 B, SHA-256 `8945010bc5fe4c1a73a99d23d883cacccccc7c345551902428569e4c920736f6`; Pages workflow PASS.
 
 ## 2026-10-19 — wydanie testowe 0.15.6
 
