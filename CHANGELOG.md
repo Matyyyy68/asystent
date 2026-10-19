@@ -3,7 +3,7 @@
 ## 2026-10-19 — kandydat 0.15.10
 
 - Obserwatory procesów i TCP zachowują punkt odniesienia, dopóki nowe zdarzenia nie zostaną zapisane w historii. Przy `SQLITE_FULL` pokazują stan błędu i ponawiają zapis po odzyskaniu miejsca; test potwierdza zapis zdarzenia procesu po zwolnieniu miejsca.
-- Testy .NET: 157/157. UI build/lint, Engine IPC oraz Windows CI i Pages wymagają potwierdzenia dla tego kandydata.
+- Testy .NET: 157/157. UI build/lint i Engine IPC PASS. Windows CI build/test/self-test oraz Pages PASS; prerelease [v0.15.10](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.10) zawiera instalator 262488693 B, SHA-256 `62b517bf665eb2e06f2f44c83524de34d541ea3031d24059f20cd9b3e7e61227`.
 
 ## 2026-10-19 — kandydat 0.15.9
 
