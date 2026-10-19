@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-10-19 — wydanie testowe 0.15.1
+
+- Wydano poprawki audytu, monitoringu Enterprise i przywracania kopii serwera z Windows.
+- Zweryfikowano 146/146 testów klienta, 19/19 testów API serwera, 2/2 testy restore backupu, testy witryny/lint/build oraz `--self-test` instalatora.
+- Instalator `Sentinel.AI.Setup.0.15.1.exe` będzie opublikowany jako prerelease wraz z plikiem SHA-256 przez workflow GitHub po wypchnięciu tagu `v0.15.1`.
+
 ## 2026-10-19 — audyt i lokalny kontrakt zdarzeń v1
 
 - Dodano audyt luk, postęp prac i 10 planów wdrożenia, które rozdzielają zweryfikowane funkcje, braki i zewnętrzne ograniczenia.

@@ -11,7 +11,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 - Klient: 146 testów .NET (w tym 32 równoległe zapisy SQLite, zgoda/profil/kolejka Enterprise, cap 10 000, odmowa niepełnego potwierdzenia batcha, odwołanie zgody i DPAPI round-trip sprawdzony w interaktywnej sesji Windows), build Electron/UI oraz IPC → reguły → SQLite; testy obejmują false positive, odrzucenie endpointu zdalnego, import/wyszukanie/usunięcie prywatnego dokumentu, redagowany eksport, kopie i przywracanie obu baz, cykl życia procesu, zalew 10k PID i odzyskanie po błędzie źródła.
 - Windows/reputacja: aktualizacja CERT Polska (ponad 125 tys. domen), cache DNS i kontrolowany snapshot TCP/UDP z PID procesu dla loopback.
-- Instalator 0.15: bieżący build po pełnym teście klienta, smoke IPC i buildzie UI; `--self-test` instalacji w katalogu tymczasowym, ACL AppContainer oraz renderer → preload → IPC → .NET → SQLite PASS. Rozmiar 279275383 B, SHA-256 `D0F10CE47F0A7C937E1ABED5DA29229FDFD14CBED436F2FCFEAE2E8A828ED231`. Nie jest to test czystego komputera.
+- Instalator 0.15.1: build po pełnym teście klienta, smoke IPC i buildzie UI; `--self-test` instalacji w katalogu tymczasowym, ACL AppContainer oraz renderer → preload → IPC → .NET → SQLite PASS. Rozmiar 279275383 B, SHA-256 `2441351AFD10EC1132CE34425512A0D328807350241A60CA5AAB5FAED44B9334`. Nie jest to test czystego komputera. GitHub Release zostanie utworzony przez workflow po wypchnięciu tagu.
 - Zasoby silnika: pięciominutowy pomiar lokalny, 60 próbek co 5 s, 257 procesów systemowych; średnie CPU procesu 0,057% logicznej mocy wszystkich procesorów, working set 43,4 MiB początkowo / 53,8 MiB maksimum, `collect` mediana 5 ms i maksimum 1 359,8 ms. To pojedyncza sesja bez wysokiego syntetycznego obciążenia, nie gwarancja wydajności.
 - Witryna: test lokalnych linków/zasobów, 63 ilustracje, lint i produkcyjny build.
 - Enterprise: 19 testów jednostkowych, build rozwiązania serwera i test HTTP API: bootstrap/login, RBAC, polityki, AI z bramką zgody, FTS5, zaproszenie, agent, heartbeat i unieważnianie.
@@ -43,7 +43,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 - W trakcie: szczegółowe wdrożenia planów 001–010; PLAN-001 ma snapshot TCP/UDP, próbkowane zdarzenia procesu i test awarii/odzyskania źródła; PLAN-004/005 mają wdrożone i przetestowane etapy, a PLAN-007 ma eksport i kopie/restore obu baz z testami. Dodano także test 32 równoległych zapisów SQLite; limity rozmiaru, brak miejsca i ACL nadal wymagają pracy.
 - Wymaga czystej maszyny Windows: pełny GUI instalatora, upgrade/rollback/uninstall, autostart po restarcie i ręczna instalacja rozszerzeń Chrome/Edge.
-- Wymaga dostępu właściciela/hostingu: status live Pages i release `v0.15.0` nie został potwierdzony przez przeglądarkę w tym środowisku.
+- Wymaga zakończenia GitHub Actions po tagu `v0.15.1` oraz późniejszej kontroli live Pages; tag `v0.15.0` istniał bez odpowiadającego Release.
 - Wymaga decyzji właściciela: licencja źródeł i warunki redystrybucji. Wymaga zakupu/decyzji: podpis kodu dla bezpiecznego autoupdate.
 - `npm audit` zgłosił 8 umiarkowanych alertów w łańcuchu narzędzia budującego instalator (`electron-builder` dev dependency → `sprintf-js`); GitHub Advisory obecnie nie podaje poprawionej wersji. `npm audit fix --force` proponuje downgrade narzędzia, więc nie stosowałem automatycznej, potencjalnie niezgodnej zmiany. To zależność build-time; należy ponowić audyt po publikacji poprawki upstream.
 
