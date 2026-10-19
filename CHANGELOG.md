@@ -1,10 +1,16 @@
 # CHANGELOG
 
-## 2026-10-19 — wydanie testowe 0.15.2
+## 2026-10-19 — kandydat wydania 0.15.3
+
+- Dodano pomiar rozmiaru baz SQLite historii i wiedzy, w tym WAL/SHM, stron i rekordów.
+- Monitor procesów zapisuje do 100 zmian jednej próbki w pojedynczej transakcji. CI wykazało, że 100 osobnych zapisów przekraczało 30 s na wolniejszym runnerze; test pokrywa atomowość błędnego batcha.
+- Klient przechodzi 149/149 testów lokalnie; test syntetycznego zalewu PID spadł z około 50 s na CI do 183 ms lokalnie po batchowaniu. Pełny build instalatora i self-test PASS. Lokalny installer 279280503 B, SHA-256 `B19AA84956674BDE9933735B8EB5D9AD06C3EDE18CB432447817D9DA9EBD5A4B`; workflow CI jeszcze nie uruchomiony.
+
+## 2026-10-19 — nieopublikowany kandydat 0.15.2
 
 - Dodano diagnostykę rozmiaru plików SQLite historii i bazy wiedzy, w tym WAL/SHM, liczbę stron, wolne strony i rekordy; pomiar jest widoczny w sekcji prywatności.
 - Dodano testy metryk obu baz oraz kontrolę statusu storage w smoke teście silnika. Klient przechodzi 148/148 testów .NET; check-product, TypeScript, IPC i self-test instalatora PASS.
-- Instalator 0.15.2 zostanie opublikowany jako prerelease po przejściu workflow tagu `v0.15.2`.
+- Workflow tagu `v0.15.2` nie przeszedł: test 10 000 zmian PID trwał 50 s przy progu 30 s. Poprawkę wydajnościową zawiera 0.15.3.
 
 ## 2026-10-19 — wydanie testowe 0.15.1
 

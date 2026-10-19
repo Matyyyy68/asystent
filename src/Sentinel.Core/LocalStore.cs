@@ -131,22 +131,34 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: true, cancellationToken);
     /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
     public Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: false, cancellationToken);
+    public async Task<int> AddLocalOnlyBatchAsync(IReadOnlyCollection<SecurityEvent> items, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count > 100) throw new ArgumentOutOfRangeException(nameof(items), "Limit batcha lokalnego zapisu to 100 zdarzeń.");
+        if (items.Count == 0) return 0;
+        var validated = items.Select(item => (Item: item, Metadata: ValidateEvent(item))).ToArray();
+        await using var c = await Open(cancellationToken);
+        using var transaction = c.BeginTransaction();
+        foreach (var (item, (eventId, source)) in validated)
+        {
+            using var command = c.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName)";
+            AddEventParameters(command, item, eventId, source);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return validated.Length;
+    }
     private async Task<long> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise, CancellationToken cancellationToken)
     {
-        if (!Enum.IsDefined(item.Risk) || !Enum.IsDefined(item.Status)) throw new ArgumentException("Nieprawidłowe zdarzenie.");
-        foreach (var text in new[] {item.Category,item.Application,item.Explanation,item.Recommendation})
-            if (string.IsNullOrWhiteSpace(text) || text.Length > 2000) throw new ArgumentException("Nieprawidłowe metadane zdarzenia.");
-        var eventId = item.EventId ?? Guid.NewGuid();
-        var source = string.IsNullOrWhiteSpace(item.Source) ? item.Application : item.Source;
-        if (eventId == Guid.Empty || source.Length > 100 || item.RuleVersion?.Length > 80 || item.Confidence is < 0 or > 100 || item.SchemaVersion != 1 ||
-            item.ProcessId < 0 || item.ProcessName?.Length > 260 || item.ProcessName?.Any(char.IsControl) == true)
-            throw new ArgumentException("Nieprawidłowe pochodzenie zdarzenia.");
+        var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(cancellationToken);
-        await Execute(c, "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName)", cancellationToken,
-            ("$t", item.Timestamp.ToUniversalTime().ToString("O")), ("$r", (int)item.Risk), ("$c", item.Category), ("$a", item.Application),
-            ("$e", item.Explanation), ("$n", item.Recommendation), ("$s", (int)item.Status), ("$eventId", eventId.ToString("D")),
-            ("$source", source), ("$ruleVersion", (object?)item.RuleVersion ?? DBNull.Value), ("$confidence", (object?)item.Confidence ?? DBNull.Value), ("$schemaVersion", item.SchemaVersion),
-            ("$processId", (object?)item.ProcessId ?? DBNull.Value), ("$processName", (object?)item.ProcessName ?? DBNull.Value));
+        using (var insert = c.CreateCommand())
+        {
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName)";
+            AddEventParameters(insert, item, eventId, source);
+            await insert.ExecuteNonQueryAsync(cancellationToken);
+        }
         using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT last_insert_rowid()"; var id = (long)(await cmd.ExecuteScalarAsync(cancellationToken))!;
         string? profileJson = null;
         if (enqueueEnterprise)
@@ -170,6 +182,31 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             await EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, item.Timestamp, category, (int)item.Risk, ruleCode), cancellationToken);
         }
         return id;
+    }
+    private static (Guid EventId, string Source) ValidateEvent(SecurityEvent item)
+    {
+        if (!Enum.IsDefined(item.Risk) || !Enum.IsDefined(item.Status)) throw new ArgumentException("Nieprawidłowe zdarzenie.");
+        foreach (var text in new[] { item.Category, item.Application, item.Explanation, item.Recommendation })
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 2000) throw new ArgumentException("Nieprawidłowe metadane zdarzenia.");
+        var eventId = item.EventId ?? Guid.NewGuid();
+        var source = string.IsNullOrWhiteSpace(item.Source) ? item.Application : item.Source;
+        if (eventId == Guid.Empty || source.Length > 100 || item.RuleVersion?.Length > 80 || item.Confidence is < 0 or > 100 || item.SchemaVersion != 1 ||
+            item.ProcessId < 0 || item.ProcessName?.Length > 260 || item.ProcessName?.Any(char.IsControl) == true)
+            throw new ArgumentException("Nieprawidłowe pochodzenie zdarzenia.");
+        return (eventId, source);
+    }
+    private static void AddEventParameters(SqliteCommand command, SecurityEvent item, Guid eventId, string source)
+    {
+        command.Parameters.AddWithValue("$t", item.Timestamp.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$r", (int)item.Risk); command.Parameters.AddWithValue("$c", item.Category);
+        command.Parameters.AddWithValue("$a", item.Application); command.Parameters.AddWithValue("$e", item.Explanation);
+        command.Parameters.AddWithValue("$n", item.Recommendation); command.Parameters.AddWithValue("$s", (int)item.Status);
+        command.Parameters.AddWithValue("$eventId", eventId.ToString("D")); command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$ruleVersion", (object?)item.RuleVersion ?? DBNull.Value);
+        command.Parameters.AddWithValue("$confidence", (object?)item.Confidence ?? DBNull.Value);
+        command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
+        command.Parameters.AddWithValue("$processId", (object?)item.ProcessId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$processName", (object?)item.ProcessName ?? DBNull.Value);
     }
     public async Task<IReadOnlyList<PendingEnterpriseEvent>> ReadPendingEnterpriseEventsAsync(int limit = 100, CancellationToken ct = default)
     {

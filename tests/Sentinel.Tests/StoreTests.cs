@@ -35,6 +35,17 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(32, ids.Distinct().Count());
         Assert.Equal(32, events.Select(item => item.EventId).Distinct().Count());
     }
+    [Fact] public async Task LocalEventBatchIsAtomicWhenAnEntryIsInvalid()
+    {
+        var store = await Store();
+        var batch = new[] { Event(), Event() with { ProcessName = new string('x', 261) } };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.AddLocalOnlyBatchAsync(batch));
+
+        Assert.Empty(await store.ReadAsync());
+        Assert.Equal(2, await store.AddLocalOnlyBatchAsync([Event(), Event()]));
+        Assert.Equal(2, (await store.ReadAsync()).Count);
+    }
     [Fact] public async Task NewEventsPersistStableIdentityAndProvenance()
     {
         var s = await Store();

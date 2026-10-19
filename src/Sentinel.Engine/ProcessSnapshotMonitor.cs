@@ -50,17 +50,19 @@ public sealed class ProcessSnapshotMonitor
         knownProcesses = current;
         var toStore = changes.Take(MaximumEventsPerSample).ToArray();
         droppedEvents += Math.Max(0, changes.Count - toStore.Length);
-        foreach (var change in toStore)
+        var now = DateTimeOffset.UtcNow;
+        var events = toStore.Select(change =>
         {
             var explanation = change.Action == "Proces zaobserwowany"
                 ? $"Windows pokazał nowy PID {change.ProcessId} o nazwie {change.ProcessName} od poprzedniej próbki. Krótkie procesy mogą zostać pominięte."
                 : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
-            await store.AddLocalOnlyAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
+            return new SecurityEvent(0, now, RiskLevel.Information,
                 change.Action, change.ProcessName, explanation,
                 "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
-                ProcessId: change.ProcessId, ProcessName: change.ProcessName), cancellationToken);
-        }
+                ProcessId: change.ProcessId, ProcessName: change.ProcessName);
+        }).ToArray();
+        await store.AddLocalOnlyBatchAsync(events, cancellationToken);
 
         var capped = current.Count >= MaximumProcesses ? " Limit snapshotu osiągnięty." : "";
         State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, pominięto łącznie {droppedEvents}.{capped}";

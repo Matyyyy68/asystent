@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sentinel AI — ochrona przeglądania",
-  "version": "0.15.2",
+  "version": "0.15.3",
   "description": "Lokalnie sprawdza adresy w Edge i Chrome przez Native Messaging.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqbzye5lM9akURrAoRNWOjBXI/I7q9puxHPcbmBXa0mG0dNnlFMXXNfm7lbVuKTAloxrBEV7urfiWH+rhCqZYw71eVmUiOuhvrcLz7FVPlIZUXt3y6jRZCjiax6Il6PCMkGhxN/6k2OOZFqwRsGBGLkUIfEQn7pGWLw/+TBvZLKFqjXUcoFbxuW+k7tuooRl9PcJmUYNUgTEh7k8+pJ0rfj0V7t4rgbbPI1HpbY4BNcUCM+KTnXq14aq+qgWOfJRigg514SahNzwFaou3wUxS4hoAXi9PkZvuHlJY0ELXtTR9oV4mY0QM6Oh2qj24dUR91vwtz1u1nLrLYAyTKyaTPQIDAQAB",
   "permissions": [
