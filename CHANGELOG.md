@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-10-19 — kandydat wydania 0.15.6
+
+- Dodano integracyjny test limitu 20 mln indeksowanych znaków. Test wypełnia FTS5 do limitu i sprawdza, że nadmiarowy import jest odrzucony bez naruszenia istniejącego indeksu.
+- Zmiana kodu limitu nie uległa zmianie względem wydania 0.15.5; testy, check-product, lint/build oraz CI dla v0.15.6 pozostają do wykonania.
+
 ## 2026-10-19 — wydanie testowe 0.15.5
 
 - UI lokalnej bazy wiedzy pokazuje teraz limity 100 dokumentów i 20 mln znaków oraz wyjaśnia, że nadmiarowy import nie usuwa wcześniejszych dokumentów.

@@ -121,6 +121,28 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task EnforcesIndexedCharacterLimitWithoutChangingExistingIndex()
+    {
+        var store = await CreateAsync();
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var seed = connection.CreateCommand();
+            seed.CommandText = "INSERT INTO documents(id,name,sha256,imported_at,chunk_count) VALUES('seed','existing.txt','seed-hash',$now,1); INSERT INTO chunks(source,content) VALUES('seed#0',$content)";
+            seed.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O"));
+            seed.Parameters.AddWithValue("$content", new string(' ', checked((int)LocalKnowledgeBase.MaximumIndexedCharacters)));
+            await seed.ExecuteNonQueryAsync();
+        }
+
+        var incoming = Path.Combine(directory, "incoming.txt");
+        await File.WriteAllTextAsync(incoming, "New unique content.");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.ImportAsync(incoming));
+
+        Assert.Contains("znaków", error.Message);
+        Assert.Equal("existing.txt", Assert.Single(await store.ListAsync()).Name);
+    }
+
+    [Fact]
     public async Task BackupCanBeReopenedWithDocumentsAndSearchIndexIntact()
     {
         var store = await CreateAsync();
