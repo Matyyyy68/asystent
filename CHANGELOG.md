@@ -1,9 +1,9 @@
 # CHANGELOG
 
-## 2026-10-19 — kandydat wydania 0.15.5
+## 2026-10-19 — wydanie testowe 0.15.5
 
 - UI lokalnej bazy wiedzy pokazuje teraz limity 100 dokumentów i 20 mln znaków oraz wyjaśnia, że nadmiarowy import nie usuwa wcześniejszych dokumentów.
-- Testy jednostkowe 150/150 przechodzą po zmianie logiki limitu w 0.15.4; `check-product`, TypeScript/lint i produkcyjny build UI przechodzą. Pełny Windows CI i publikacja prerelease 0.15.5 pozostają do wykonania.
+- Testy jednostkowe 150/150 przechodzą po zmianie logiki limitu w 0.15.4; `check-product`, TypeScript/lint i produkcyjny build UI przechodzą. GitHub Actions potwierdził Windows build/test/self-test i opublikował prerelease [v0.15.5](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.5). Instalator CI ma 262481011 B, SHA-256 `81fb4097a5bd9f72c47f3048ee73c81e664b282e7301f2de7b0a6f9c513a4fea`; Pages workflow również PASS.
 
 ## 2026-10-19 — wydanie testowe 0.15.4
 

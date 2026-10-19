@@ -11,5 +11,5 @@
 9. **Testy:** eksport bez pełnej treści/URL, kopia obu SQLite, restore dokumentów i wyszukiwania FTS5, restore historii/settings z zachowaniem profilu, odrzucenie corrupt bez zmiany aktywnych danych, retencja, 32 równoległe zapisy PASS, pomiar storage z danymi PASS; dodano test odmowy 101. dokumentu bez utraty indeksu. Brak miejsca i ACL check pozostają niewykonane.
 10. **Akceptacja:** kopie przechodzą `integrity_check`; restore obsługiwanych wersji waliduje dane przed transakcją; błędna kopia nie modyfikuje aktywnej bazy; profil instalacji pozostaje bez zmian; eksport nie zawiera surowej treści/URL.
 11. **Ryzyka:** SQLite file encryption wymaga osobnej zależności/klucza i może utrudnić naprawę.
-12. **Status:** `IN_PROGRESS` — eksport, backup/restore obu baz, pomiar rozmiaru, limity bazy wiedzy i test współbieżnych zapisów wdrożone oraz testowane; pełny Windows CI dla wydania 0.15.4 PASS. Limity bazy historii, testy braku miejsca, obciążeniowe i ACL pozostają.
+12. **Status:** `IN_PROGRESS` — eksport, backup/restore obu baz, pomiar rozmiaru, limity bazy wiedzy i test współbieżnych zapisów wdrożone oraz testowane; UI komunikuje limity, a pełny Windows CI dla wydania 0.15.5 PASS. Limity bazy historii, testy braku miejsca, obciążeniowe i ACL pozostają.
 
