@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-10-19 — kandydat 0.15.10
+
+- Obserwatory procesów i TCP zachowują punkt odniesienia, dopóki nowe zdarzenia nie zostaną zapisane w historii. Przy `SQLITE_FULL` pokazują stan błędu i ponawiają zapis po odzyskaniu miejsca; test potwierdza zapis zdarzenia procesu po zwolnieniu miejsca.
+- Testy .NET: 157/157. UI build/lint, Engine IPC oraz Windows CI i Pages wymagają potwierdzenia dla tego kandydata.
+
 ## 2026-10-19 — kandydat 0.15.9
 
 - Ograniczono wzrost lokalnej historii SQLite do 512 MiB; przy pełnym dysku lub limicie transakcja jest odrzucana bez automatycznego kasowania starszych zdarzeń, a użytkownik dostaje czytelny komunikat. Test wymuszonego SQLITE_FULL potwierdza rollback batcha i zachowanie wcześniejszych wpisów.

@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 
@@ -68,7 +69,7 @@ public sealed class TcpConnectionSnapshotMonitor
 
         var newConnections = current.Except(knownConnections).ToArray();
         var added = newConnections.Take(MaximumEventsPerSample).ToArray();
-        droppedEvents += newConnections.Length - added.Length;
+        var newlyDroppedEvents = newConnections.Length - added.Length;
         var events = added.Select(connection => new SecurityEvent(0, now, RiskLevel.Information,
             "Zaobserwowano połączenie TCP", connection.ProcessName,
             $"Nowa migawka TCP: {connection.LocalAddress}:{connection.LocalPort} → {connection.RemoteAddress}:{connection.RemotePort}, stan {connection.State}, PID {connection.ProcessId}.",
@@ -76,8 +77,17 @@ public sealed class TcpConnectionSnapshotMonitor
             EventId: Guid.NewGuid(), Source: "tcp-connection-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
             ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName)).ToArray();
 
-        if (events.Length > 0) await store.AddLocalOnlyBatchAsync(events, cancellationToken);
+        if (events.Length > 0)
+        {
+            try { await store.AddLocalOnlyBatchAsync(events, cancellationToken); }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
+            {
+                State = "Historia nie przyjęła nowych połączeń: baza osiągnęła limit lub brakuje miejsca. Zmiany TCP pozostają do ponowienia.";
+                return 0;
+            }
+        }
         knownConnections = current;
+        droppedEvents += newlyDroppedEvents;
         State = $"Ciągła migawka TCP działa; {current.Count} połączeń, {events.Length} nowych, pominięto łącznie {droppedEvents}. Krótkie połączenia mogą zostać pominięte.";
         return events.Length;
     }

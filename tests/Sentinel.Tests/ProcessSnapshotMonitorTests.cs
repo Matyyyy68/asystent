@@ -1,4 +1,5 @@
 using Sentinel.Core;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Sentinel.Tests;
@@ -53,6 +54,45 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
         Assert.Contains("Snapshot procesów działa", monitor.State);
         Assert.Equal(43210, Assert.Single(await store.ReadAsync()).ProcessId);
+    }
+
+    [Fact]
+    public async Task ProcessDeltaIsRetriedAfterHistoryDatabaseIsFull()
+    {
+        const long maximumBytes = 1024 * 1024;
+        var store = new LocalStore(directory, maximumBytes);
+        await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string> { [41] = "existing-process" };
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        var batchFailed = false;
+        var full = false;
+        SecurityEvent Filler() => new(0, DateTimeOffset.UtcNow, RiskLevel.Information, "Proces zaobserwowany", "new-process",
+            "Windows pokazał nowy PID 99 o nazwie new-process od poprzedniej próbki. Krótkie procesy mogą zostać pominięte.",
+            "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
+            Source: "process-snapshot", RuleVersion: Sentinel.Core.Analysis.ThreatAnalysisEngine.RulesVersion,
+            ProcessId: 99, ProcessName: "new-process");
+
+        for (var batch = 0; batch < 100 && !batchFailed; batch++)
+        {
+            try { await store.AddLocalOnlyBatchAsync(Enumerable.Range(0, 100).Select(_ => Filler()).ToArray()); }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 13) { batchFailed = true; }
+        }
+        Assert.True(batchFailed);
+        for (var attempt = 0; attempt < 100 && !full; attempt++)
+        {
+            try { await store.AddLocalOnlyAsync(Filler()); }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 13) { full = true; }
+        }
+        Assert.True(full);
+
+        snapshot.Add(42, "new-process");
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Contains("pozostają do ponowienia", monitor.State);
+        Assert.DoesNotContain(await store.ReadAsync(), item => item.ProcessId == 42);
+
+        await store.DeleteHistoryAsync();
+        Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(42, Assert.Single(await store.ReadAsync()).ProcessId);
     }
 
     public void Dispose()

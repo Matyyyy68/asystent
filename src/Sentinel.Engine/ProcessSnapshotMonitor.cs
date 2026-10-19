@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 
@@ -47,9 +48,8 @@ public sealed class ProcessSnapshotMonitor
             if ((!current.TryGetValue(id, out var currentName) || !string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
                 changes.Add(new("Proces zniknął z migawki", id, name));
 
-        knownProcesses = current;
         var toStore = changes.Take(MaximumEventsPerSample).ToArray();
-        droppedEvents += Math.Max(0, changes.Count - toStore.Length);
+        var newlyDroppedEvents = Math.Max(0, changes.Count - toStore.Length);
         var now = DateTimeOffset.UtcNow;
         var events = toStore.Select(change =>
         {
@@ -62,8 +62,15 @@ public sealed class ProcessSnapshotMonitor
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: change.ProcessId, ProcessName: change.ProcessName);
         }).ToArray();
-        await store.AddLocalOnlyBatchAsync(events, cancellationToken);
+        try { await store.AddLocalOnlyBatchAsync(events, cancellationToken); }
+        catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
+        {
+            State = "Historia nie przyjęła zdarzeń: baza osiągnęła limit lub brakuje miejsca. Zmiany procesu pozostają do ponowienia.";
+            return 0;
+        }
 
+        knownProcesses = current;
+        droppedEvents += newlyDroppedEvents;
         var capped = current.Count >= MaximumProcesses ? " Limit snapshotu osiągnięty." : "";
         State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, pominięto łącznie {droppedEvents}.{capped}";
         return toStore.Length;
