@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-10-19 — kandydat wydania 0.15.5
+
+- UI lokalnej bazy wiedzy pokazuje teraz limity 100 dokumentów i 20 mln znaków oraz wyjaśnia, że nadmiarowy import nie usuwa wcześniejszych dokumentów.
+- Testy jednostkowe 150/150 przechodzą po zmianie logiki limitu w 0.15.4; `check-product`, TypeScript/lint i produkcyjny build UI przechodzą. Pełny Windows CI i publikacja prerelease 0.15.5 pozostają do wykonania.
+
 ## 2026-10-19 — wydanie testowe 0.15.4
 
 - Ograniczono wzrost lokalnej bazy wiedzy: maksymalnie 100 dokumentów i 20 mln indeksowanych znaków. Odrzucony import nie narusza zapisanych danych.
