@@ -6,6 +6,7 @@
 - Zintegrowano przezroczyste grafiki z witryną, ekranami aplikacji i kreatorem własnego instalatora Windows; sześć ilustracji instalatora jest osadzanych w pliku EXE.
 - Dodano katalog `media/illustrations/README.md` oraz test dekodujący PNG, który sprawdza rzeczywiste piksele alfa, format, wymiary i dokładne duplikaty.
 - Podglądy wszystkich kategorii sprawdzono na jasnym i ciemnym tle; stare zasoby WebP nie są już używane i zostały usunięte.
+- Workflow witryny włącza GitHub Pages przez `configure-pages`, jeśli repozytorium nie ma jeszcze ustawionego źródła publikacji.
 
 ## 2026-10-18 — 0.14.0, przebudowa Sentinel AI User (wersja rozwojowa)
 

@@ -32,6 +32,8 @@ jobs:
           cache-dependency-path: website/package-lock.json
       - uses: actions/configure-pages@v5
         id: pages
+        with:
+          enablement: true
       - run: npm ci
         working-directory: website
       - run: npm run lint
