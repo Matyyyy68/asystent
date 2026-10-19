@@ -1,10 +1,20 @@
 # CHANGELOG
 
-## 2026-10-19 — kandydat wydania 0.15.3
+## 2026-10-19 — kandydat wydania 0.15.4
+
+- Ograniczono wzrost lokalnej bazy wiedzy: maksymalnie 100 dokumentów i 20 mln indeksowanych znaków. Odrzucony import nie narusza zapisanych danych.
+- Testy klienta przechodzą 150/150; build wydania i workflow CI dla v0.15.4 pozostają do wykonania.
+
+## 2026-10-19 — ograniczenie wzrostu lokalnej bazy wiedzy
+
+- Import zatrzymuje się po 100 dokumentach lub 20 mln indeksowanych znaków. Transakcja odrzuca przekroczenie przed zapisem i nie usuwa starszych dokumentów; istniejąca treść pozostaje dostępna.
+- Test sprawdza limit 100 dokumentów i potwierdza brak utraty istniejących wpisów przy odrzuceniu następnego.
+
+## 2026-10-19 — wydanie testowe 0.15.3
 
 - Dodano pomiar rozmiaru baz SQLite historii i wiedzy, w tym WAL/SHM, stron i rekordów.
 - Monitor procesów zapisuje do 100 zmian jednej próbki w pojedynczej transakcji. CI wykazało, że 100 osobnych zapisów przekraczało 30 s na wolniejszym runnerze; test pokrywa atomowość błędnego batcha.
-- Klient przechodzi 149/149 testów lokalnie; test syntetycznego zalewu PID spadł z około 50 s na CI do 183 ms lokalnie po batchowaniu. Pełny build instalatora i self-test PASS. Lokalny installer 279280503 B, SHA-256 `B19AA84956674BDE9933735B8EB5D9AD06C3EDE18CB432447817D9DA9EBD5A4B`; workflow CI jeszcze nie uruchomiony.
+- Klient przechodzi 149/149 testów lokalnie; test syntetycznego zalewu PID spadł z około 50 s na CI do 183 ms lokalnie po batchowaniu. Pełny build instalatora i self-test PASS. Opublikowano [prerelease v0.15.3](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.3); CI zbudowało i zweryfikowało installer 262479987 B, SHA-256 `d6f29ebfd0928db63353c1b88216cac9bb97f47819e0431dee89ed4ec0d47e88`. Pages workflow PASS. Lokalny build ma 279280503 B i SHA-256 `B19AA84956674BDE9933735B8EB5D9AD06C3EDE18CB432447817D9DA9EBD5A4B`; to odrębny artefakt niż opublikowany build CI.
 
 ## 2026-10-19 — nieopublikowany kandydat 0.15.2
 

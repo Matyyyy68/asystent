@@ -29,6 +29,8 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
 {
     public const int MaximumFileBytes = 10 * 1024 * 1024;
     public const int MaximumExtractedCharacters = 2_000_000;
+    public const int MaximumDocuments = 100;
+    public const long MaximumIndexedCharacters = 20_000_000;
     private const int ChunkCharacters = 1200;
     private const int ChunkOverlap = 180;
     private readonly string connectionString;
@@ -121,6 +123,20 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
                 await transaction.CommitAsync(cancellationToken);
                 return existing;
             }
+        }
+        using (var capacity = connection.CreateCommand())
+        {
+            capacity.Transaction = (SqliteTransaction)transaction;
+            capacity.CommandText = "SELECT (SELECT COUNT(*) FROM documents), (SELECT COALESCE(SUM(length(content)),0) FROM chunks)";
+            using var reader = await capacity.ExecuteReaderAsync(cancellationToken);
+            await reader.ReadAsync(cancellationToken);
+            var documentCount = reader.GetInt32(0);
+            var indexedCharacters = reader.GetInt64(1);
+            await reader.CloseAsync();
+            if (documentCount >= MaximumDocuments)
+                throw new InvalidOperationException($"Baza wiedzy osiągnęła limit {MaximumDocuments} dokumentów. Usuń dokumenty, których już nie potrzebujesz.");
+            if (indexedCharacters + chunks.Sum(chunk => (long)chunk.Length) > MaximumIndexedCharacters)
+                throw new InvalidOperationException($"Baza wiedzy osiągnęła limit {MaximumIndexedCharacters:N0} indeksowanych znaków. Usuń dokumenty albo zaimportuj krótszy materiał.");
         }
         using (var document = connection.CreateCommand())
         {

@@ -102,6 +102,25 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task EnforcesDocumentCountLimitWithoutChangingExistingIndex()
+    {
+        var store = await CreateAsync();
+        for (var index = 0; index < LocalKnowledgeBase.MaximumDocuments; index++)
+        {
+            var path = Path.Combine(directory, $"document-{index}.txt");
+            await File.WriteAllTextAsync(path, $"Unique knowledge fixture {index}.");
+            await store.ImportAsync(path);
+        }
+
+        var overflow = Path.Combine(directory, "overflow.txt");
+        await File.WriteAllTextAsync(overflow, "One more unique document.");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => store.ImportAsync(overflow));
+
+        Assert.Contains(LocalKnowledgeBase.MaximumDocuments.ToString(), error.Message);
+        Assert.Equal(LocalKnowledgeBase.MaximumDocuments, (await store.ListAsync()).Count);
+    }
+
+    [Fact]
     public async Task BackupCanBeReopenedWithDocumentsAndSearchIndexIntact()
     {
         var store = await CreateAsync();
