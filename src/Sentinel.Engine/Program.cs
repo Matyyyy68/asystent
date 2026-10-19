@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Sentinel.Core.Configuration;
@@ -394,7 +395,12 @@ while (await Console.In.ReadLineAsync() is { } line)
     }
     catch (Exception ex)
     {
-        Console.WriteLine(JsonSerializer.Serialize(new { id, ok = false, error = ex is InvalidDataException or ArgumentException
-            ? ex.Message : "Operacja nie powiodła się: " + ex.GetType().Name }, json));
+        var error = ex switch
+        {
+            SqliteException { SqliteErrorCode: 13 } => "Brak miejsca na dysku lub osiągnięto limit 512 MiB lokalnej historii. Zwolnij miejsce, skróć retencję albo wykonaj kopię i usuń część historii.",
+            InvalidDataException or ArgumentException => ex.Message,
+            _ => "Operacja nie powiodła się: " + ex.GetType().Name
+        };
+        Console.WriteLine(JsonSerializer.Serialize(new { id, ok = false, error }, json));
     }
 }

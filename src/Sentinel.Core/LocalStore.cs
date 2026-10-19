@@ -6,12 +6,16 @@ using Sentinel.Core.Enterprise;
 namespace Sentinel.Core;
 public sealed class LocalStore : IEventRepository, ISettingsRepository
 {
+    public const long DefaultMaximumDatabaseBytes = 512L * 1024 * 1024;
     private readonly string connectionString;
+    private readonly long maximumDatabaseBytes;
     public string DatabasePath { get; }
     public Task<DatabaseStorageMetrics> GetStorageMetricsAsync(CancellationToken cancellationToken = default) =>
         DatabaseStorageMetricsReader.ReadAsync(DatabasePath, "SELECT COUNT(*) FROM events", cancellationToken);
-    public LocalStore(string directory)
+    public LocalStore(string directory, long maximumDatabaseBytes = DefaultMaximumDatabaseBytes)
     {
+        if (maximumDatabaseBytes < 1024 * 1024) throw new ArgumentOutOfRangeException(nameof(maximumDatabaseBytes), "Limit historii musi wynosić co najmniej 1 MiB.");
+        this.maximumDatabaseBytes = maximumDatabaseBytes;
         var full = Path.GetFullPath(directory);
         if (full.StartsWith(@"\\", StringComparison.Ordinal)) throw new IOException("Wymagany jest lokalny katalog danych.");
         Directory.CreateDirectory(full);
@@ -21,7 +25,17 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     private async Task<SqliteConnection> Open(CancellationToken ct)
     {
         var c = new SqliteConnection(connectionString);
-        try { await c.OpenAsync(ct); return c; } catch { await c.DisposeAsync(); throw; }
+        try
+        {
+            await c.OpenAsync(ct);
+            using var pageSize = c.CreateCommand(); pageSize.CommandText = "PRAGMA page_size";
+            var pageBytes = Convert.ToInt64(await pageSize.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+            var maximumPages = Math.Max(1, maximumDatabaseBytes / pageBytes);
+            using var limit = c.CreateCommand(); limit.CommandText = $"PRAGMA max_page_count={maximumPages.ToString(CultureInfo.InvariantCulture)}";
+            await limit.ExecuteScalarAsync(ct);
+            return c;
+        }
+        catch { await c.DisposeAsync(); throw; }
     }
     private static async Task Execute(SqliteConnection c, string sql, CancellationToken ct, params (string, object)[] values)
     {

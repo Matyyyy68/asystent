@@ -1,5 +1,6 @@
 using Sentinel.Core;
 using Sentinel.Core.Enterprise;
+using Microsoft.Data.Sqlite;
 using Xunit;
 namespace Sentinel.Tests;
 public sealed class StoreTests : IDisposable
@@ -28,6 +29,47 @@ public sealed class StoreTests : IDisposable
         Assert.True(metrics.TotalBytes >= metrics.DatabaseBytes);
         Assert.True(metrics.PageCount > 0);
         Assert.InRange(metrics.FreePages, 0, metrics.PageCount);
+    }
+    [Fact] public async Task HistoryDatabaseLimitRejectsGrowthWithoutLosingExistingEvents()
+    {
+        const long maximumBytes = 1024 * 1024;
+        var store = new LocalStore(dir, maximumBytes);
+        await store.InitializeAsync();
+        var fullEvent = Event() with { Explanation = new string('x', 1800), Recommendation = new string('y', 1800) };
+        var batchFailed = false;
+        for (var batch = 0; batch < 100; batch++)
+        {
+            var countBeforeBatch = await store.CountEventsAsync();
+            try
+            {
+                await store.AddLocalOnlyBatchAsync(Enumerable.Range(0, 100).Select(_ => fullEvent with { EventId = Guid.NewGuid() }).ToArray());
+            }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
+            {
+                batchFailed = true;
+                Assert.Equal(countBeforeBatch, await store.CountEventsAsync());
+                break;
+            }
+        }
+
+        Assert.True(batchFailed);
+        Assert.True(await store.CountEventsAsync() > 0);
+        var writeFailed = false;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            var countBeforeWrite = await store.CountEventsAsync();
+            try { await store.AddLocalOnlyAsync(fullEvent with { EventId = Guid.NewGuid() }); }
+            catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
+            {
+                writeFailed = true;
+                Assert.Equal(countBeforeWrite, await store.CountEventsAsync());
+                break;
+            }
+        }
+        Assert.True(writeFailed);
+        Assert.NotEmpty(await store.ReadAsync()); // The database remains queryable.
+        var metrics = await store.GetStorageMetricsAsync();
+        Assert.InRange(metrics.TotalBytes, 1, maximumBytes);
     }
     [Fact] public async Task ConcurrentEventWritesPersistEveryUniqueEvent()
     {

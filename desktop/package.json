@@ -1,6 +1,6 @@
 {
   "name": "sentinel-ai-user",
-  "version": "0.15.8",
+  "version": "0.15.9",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
