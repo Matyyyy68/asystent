@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node ../scripts/copy-media.mjs website && vite --host 127.0.0.1",
     "build": "node ../scripts/copy-media.mjs website && vite build",
-    "test": "node test.mjs",
+    "test": "node test.mjs && node ../scripts/test-illustrations.mjs",
     "lint": "node --check vite.config.js && node --check test.mjs"
   },
   "devDependencies": {

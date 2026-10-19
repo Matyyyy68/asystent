@@ -9,6 +9,11 @@ Push-Location (Join-Path $repo 'desktop')
 try {
   npm.cmd run build
   if ($LASTEXITCODE) { throw 'Budowa aplikacji nie powiodła się.' }
+  foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error')) {
+    if (!(Test-Path (Join-Path $repo "desktop/dist/media/illustrations/installer/$asset.png"))) {
+      throw "Brak ilustracji instalatora w paczce aplikacji: $asset.png"
+    }
+  }
   npx.cmd electron-builder --win dir
   if ($LASTEXITCODE) { throw 'Budowa plików aplikacji nie powiodła się.' }
 } finally { Pop-Location }

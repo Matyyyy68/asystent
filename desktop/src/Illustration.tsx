@@ -1,12 +1,12 @@
 type IllustrationProps = {
   name: string;
   alt: string;
-  group?: 'empty-states' | 'onboarding' | 'status';
+  group?: 'states' | 'security' | 'phishing' | 'ai' | 'people' | 'infrastructure' | 'installer';
   size?: 'small' | 'medium' | 'large';
 };
 
-export function Illustration({ name, alt, group = 'empty-states', size = 'medium' }: IllustrationProps) {
+export function Illustration({ name, alt, group = 'states', size = 'medium' }: IllustrationProps) {
   return <figure className={`illustration illustration-${size}`}>
-    <img src={`./media/app/${group}/${name}.webp`} alt={alt} loading="lazy" width="410" height="410" />
+    <img src={`./media/illustrations/${group}/${name}.png`} alt={alt} loading="lazy" width="512" height="341" />
   </figure>;
 }

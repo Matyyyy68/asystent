@@ -167,6 +167,7 @@ internal sealed class SetupWizard : Form
     private readonly Label status = new() { AutoSize = true, Text = "Gotowy do instalacji" };
     private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100, Height = 12, Dock = DockStyle.Fill };
     private readonly Button install = new() { Text = "Zainstaluj", Width = 118, Height = 38 };
+    private readonly PictureBox illustration = new() { Bounds = new Rectangle(454, 18, 150, 112), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent };
 
     public SetupWizard()
     {
@@ -180,7 +181,8 @@ internal sealed class SetupWizard : Form
         desktop.Location = new Point(38, 224); start.Location = new Point(38, 258); status.Location = new Point(38, 324);
         progress.SetBounds(36, 354, 572, 13); install.Location = new Point(490, 381); install.BackColor = Color.FromArgb(20, 93, 153); install.ForeColor = Color.White; install.FlatStyle = FlatStyle.Flat;
         var cancel = new Button { Text = "Anuluj", Location = new Point(383, 381), Size = new Size(92, 38), DialogResult = DialogResult.Cancel };
-        Controls.AddRange([heading, intro, pathLabel, folder, browse, desktop, start, status, progress, cancel, install]); AcceptButton = install; CancelButton = cancel;
+        Controls.AddRange([heading, intro, illustration, pathLabel, folder, browse, desktop, start, status, progress, cancel, install]); AcceptButton = install; CancelButton = cancel;
+        SetIllustration("welcome");
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); };
         install.Click += async (_, _) => await InstallAsync();
     }
@@ -188,13 +190,28 @@ internal sealed class SetupWizard : Form
     private async Task InstallAsync()
     {
         install.Enabled = false;
+        SetIllustration("prepare");
         try
         {
-            await Task.Run(() => Program.Install(folder.Text, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() => { status.Text = message; progress.Value = value; })));
+            await Task.Run(() => Program.Install(folder.Text, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() =>
+            {
+                status.Text = message;
+                progress.Value = value;
+                SetIllustration(value >= 100 ? "complete" : value >= 80 ? "configure" : value > 10 ? "installing" : "prepare");
+            })));
             if (MessageBox.Show(this, "Sentinel AI został zainstalowany. Czy uruchomić program teraz?", "Gotowe", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                 Process.Start(new ProcessStartInfo(Path.Combine(folder.Text, "Sentinel AI.exe")) { UseShellExecute = true });
             DialogResult = DialogResult.OK; Close();
         }
-        catch (Exception ex) { install.Enabled = true; status.Text = "Instalacja nie została zakończona."; MessageBox.Show(this, "Nie udało się zainstalować Sentinel AI.\n\n" + ex.Message, "Błąd instalacji", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        catch (Exception ex) { install.Enabled = true; status.Text = "Instalacja nie została zakończona."; SetIllustration("error"); MessageBox.Show(this, "Nie udało się zainstalować Sentinel AI.\n\n" + ex.Message, "Błąd instalacji", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
+    private void SetIllustration(string name)
+    {
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream($"installer-{name}.png");
+        if (stream is null) return;
+        using var source = Image.FromStream(stream);
+        illustration.Image?.Dispose();
+        illustration.Image = new Bitmap(source);
     }
 }

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-10-19 — biblioteka ilustracji Sentinel AI
+
+- Zastąpiono starsze ilustracje z niepożądanymi tłami zestawem 63 nowych, minimalistycznych grafik PNG RGBA w siedmiu kategoriach.
+- Zintegrowano przezroczyste grafiki z witryną, ekranami aplikacji i kreatorem własnego instalatora Windows; sześć ilustracji instalatora jest osadzanych w pliku EXE.
+- Dodano katalog `media/illustrations/README.md` oraz test dekodujący PNG, który sprawdza rzeczywiste piksele alfa, format, wymiary i dokładne duplikaty.
+- Podglądy wszystkich kategorii sprawdzono na jasnym i ciemnym tle; stare zasoby WebP nie są już używane i zostały usunięte.
+
 ## 2026-10-18 — 0.14.0, przebudowa Sentinel AI User (wersja rozwojowa)
 
 ### Zrealizowano
