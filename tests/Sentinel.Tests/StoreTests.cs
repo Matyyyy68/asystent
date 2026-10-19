@@ -9,6 +9,19 @@ public sealed class StoreTests : IDisposable
     private static SecurityEvent Event(DateTimeOffset? time = null) => new(0,time ?? DateTimeOffset.UtcNow,RiskLevel.Information,"Test","Synthetic","Synthetic test only","No action",EventStatus.New);
     [Fact] public async Task SettingsSurviveReopening() { var s = await Store(); await s.SaveSettingsAsync(new(7,false)); var next = await Store(); Assert.Equal(new AppSettings(7,false), await next.LoadSettingsAsync()); }
     [Fact] public async Task EventsAndFeedbackPersist() { var s = await Store(); var id = await s.AddAsync(Event()); await s.SetStatusAsync(id,EventStatus.FalsePositive); var next = await Store(); Assert.Equal(EventStatus.FalsePositive,Assert.Single(await next.ReadAsync()).Status); }
+    [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event());
+
+        var metrics = await store.GetStorageMetricsAsync();
+
+        Assert.Equal(1, metrics.RecordCount);
+        Assert.True(metrics.DatabaseBytes > 0);
+        Assert.True(metrics.TotalBytes >= metrics.DatabaseBytes);
+        Assert.True(metrics.PageCount > 0);
+        Assert.InRange(metrics.FreePages, 0, metrics.PageCount);
+    }
     [Fact] public async Task ConcurrentEventWritesPersistEveryUniqueEvent()
     {
         var store = await Store();

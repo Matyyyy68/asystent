@@ -8,6 +8,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
 {
     private readonly string connectionString;
     public string DatabasePath { get; }
+    public Task<DatabaseStorageMetrics> GetStorageMetricsAsync(CancellationToken cancellationToken = default) =>
+        DatabaseStorageMetricsReader.ReadAsync(DatabasePath, "SELECT COUNT(*) FROM events", cancellationToken);
     public LocalStore(string directory)
     {
         var full = Path.GetFullPath(directory);

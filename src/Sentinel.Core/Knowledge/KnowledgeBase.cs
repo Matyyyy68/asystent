@@ -4,6 +4,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Data.Sqlite;
+using Sentinel.Core;
 
 namespace Sentinel.Core.Knowledge;
 
@@ -33,6 +34,8 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
     private readonly string connectionString;
 
     public string DatabasePath { get; }
+    public Task<DatabaseStorageMetrics> GetStorageMetricsAsync(CancellationToken cancellationToken = default) =>
+        DatabaseStorageMetricsReader.ReadAsync(DatabasePath, "SELECT COUNT(*) FROM documents", cancellationToken);
 
     public LocalKnowledgeBase(string dataDirectory)
     {

@@ -18,6 +18,10 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
 (async () => {
  try {
   const initialStatus = await call('status'); assert.equal(initialStatus.result.engine, 'ready');
+  assert.ok(initialStatus.result.storage.history.totalBytes > 0, 'status must include history database size');
+  assert.ok(initialStatus.result.storage.knowledge.totalBytes > 0, 'status must include knowledge database size');
+  assert.equal(initialStatus.result.storage.history.recordCount, 0);
+  assert.equal(initialStatus.result.storage.knowledge.recordCount, 0);
   assert.equal(initialStatus.result.enterprise.variant, 'User');
   assert.equal(initialStatus.result.enterprise.paired, false);
   assert.equal((await call('enterprisePair', { server: 'https://sentinel.example', invitationCode: 'test-code', shareSecurityMetadata: false })).ok, false,

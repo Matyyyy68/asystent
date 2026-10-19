@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 Push-Location $repo
 try {
+  node scripts/check-product.cjs
+  if ($LASTEXITCODE) { throw 'Product consistency check failed' }
   dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release
   if ($LASTEXITCODE) { throw 'Tests failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {

@@ -203,7 +203,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     enterprise = await EnterpriseStatusAsync(),
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
-                    reputation = reputation.Status(DateTimeOffset.UtcNow), browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath };
+                    reputation = reputation.Status(DateTimeOffset.UtcNow), browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
+                    storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "rollbackFeed": reputation.Rollback(); result = reputation.Status(DateTimeOffset.UtcNow); break;

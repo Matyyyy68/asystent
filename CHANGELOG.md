@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-10-19 — wydanie testowe 0.15.2
+
+- Dodano diagnostykę rozmiaru plików SQLite historii i bazy wiedzy, w tym WAL/SHM, liczbę stron, wolne strony i rekordy; pomiar jest widoczny w sekcji prywatności.
+- Dodano testy metryk obu baz oraz kontrolę statusu storage w smoke teście silnika. Klient przechodzi 148/148 testów .NET; check-product, TypeScript, IPC i self-test instalatora PASS.
+- Instalator 0.15.2 zostanie opublikowany jako prerelease po przejściu workflow tagu `v0.15.2`.
+
 ## 2026-10-19 — wydanie testowe 0.15.1
 
 - Wydano poprawki audytu, monitoringu Enterprise i przywracania kopii serwera z Windows.

@@ -37,6 +37,23 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task StorageMetricsReportKnowledgeDocumentsAndIndexSize()
+    {
+        var store = await CreateAsync();
+        var path = Path.Combine(directory, "knowledge.txt");
+        await File.WriteAllTextAsync(path, "Local knowledge storage measurement.");
+        await store.ImportAsync(path);
+
+        var metrics = await store.GetStorageMetricsAsync();
+
+        Assert.Equal(1, metrics.RecordCount);
+        Assert.True(metrics.DatabaseBytes > 0);
+        Assert.True(metrics.TotalBytes >= metrics.DatabaseBytes);
+        Assert.True(metrics.PageCount > 0);
+        Assert.InRange(metrics.FreePages, 0, metrics.PageCount);
+    }
+
+    [Fact]
     public async Task ExtractsDocxTextWithoutUnpackingFilesToDisk()
     {
         var store = await CreateAsync();
