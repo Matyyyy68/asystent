@@ -1,9 +1,9 @@
 # CHANGELOG
 
-## 2026-10-19 — kandydat wydania 0.15.6
+## 2026-10-19 — wydanie testowe 0.15.6
 
 - Dodano integracyjny test limitu 20 mln indeksowanych znaków. Test wypełnia FTS5 do limitu i sprawdza, że nadmiarowy import jest odrzucony bez naruszenia istniejącego indeksu.
-- Zmiana kodu limitu nie uległa zmianie względem wydania 0.15.5; testy, check-product, lint/build oraz CI dla v0.15.6 pozostają do wykonania.
+- Zmiana kodu limitu nie uległa zmianie względem wydania 0.15.5; klient przechodzi 151/151 testów, a `check-product` PASS. Windows CI wykonał build, testy i self-test oraz opublikował prerelease [v0.15.6](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.6). Installer ma 262481011 B, SHA-256 `c4c5b3bc34f5fd571269b586af214b5d7a771863165858473c69374a0a2f270d`; Pages workflow PASS.
 
 ## 2026-10-19 — wydanie testowe 0.15.5
 
