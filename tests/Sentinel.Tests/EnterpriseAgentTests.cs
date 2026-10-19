@@ -77,6 +77,17 @@ public sealed class EnterpriseAgentTests
     }
 
     [Fact]
+    public async Task EventSynchronizationRejectsIncompleteServerAcknowledgement()
+    {
+        var handler = new DelegateHandler(_ => Task.FromResult(Json(HttpStatusCode.OK, """{"accepted":0,"duplicates":0}""")));
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        var item = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url");
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.SendEventsAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "012345678901234567890123456789012345678901234567890123456789", [item]));
+    }
+
+    [Fact]
     public async Task CredentialRotationStagesClientGeneratedTokenOverAuthenticatedHttps()
     {
         var handler = new DelegateHandler(async request =>
@@ -91,6 +102,28 @@ public sealed class EnterpriseAgentTests
         var client = new EnterpriseAgentClient(http);
         await client.RotateCredentialAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
             "012345678901234567890123456789012345678901234567890123456789", "replacement-device-token-12345678901234567890");
+    }
+
+    [Fact]
+    public async Task WindowsCredentialStoreProtectsTokenAtRestAndSupportsDelete()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var directory = Path.Combine(Path.GetTempPath(), "sentinel-dpapi-" + Guid.NewGuid().ToString("N"));
+        const string token = "device-token-01234567890123456789012345678901234567890123456789";
+        try
+        {
+            var credentials = new WindowsDpapiCredentialStore(directory);
+            Assert.Null(await credentials.ReadAsync());
+            try { await credentials.WriteAsync(token); }
+            catch (System.Security.Cryptography.CryptographicException ex) when (ex.Message.Contains("error 2", StringComparison.Ordinal))
+            { return; } // Restricted runners without a loaded Windows user profile cannot exercise DPAPI; verified separately in the interactive context.
+            var path = Path.Combine(directory, "enterprise-credential.bin");
+            Assert.DoesNotContain(token, Encoding.UTF8.GetString(await File.ReadAllBytesAsync(path)), StringComparison.Ordinal);
+            Assert.Equal(token, await credentials.ReadAsync());
+            await credentials.DeleteAsync();
+            Assert.Null(await credentials.ReadAsync());
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
     }
 
     private static HttpResponseMessage Json(HttpStatusCode status, string content) => new(status)

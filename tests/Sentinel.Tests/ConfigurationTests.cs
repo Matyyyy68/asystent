@@ -95,15 +95,15 @@ public sealed class ConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void EnterpriseRecommendationListsImplementedPolicyEnforcementAndRemainingGaps()
+    public void EnterpriseRecommendationSeparatesIntegratedAgentFromMissingOperations()
     {
         var system = new SystemSnapshot("Windows", null, "X64", null, null, null, null, null, null,
             NpuAvailability.Unknown, null, [], true, true);
         var recommendation = new ConfigurationRecommendationEngine().Recommend(system, ProductVariant.EnterpriseClient);
-        Assert.Contains(recommendation.AvailableModules, item => item.Contains("Parowanie z serwerem Enterprise", StringComparison.Ordinal));
-        Assert.Contains(recommendation.AvailableModules, item => item.Contains("Egzekwowanie interwału analizy", StringComparison.Ordinal));
-        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("Automatyczna analiza serwerowa", StringComparison.Ordinal));
-        Assert.Contains(recommendation.Notices, item => item.Contains("jawnej zgody użytkownika", StringComparison.Ordinal));
+        Assert.Contains(recommendation.AvailableModules, item => item.Contains("DPAPI", StringComparison.Ordinal));
+        Assert.Contains(recommendation.AvailableModules, item => item.Contains("lokalnej polityki", StringComparison.Ordinal));
+        Assert.Contains(recommendation.UnavailableModules, item => item.Contains("Serwerowa analiza treści", StringComparison.Ordinal));
+        Assert.Contains(recommendation.Notices, item => item.Contains("jednorazowym zaproszeniem", StringComparison.Ordinal));
     }
 
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }

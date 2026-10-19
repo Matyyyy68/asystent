@@ -54,7 +54,7 @@ public sealed class EnrollmentTests : IDisposable
         await _store.CreateBackupAsync(backupPath);
 
         Assert.True(File.Exists(backupPath));
-        await using var backup = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = backupPath, Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly }.ToString());
+        await using var backup = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = backupPath, Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         await backup.OpenAsync();
         await using var integrity = backup.CreateCommand(); integrity.CommandText = "PRAGMA integrity_check";
         Assert.Equal("ok", await integrity.ExecuteScalarAsync());
@@ -120,7 +120,7 @@ public sealed class EnrollmentTests : IDisposable
     public async Task ExistingSchemaFiveDatabaseGetsApprovedDefaultsDuringMigration()
     {
         var path = Path.Combine(_directory, "legacy.db");
-        await using (var legacy = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+        await using (var legacy = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
         {
             await legacy.OpenAsync();
             await using var setup = legacy.CreateCommand();

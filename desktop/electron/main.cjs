@@ -6,7 +6,7 @@ const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 let win, tray, engine, quitting = false, sequence = 0;
 const pending = new Map();
-const allowed = new Set(['status', 'history', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed']);
+const allowed = new Set(['status', 'history', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -38,6 +38,23 @@ app.whenReady().then(() => {
     if (method === 'chooseFile') {
       const choice = await dialog.showOpenDialog(win, { properties: ['openFile'] });
       return choice.canceled ? null : call('file', { path: choice.filePaths[0] });
+    }
+    if (method === 'chooseKnowledgeFile') {
+      const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Dokumenty tekstowe', extensions: ['txt', 'md', 'docx'] }] });
+      return choice.canceled ? null : call('knowledgeImport', { path: choice.filePaths[0] });
+    }
+    if (['databaseRestore', 'knowledgeRestore'].includes(method)) {
+      const title = method === 'databaseRestore' ? 'Kopia historii Sentinel AI' : 'Kopia bazy wiedzy Sentinel AI';
+      const choice = await dialog.showOpenDialog(win, { title, properties: ['openFile'], filters: [{ name: title, extensions: ['db'] }] });
+      return choice.canceled ? null : call(method, { path: choice.filePaths[0] });
+    }
+    if (['historyExport', 'databaseBackup', 'knowledgeBackup'].includes(method)) {
+      const date = new Date().toISOString().replace(/[:.]/g, '-');
+      const names = { historyExport: `Sentinel-history-${date}.json`, databaseBackup: `Sentinel-data-${date}.db`, knowledgeBackup: `Sentinel-knowledge-${date}.db` };
+      const choice = await dialog.showSaveDialog(win, { defaultPath: names[method], filters: [{ name: method === 'historyExport' ? 'JSON' : 'SQLite', extensions: [method === 'historyExport' ? 'json' : 'db'] }] });
+      if (choice.canceled || !choice.filePath) return null;
+      if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać kopii.');
+      return call(method, { path: choice.filePath });
     }
     if (!allowed.has(method) || JSON.stringify(data).length > 23000) throw new Error('Nieprawidłowe żądanie');
     return call(method, data);
@@ -71,15 +88,12 @@ app.whenReady().then(() => {
     } catch (error) { console.error(error); quitting = true; app.exit(1); }
   });
   let collecting = false;
-  let lastCollection = 0;
   const collector = setInterval(async () => {
     if (collecting || quitting) return;
     collecting = true;
-    try { const status = await call('status', {});
-      if (Date.now() - lastCollection < status.settings.dnsPollIntervalSeconds * 1000) return;
-      lastCollection = Date.now();
+    try {
       const state = await call('collect', {});
-      tray?.setToolTip('Sentinel AI — ' + state.dns);
+      tray?.setToolTip('Sentinel AI — ' + state.dns + ' · procesy: ' + state.processes);
       if (state.detections > 0 && state.notifications && Notification.isSupported())
         new Notification({ title: 'Sentinel AI — ostrzeżenie DNS', body: 'W cache DNS wykryto domenę z listy CERT Polska. Ruch nie został zablokowany.' }).show();
     } catch { tray?.setToolTip('Sentinel AI — silnik niedostępny'); }

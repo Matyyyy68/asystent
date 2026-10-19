@@ -84,5 +84,43 @@ public sealed class KnowledgeBaseTests : IDisposable
         Assert.False(File.Exists(Path.Combine(directory, "sentinel.db")));
     }
 
+    [Fact]
+    public async Task BackupCanBeReopenedWithDocumentsAndSearchIndexIntact()
+    {
+        var store = await CreateAsync();
+        var documentPath = Path.Combine(directory, "backup-guide.txt");
+        await File.WriteAllTextAsync(documentPath, "Backup knowledge fixture stays searchable.");
+        await store.ImportAsync(documentPath);
+        var backupDirectory = Path.Combine(directory, "backup"); Directory.CreateDirectory(backupDirectory);
+        await store.BackupAsync(Path.Combine(backupDirectory, "knowledge.db"));
+        var restored = new LocalKnowledgeBase(backupDirectory); await restored.InitializeAsync();
+        Assert.Equal("backup-guide.txt", Assert.Single(await restored.ListAsync()).Name);
+        Assert.NotEmpty(await restored.SearchAsync("searchable"));
+    }
+
+    [Fact]
+    public async Task RestoreReplacesKnowledgeIndexAndRejectsCorruptBackupWithoutDataLoss()
+    {
+        var sourceDirectory = Path.Combine(directory, "source"); Directory.CreateDirectory(sourceDirectory);
+        var source = new LocalKnowledgeBase(sourceDirectory); await source.InitializeAsync();
+        var sourceDocument = Path.Combine(directory, "source.txt"); await File.WriteAllTextAsync(sourceDocument, "Restored knowledge remains searchable.");
+        await source.ImportAsync(sourceDocument);
+        var backupPath = Path.Combine(directory, "knowledge-backup.db"); await source.BackupAsync(backupPath);
+
+        var targetDirectory = Path.Combine(directory, "target"); Directory.CreateDirectory(targetDirectory);
+        var target = new LocalKnowledgeBase(targetDirectory); await target.InitializeAsync();
+        var targetDocument = Path.Combine(directory, "target.txt"); await File.WriteAllTextAsync(targetDocument, "Discarded index content should disappear.");
+        await target.ImportAsync(targetDocument);
+        Assert.Equal(1, await target.RestoreAsync(backupPath));
+        Assert.Equal("source.txt", Assert.Single(await target.ListAsync()).Name);
+        Assert.NotEmpty(await target.SearchAsync("searchable"));
+        Assert.Empty(await target.SearchAsync("discarded"));
+
+        var corrupt = Path.Combine(directory, "corrupt-knowledge.db"); await File.WriteAllTextAsync(corrupt, "not a SQLite database");
+        await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(() => target.RestoreAsync(corrupt));
+        Assert.Equal("source.txt", Assert.Single(await target.ListAsync()).Name);
+        Assert.NotEmpty(await target.SearchAsync("searchable"));
+    }
+
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 }

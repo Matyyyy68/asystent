@@ -88,7 +88,7 @@ public sealed class AdminSecurityTests : IDisposable
     {
         var path = Path.Combine(_directory, "legacy.db");
         Directory.CreateDirectory(_directory);
-        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString()))
         {
             await connection.OpenAsync(); await using var command = connection.CreateCommand();
             command.CommandText = """

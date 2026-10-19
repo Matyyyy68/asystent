@@ -4,6 +4,12 @@ $version = ([xml](Get-Content (Join-Path $repo 'eng/ProductVersion.props'))).Pro
 $out = Join-Path $repo 'artifacts/desktop'
 $unpacked = Join-Path $out 'win-unpacked'
 $payload = Join-Path $out "Sentinel.AI.Payload.$version.zip"
+function Get-Sha256Hex([string]$path) {
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $stream = [System.IO.File]::OpenRead($path)
+  try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '') }
+  finally { $stream.Dispose(); $sha.Dispose() }
+}
 New-Item -ItemType Directory -Force $out | Out-Null
 Push-Location (Join-Path $repo 'desktop')
 try {
@@ -20,13 +26,13 @@ try {
 if (Test-Path $payload) { Remove-Item $payload -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($unpacked, $payload, [System.IO.Compression.CompressionLevel]::Optimal, $false)
-$hash = (Get-FileHash $payload -Algorithm SHA256).Hash
+$hash = Get-Sha256Hex $payload
 dotnet publish (Join-Path $PSScriptRoot 'Sentinel.Setup/Sentinel.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PayloadZip="$payload" -p:PayloadSha256="$hash" -o $out
 if ($LASTEXITCODE) { throw 'Installer publish failed.' }
 $installer = Join-Path $out 'Sentinel.AI.Setup.exe'
 $namedInstaller = Join-Path $out "Sentinel.AI.Setup.$version.exe"
 Move-Item -Force $installer $namedInstaller
-$finalHash = (Get-FileHash $namedInstaller -Algorithm SHA256).Hash
+$finalHash = Get-Sha256Hex $namedInstaller
 Set-Content -NoNewline -Encoding ascii "$namedInstaller.sha256" "$finalHash  Sentinel.AI.Setup.$version.exe`n"
 Write-Host "Instalator: $namedInstaller"
 Write-Host "SHA-256: $finalHash"

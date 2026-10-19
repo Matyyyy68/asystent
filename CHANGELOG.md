@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## 2026-10-19 — audyt i lokalny kontrakt zdarzeń v1
+
+- Dodano audyt luk, postęp prac i 10 planów wdrożenia, które rozdzielają zweryfikowane funkcje, braki i zewnętrzne ograniczenia.
+- Dodano lokalnym zdarzeniom `schemaVersion`, stabilny GUID, źródło, wersję reguł, opcjonalną ocenę confidence oraz PID/nazwę procesu. SQLite migruje do v6 bez utraty historii; migracje z v3/v5, odczyt, ponowna inicjalizacja i eksport mają testy.
+- Nie zapisuje się sztucznego confidence: deterministyczne reguły nie mają skalibrowanej pewności.
+- Poprawiono nazwę nawigacji „Baza wiedzy” na „Reguły, reputacja i baza”, zgodnie z zawartością ekranu po podłączeniu lokalnego indeksu.
+- Podłączono lokalne FTS5 do UI/IPC: jawny import TXT/MD/DOCX, wyszukiwanie, lista i usuwanie; test IPC sprawdza, że tekst dokumentu nie trafia do historii.
+- Historia pokazuje pochodzenie i wersję reguł oraz umożliwia oznaczenie fałszywego alarmu.
+- Podłączono opcjonalny provider Ollama do aktywnej analizy. Wybór modelu i opt-in są jawne; endpoint musi być loopback, a awaria modelu wraca do lokalnych reguł.
+- Rozszerzony IPC smoke test weryfikuje odrzucenie zdalnego endpointu, działanie fałszywych alarmów oraz import/search/delete wiedzy.
+- Zbudowano i uruchomiono `--self-test` instalatora 0.15.0 po integracji Enterprise i Authenticode: 279275383 B, SHA-256 `9DD5FFFA070DADA8CD818F09BFA46A4AB42550E78C172EFB30FA13ACF9DC013C`.
+- Audyt npm wskazał 8 umiarkowanych alertów w dev-only łańcuchu electron-builder/sprintf-js bez opublikowanej poprawki; szczegóły i ograniczenie opisano w raporcie audytu.
+- Ulepszono ręczny snapshot Windows do 800 połączeń TCP i 200 lokalnych punktów UDP z PID/nazwą procesu, jeśli dostępne. Loopback integration test potwierdza korelację obu protokołów; nie jest to monitoring ciągły.
+- Dodano próbki widocznych procesów co 5 sekund z informacyjnymi zdarzeniami pojawienia/zniknięcia PID, pauzą, wykluczeniami i limitem 100 zdarzeń/próbkę. Test potomnego procesu weryfikuje oba przejścia.
+- Dodano eksport historii JSON oraz kopie lokalnych baz historii/ustawień i wiedzy przez systemowy wybór pliku. UI ostrzega, że pliki są nieszyfrowane; testy IPC sprawdzają redakcję eksportu i format kopii SQLite, a test Core ponownie otwiera kopię bazy wiedzy.
+- Skrypt budowania instalatora oblicza SHA-256 bez zależności od dostępności polecenia `Get-FileHash`; nowy build i instalacyjny self-test przechodzą.
+- Dodano test integracyjny zalewu procesu: 10 500 syntetycznych PID weryfikuje limit 10 000 w migawce, limit 100 zapisów na próbkę oraz liczenie pominiętych zdarzeń podczas startu i zakończenia procesów.
+- Diagnostyka pokazuje pamięć roboczą/prywatną i skumulowany czas CPU silnika; benchmark 300-sekundowy zebrał 60 próbek `collect`. Na bieżącej maszynie wynik wyniósł 43,4–53,8 MiB working set, 0,057% średniego CPU względem całkowitej mocy logicznych procesorów, medianę 5 ms i maksimum 1 359,8 ms. To pojedynczy pomiar bez wysokiego obciążenia syntetycznego.
+- Test źródła procesu wymusza błąd odczytu, potwierdza komunikat diagnostyczny i brak zdarzeń, a następnie sprawdza odzyskanie i wznowienie zapisu; łącznie testy klienta: 137/137.
+- Dodano przywracanie historii/ustawień i lokalnego indeksu wiedzy po kontroli integralności/schematu. Restore historii zachowuje profil instalacji, a restore FTS5 odtwarza dokumenty i wyszukiwanie. Testy potwierdzają round-trip i brak utraty przy uszkodzonej kopii; klient przechodzi 140/140 testów.
+- Ręczna kontrola pliku do 256 MiB sprawdza SHA-256 oraz status podpisu Authenticode w izolowanym Windows PowerShell. Engine IPC testuje niepodpisany syntetyczny plik; hash i podpis nie są werdyktem bezpieczeństwa, reputacji nadal brak.
+- Wyłączono SQLite pooling w testowych fixture'ach Enterprise, aby bazy tymczasowe były zwalniane przed usunięciem katalogów.
+- Zaktualizowano rekomendację wariantu Enterprise: odróżnia teraz dostępne parowanie/heartbeat/politykę lokalną od brakującego serwerowego kontekstu, zatwierdzania i podpisanych aktualizacji.
+- Dodano do aktywnego Electron parowanie Enterprise przez HTTPS z jednorazowym zaproszeniem i jawną zgodą; urządzeniowy token jest chroniony Windows DPAPI CurrentUser. Heartbeat, lokalna polityka (wspierany tryb local), oraz kolejka i synchronizacja samych metadanych działają po parowaniu. Kolejka jest ograniczona do 10 000 wpisów i nie wyrzuca oczekujących zdarzeń; UI pokazuje jej rozmiar. Odmowa blokuje parowanie i transmisję; odwołanie zgody zatrzymuje całe połączenie, usuwa oczekujące metadane, a klient odrzuca niepełne potwierdzenie batcha. Test DPAPI przeszedł poza sandboxem, a testy klienta rozszerzono do 145.
+- Walidacja klienta .NET: 146/146 testów, w tym równoległe zapisy SQLite; test DPAPI przeszedł w interaktywnej sesji Windows (w sandboxie bez profilu DPAPI ścieżka testu jest pomijana).
+
 ## 2026-10-19 — naprawa i walidacja instalatora
 
 - Naprawiono brak uprawnień `ALL APPLICATION PACKAGES` dla katalogu aplikacji; instalator teraz sprawdza wynik `icacls`, wymagany do uruchomienia sandboxa Chromium.

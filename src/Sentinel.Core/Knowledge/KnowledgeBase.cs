@@ -17,6 +17,7 @@ public interface IKnowledgeBaseProvider
     Task<IReadOnlyList<KnowledgeHit>> SearchAsync(string query, int limit = 5, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(string documentId, CancellationToken cancellationToken = default);
     Task BackupAsync(string destination, CancellationToken cancellationToken = default);
+    Task<int> RestoreAsync(string backupPath, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -197,6 +198,64 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
         await using var target = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = destination, Pooling = false }.ToString());
         await target.OpenAsync(cancellationToken);
         source.BackupDatabase(target);
+    }
+
+    public async Task<int> RestoreAsync(string backupPath, CancellationToken cancellationToken = default)
+    {
+        var sourcePath = Path.GetFullPath(backupPath);
+        if (!File.Exists(sourcePath)) throw new FileNotFoundException("Nie znaleziono kopii bazy wiedzy.", sourcePath);
+        if (string.Equals(sourcePath, DatabasePath, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("Nie można przywrócić bazy wiedzy z jej aktywnego pliku.");
+        var documentCount = 0;
+        await using (var source = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = sourcePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
+        {
+            await source.OpenAsync(cancellationToken);
+            using var integrity = source.CreateCommand(); integrity.CommandText = "PRAGMA integrity_check";
+            if (!string.Equals(await integrity.ExecuteScalarAsync(cancellationToken) as string, "ok", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Kopia bazy wiedzy nie przeszła kontroli integralności.");
+            using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
+            if (Convert.ToInt32(await version.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) != 1)
+                throw new InvalidDataException("Kopia bazy wiedzy pochodzi z nieobsługiwanej wersji.");
+            using var tables = source.CreateCommand();
+            tables.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('documents','chunks')";
+            if (Convert.ToInt32(await tables.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture) != 2)
+                throw new InvalidDataException("Kopia nie zawiera wymaganych tabel bazy wiedzy.");
+            using var documents = source.CreateCommand(); documents.CommandText = "SELECT id,name,sha256,imported_at,chunk_count,(SELECT COUNT(*) FROM chunks c WHERE c.source GLOB documents.id||'#*') FROM documents";
+            using var reader = await documents.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var id = reader.GetString(0); var name = reader.GetString(1); var hash = reader.GetString(2);
+                if (!Guid.TryParseExact(id, "N", out _) || name.Length is < 1 or > 180 || hash.Length != 64 ||
+                    !DateTimeOffset.TryParse(reader.GetString(3), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out _) ||
+                    reader.GetInt32(4) < 0 || reader.GetInt32(4) != reader.GetInt32(5))
+                    throw new InvalidDataException("Kopia zawiera nieprawidłowe metadane dokumentu lub liczbę fragmentów.");
+                try { _ = Convert.FromHexString(hash); } catch (FormatException ex) { throw new InvalidDataException("Kopia zawiera nieprawidłowy hash dokumentu.", ex); }
+                documentCount++;
+            }
+        }
+
+        await using var destination = await OpenAsync(cancellationToken);
+        using (var attach = destination.CreateCommand())
+        {
+            attach.CommandText = "ATTACH DATABASE $source AS restore_source";
+            attach.Parameters.AddWithValue("$source", sourcePath);
+            await attach.ExecuteNonQueryAsync(cancellationToken);
+        }
+        try
+        {
+            await using var transaction = await destination.BeginTransactionAsync(cancellationToken);
+            using var command = destination.CreateCommand(); command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = "DELETE FROM chunks; DELETE FROM documents; INSERT INTO documents(id,name,sha256,imported_at,chunk_count) SELECT id,name,sha256,imported_at,chunk_count FROM restore_source.documents; INSERT INTO chunks(source,content) SELECT source,content FROM restore_source.chunks;";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return documentCount;
+        }
+        finally
+        {
+            using var detach = destination.CreateCommand(); detach.CommandText = "DETACH DATABASE restore_source";
+            await detach.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken cancellationToken)

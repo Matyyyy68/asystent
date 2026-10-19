@@ -138,10 +138,16 @@
           "Microsoft.Data.Sqlite": "[10.0.13, )"
         }
       },
+      "sentinel.engine": {
+        "type": "Project",
+        "dependencies": {
+          "Sentinel.Core": "[0.15.0, )"
+        }
+      },
       "sentinel.urlhost": {
         "type": "Project",
         "dependencies": {
-          "Sentinel.Core": "[0.13.0, )"
+          "Sentinel.Core": "[0.15.0, )"
         }
       }
     },

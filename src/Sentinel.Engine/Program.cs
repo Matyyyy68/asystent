@@ -1,9 +1,11 @@
-using System.Net.NetworkInformation;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
+using Sentinel.Core.Configuration;
+using Sentinel.Core.Enterprise;
+using Sentinel.Core.Knowledge;
 
 // Versioned JSON-lines protocol on inherited stdio only; no listening TCP port.
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -14,14 +16,174 @@ var pointer = Path.Combine(root, "data-path.txt");
 var directory = File.Exists(pointer) ? File.ReadAllText(pointer).Trim() : Path.Combine(root, "data");
 var store = new LocalStore(directory);
 await store.InitializeAsync();
+var installationProfile = await store.GetInstallationProfileAsync();
+var deviceCredentials = new WindowsDpapiCredentialStore(directory);
+var knowledge = new LocalKnowledgeBase(directory);
+await knowledge.InitializeAsync();
 if (!File.Exists(pointer)) await File.WriteAllTextAsync(pointer, directory);
 var settings = await store.LoadSettingsAsync();
+var defaultExcludedApplications = settings.ExcludedApplications;
 await store.ApplyRetentionAsync(settings.RetentionDays);
 var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
 var reputation = new DomainReputation(directory);
+var processMonitor = new ProcessSnapshotMonitor();
+using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+var aiProvider = new OllamaLocalProvider(aiHttpClient);
+var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
 var deduplicator = new NotificationDeduplicator();
+using var enterpriseHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+var enterpriseAgent = new EnterpriseAgentClient(enterpriseHttpClient);
+DateTimeOffset? lastEnterpriseSyncAttempt = null;
+DateTimeOffset? lastEnterpriseSync = null;
+string? enterpriseError = null;
+var enterpriseSyncIntervalSeconds = 60;
+async Task<object> EnterpriseStatusAsync()
+{
+    string? token = null;
+    try
+    {
+        if (OperatingSystem.IsWindows() && installationProfile.Variant == ProductVariant.EnterpriseClient)
+            token = await deviceCredentials.ReadAsync();
+    }
+    catch { enterpriseError = "credential_unavailable"; }
+    return new { variant = installationProfile.Variant.ToString(), server = installationProfile.EnterpriseServerUri,
+        paired = !string.IsNullOrEmpty(token), sharingMetadata = installationProfile.ShareSecurityMetadata,
+        queuedEvents = installationProfile.Variant == ProductVariant.EnterpriseClient ? await store.CountPendingEnterpriseEventsAsync() : 0,
+        lastSync = lastEnterpriseSync, error = enterpriseError };
+}
+async Task<object> SyncEnterpriseAsync(bool force)
+{
+    if (installationProfile.Variant != ProductVariant.EnterpriseClient || string.IsNullOrEmpty(installationProfile.EnterpriseServerUri))
+        return new { paired = false, synchronized = 0, reason = "enterprise_not_configured" };
+    string? token;
+    try { token = await deviceCredentials.ReadAsync(); }
+    catch { enterpriseError = "credential_unavailable"; return new { paired = false, synchronized = 0, reason = enterpriseError }; }
+    if (string.IsNullOrEmpty(token)) return new { paired = false, synchronized = 0, reason = "not_paired" };
+    if (!installationProfile.ShareSecurityMetadata)
+        return new { paired = true, synchronized = 0, reason = "consent_disabled", lastSync = lastEnterpriseSync };
+    if (!force && lastEnterpriseSyncAttempt is { } previous && DateTimeOffset.UtcNow - previous < TimeSpan.FromSeconds(enterpriseSyncIntervalSeconds))
+        return new { paired = true, synchronized = 0, reason = "interval_not_elapsed" };
+    lastEnterpriseSyncAttempt = DateTimeOffset.UtcNow;
+    var server = EnterpriseAgentClient.ValidateServer(installationProfile.EnterpriseServerUri);
+    try
+    {
+        await enterpriseAgent.SendHeartbeatAsync(server, token);
+        using var configuration = await enterpriseAgent.ReadConfigurationAsync(server, token);
+        var policy = EnterprisePolicy.Parse(configuration);
+        if (policy.AnalysisMode != "local" || policy.AnalysisIntervalSeconds is < 10 or > 300)
+            throw new InvalidDataException("Polityka wymaga trybu lokalnego i odstępu 10–300 sekund obsługiwanego przez ten klient.");
+        var combinedExclusions = defaultExcludedApplications.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Concat(policy.ExcludedApplications).Distinct(StringComparer.OrdinalIgnoreCase);
+        var excludedApplications = string.Join(';', combinedExclusions);
+        if (excludedApplications.Length > 2000)
+            throw new InvalidDataException("Lista wykluczeń polityki Enterprise przekracza limit klienta.");
+        settings = settings with { MinimumIntervalSeconds = policy.AnalysisIntervalSeconds,
+            ExcludedApplications = excludedApplications,
+            Notifications = policy.NotificationLevel != "history" };
+        await store.SaveSettingsAsync(settings);
+        await store.ApplyRetentionAsync(settings.RetentionDays);
+        enterpriseSyncIntervalSeconds = policy.SyncIntervalSeconds;
+        var pending = installationProfile.ShareSecurityMetadata
+            ? await store.ReadPendingEnterpriseEventsAsync() : Array.Empty<PendingEnterpriseEvent>();
+        var accepted = 0;
+        if (pending.Count > 0)
+        {
+            var response = await enterpriseAgent.SendEventsAsync(server, token, pending);
+            await store.MarkEnterpriseEventsSentAsync(pending.Select(item => item.EventId));
+            accepted = response.Accepted + response.Duplicates;
+        }
+        lastEnterpriseSync = DateTimeOffset.UtcNow;
+        enterpriseError = null;
+        return new { paired = true, synchronized = accepted, policyVersion = policy.Version,
+            syncIntervalSeconds = policy.SyncIntervalSeconds, lastSync = lastEnterpriseSync, error = (string?)null };
+    }
+    catch (Exception ex)
+    {
+        enterpriseError = ex.GetType().Name == nameof(InvalidDataException) ? "configuration_invalid" : "sync_failed";
+        try { await enterpriseAgent.SendHeartbeatAsync(server, token, enterpriseError); } catch { }
+        return new { paired = true, synchronized = 0, reason = enterpriseError, lastSync = lastEnterpriseSync };
+    }
+}
+async Task RecordDetectionAsync(SecurityEvent item, string category, string ruleCode)
+{
+    await store.AddLocalOnlyAsync(item);
+    if (installationProfile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } && item.Risk >= RiskLevel.Moderate &&
+        !await store.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(item.EventId!.Value, item.Timestamp, category, (int)item.Risk, ruleCode)))
+        enterpriseError = "queue_full";
+}
 DateTimeOffset? lastDnsRead = null;
+DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
+async Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
+{
+    if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Snapshot TCP/UDP wymaga Windows.");
+    const string script = "$ErrorActionPreference='Stop'; $processes=@{}; Get-Process | ForEach-Object {$processes[[int]$_.Id]=$_.ProcessName}; " +
+        "$tcp=@(Get-NetTCPConnection -ErrorAction Stop | Select-Object -First 800 | ForEach-Object {[pscustomobject]@{protocol='TCP';localAddress=$_.LocalAddress;localPort=[int]$_.LocalPort;remoteAddress=$_.RemoteAddress;remotePort=[int]$_.RemotePort;state=[string]$_.State;processId=[int]$_.OwningProcess;processName=$processes[[int]$_.OwningProcess]}}); " +
+        "$udp=@(Get-NetUDPEndpoint -ErrorAction Stop | Select-Object -First 200 | ForEach-Object {[pscustomobject]@{protocol='UDP';localAddress=$_.LocalAddress;localPort=[int]$_.LocalPort;remoteAddress='';remotePort=$null;state='Endpoint';processId=[int]$_.OwningProcess;processName=$processes[[int]$_.OwningProcess]}}); " +
+        "ConvertTo-Json -InputObject @($tcp+$udp) -Compress -Depth 3";
+    using var process = new System.Diagnostics.Process { StartInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
+        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+    } };
+    process.StartInfo.ArgumentList.Add("-NoProfile"); process.StartInfo.ArgumentList.Add("-NonInteractive");
+    process.StartInfo.ArgumentList.Add("-Command"); process.StartInfo.ArgumentList.Add(script);
+    process.Start();
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    timeout.CancelAfter(TimeSpan.FromSeconds(8));
+    var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+    var errors = process.StandardError.ReadToEndAsync(timeout.Token);
+    try { await process.WaitForExitAsync(timeout.Token); }
+    catch { process.Kill(entireProcessTree: true); throw; }
+    var jsonText = await output; await errors;
+    if (process.ExitCode != 0 || jsonText.Length > 1_500_000) throw new InvalidDataException("Snapshot TCP/UDP niedostępny lub przekroczył limit.");
+    return JsonSerializer.Deserialize<ConnectionSnapshot[]>(jsonText, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+}
+object ReadRuntimeMetrics()
+{
+    using var current = System.Diagnostics.Process.GetCurrentProcess();
+    current.Refresh();
+    return new { workingSetBytes = current.WorkingSet64, privateMemoryBytes = current.PrivateMemorySize64,
+        cpuTimeMilliseconds = current.TotalProcessorTime.TotalMilliseconds, processorCount = Environment.ProcessorCount };
+}
+async Task<object> ReadAuthenticodeSignatureAsync(string path, CancellationToken cancellationToken)
+{
+    if (!OperatingSystem.IsWindows()) return new { status = "Unsupported", signer = (string?)null, thumbprint = (string?)null };
+    const string script = "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; $p=[Environment]::GetEnvironmentVariable('SENTINEL_FILE_TO_VERIFY'); " +
+        "$s=Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop; " +
+        "$subject=$null; $thumbprint=$null; if($s.SignerCertificate){$subject=$s.SignerCertificate.Subject;$thumbprint=$s.SignerCertificate.Thumbprint}; " +
+        "[pscustomobject]@{status=[string]$s.Status;signer=$subject;thumbprint=$thumbprint}|ConvertTo-Json -Compress -Depth 2";
+    using var process = new System.Diagnostics.Process { StartInfo = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
+        UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
+    } };
+    process.StartInfo.ArgumentList.Add("-NoProfile"); process.StartInfo.ArgumentList.Add("-NonInteractive");
+    process.StartInfo.ArgumentList.Add("-Command"); process.StartInfo.ArgumentList.Add(script);
+    process.StartInfo.Environment["SENTINEL_FILE_TO_VERIFY"] = path;
+    process.StartInfo.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
+    process.Start();
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromSeconds(10));
+    var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
+    var errors = process.StandardError.ReadToEndAsync(timeout.Token);
+    try
+    {
+        await process.WaitForExitAsync(timeout.Token);
+        var jsonText = await output; await errors;
+        if (process.ExitCode != 0 || jsonText.Length > 16_384) return new { status = "Unknown", signer = (string?)null, thumbprint = (string?)null };
+        using var document = JsonDocument.Parse(jsonText, new JsonDocumentOptions { MaxDepth = 4 });
+        var root = document.RootElement;
+        var status = root.TryGetProperty("status", out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        var signer = root.TryGetProperty("signer", out var signerValue) && signerValue.ValueKind == JsonValueKind.String ? signerValue.GetString() : null;
+        var thumbprint = root.TryGetProperty("thumbprint", out var thumbprintValue) && thumbprintValue.ValueKind == JsonValueKind.String ? thumbprintValue.GetString() : null;
+        return new { status = status is "Valid" or "NotSigned" or "HashMismatch" or "NotTrusted" ? status : "Unknown", signer, thumbprint };
+    }
+    catch
+    {
+        try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+        return new { status = "Unknown", signer = (string?)null, thumbprint = (string?)null };
+    }
+}
 while (await Console.In.ReadLineAsync() is { } line)
 {
     string? id = null;
@@ -37,15 +199,21 @@ while (await Console.In.ReadLineAsync() is { } line)
         {
             case "status":
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
-                    dns = dnsState, lastDnsRead, wfp = "Niewdrożone", ai = "Wyłączone w nowym kliencie",
+                    dns = dnsState, lastDnsRead, processes = processMonitor.State,
+                    enterprise = await EnterpriseStatusAsync(),
+                    runtime = ReadRuntimeMetrics(),
+                    wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath };
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "rollbackFeed": reputation.Rollback(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "collect":
                 var detections = new List<string>();
-                if (!settings.Paused && OperatingSystem.IsWindows())
+                var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
+                if (settings.Paused) dnsState = "Obserwacja wstrzymana";
+                else if (OperatingSystem.IsWindows() && (lastDnsAttempt is not { } previousDnsAttempt || DateTimeOffset.UtcNow - previousDnsAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
                 {
+                    lastDnsAttempt = DateTimeOffset.UtcNow;
                     try
                     {
                         using var process = new System.Diagnostics.Process { StartInfo = new System.Diagnostics.ProcessStartInfo
@@ -72,9 +240,10 @@ while (await Console.In.ReadLineAsync() is { } line)
                             foreach (var name in reputation.FindMatches(names.OfType<string>(), DateTimeOffset.UtcNow))
                             {
                                 if (!deduplicator.TryMark(name, DateTimeOffset.UtcNow)) continue;
-                                await store.AddLocalOnlyAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.High,
+                                await RecordDetectionAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.High,
                                     "Domena na liście CERT Polska", "Cache DNS Windows", "Zaobserwowano domenę z aktualnej listy: " + name,
-                                    "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New));
+                                    "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New,
+                                    EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion), "url", "reputation.cert");
                                 detections.Add(name!);
                             }
                         }
@@ -83,10 +252,101 @@ while (await Console.In.ReadLineAsync() is { } line)
                     }
                     catch (Exception ex) { dnsState = "Odczyt cache DNS niedostępny: " + ex.GetType().Name; }
                 }
-                else dnsState = "Obserwacja wstrzymana";
-                result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState };
+                var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
+                    ? await SyncEnterpriseAsync(force: false) : null;
+                result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState,
+                    processChanges, processes = processMonitor.State, enterpriseSync };
                 break;
             case "history": result = await store.ReadAsync(); break;
+            case "eventStatus":
+                if (!Enum.TryParse<EventStatus>(request.GetProperty("status").GetString(), ignoreCase: true, out var eventStatus) || !Enum.IsDefined(eventStatus))
+                    throw new InvalidDataException("Nieprawidłowy status zdarzenia.");
+                await store.SetStatusAsync(request.GetProperty("eventId").GetInt64(), eventStatus);
+                result = new { updated = true };
+                break;
+            case "knowledgeList": result = await knowledge.ListAsync(); break;
+            case "knowledgeImport":
+                var documentPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano dokumentu.");
+                result = await knowledge.ImportAsync(documentPath);
+                break;
+            case "knowledgeSearch":
+                var query = request.GetProperty("query").GetString() ?? "";
+                result = await knowledge.SearchAsync(query);
+                break;
+            case "knowledgeDelete":
+                var documentId = request.GetProperty("documentId").GetString() ?? "";
+                result = new { deleted = await knowledge.DeleteAsync(documentId) };
+                break;
+            case "knowledgeBackup":
+                var knowledgeBackupPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku kopii.");
+                await knowledge.BackupAsync(knowledgeBackupPath);
+                result = new { backedUp = true };
+                break;
+            case "knowledgeRestore":
+                var knowledgeRestorePath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku kopii.");
+                result = new { restoredDocuments = await knowledge.RestoreAsync(knowledgeRestorePath) };
+                break;
+            case "historyExport":
+                var exportPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku eksportu.");
+                await store.ExportAsync(exportPath);
+                result = new { exported = true };
+                break;
+            case "databaseBackup":
+                var databaseBackupPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku kopii.");
+                await store.BackupAsync(databaseBackupPath);
+                result = new { backedUp = true };
+                break;
+            case "databaseRestore":
+                var databaseRestorePath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku kopii.");
+                await store.RestoreAsync(databaseRestorePath);
+                settings = await store.LoadSettingsAsync();
+                await store.ApplyRetentionAsync(settings.RetentionDays);
+                result = new { restored = true, eventCount = await store.CountEventsAsync(), installationProfilePreserved = true };
+                break;
+            case "aiModels":
+                var endpoint = request.GetProperty("endpoint").GetString() ?? settings.LocalAIEndpoint;
+                result = await aiProvider.ListModelsAsync(endpoint);
+                break;
+            case "aiSettings":
+                var aiSettings = settings with { UseLocalAI = request.GetProperty("useLocalAI").GetBoolean(),
+                    LocalAIEndpoint = request.GetProperty("endpoint").GetString() ?? "",
+                    LocalAIModel = request.GetProperty("model").GetString() ?? "",
+                    LocalAITimeoutSeconds = request.TryGetProperty("timeoutSeconds", out var timeoutSeconds) ? timeoutSeconds.GetInt32() : settings.LocalAITimeoutSeconds };
+                await store.SaveSettingsAsync(aiSettings);
+                settings = aiSettings;
+                result = settings;
+                break;
+            case "enterpriseStatus": result = await EnterpriseStatusAsync(); break;
+            case "enterprisePair":
+                if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Parowanie Enterprise wymaga Windows DPAPI.");
+                if (!request.GetProperty("shareSecurityMetadata").GetBoolean())
+                    throw new InvalidDataException("Parowanie wymaga jawnego potwierdzenia synchronizacji metadanych bezpieczeństwa.");
+                var enterpriseServer = EnterpriseAgentClient.ValidateServer(request.GetProperty("server").GetString() ?? "");
+                var invitationCode = request.GetProperty("invitationCode").GetString() ?? "";
+                var enrollment = await enterpriseAgent.EnrollAsync(enterpriseServer, invitationCode, Environment.MachineName,
+                    typeof(EnterpriseAgentClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
+                await deviceCredentials.WriteAsync(enrollment.DeviceToken);
+                try
+                {
+                    await store.SetEnterpriseProfileAsync(enterpriseServer.ToString(), shareSecurityMetadata: true);
+                    installationProfile = await store.GetInstallationProfileAsync();
+                }
+                catch { await deviceCredentials.DeleteAsync(); throw; }
+                lastEnterpriseSyncAttempt = null;
+                result = new { paired = true, deviceId = enrollment.DeviceId, group = enrollment.Group };
+                break;
+            case "enterpriseConsent":
+                if (installationProfile.Variant != ProductVariant.EnterpriseClient || installationProfile.EnterpriseServerUri is null)
+                    throw new InvalidOperationException("Najpierw sparuj urządzenie z serwerem Enterprise.");
+                var shareMetadata = request.GetProperty("enabled").GetBoolean();
+                if (shareMetadata && string.IsNullOrEmpty(await deviceCredentials.ReadAsync()))
+                    throw new InvalidOperationException("Brak poświadczenia urządzenia; sparuj je ponownie przed włączeniem synchronizacji.");
+                await store.SetEnterpriseProfileAsync(installationProfile.EnterpriseServerUri, shareMetadata);
+                installationProfile = await store.GetInstallationProfileAsync();
+                if (!shareMetadata) await store.ClearEnterpriseEventQueueAsync();
+                result = new { sharingMetadata = shareMetadata, queuedEvents = await store.CountPendingEnterpriseEventsAsync() };
+                break;
+            case "enterpriseSync": result = await SyncEnterpriseAsync(force: true); break;
             case "pause":
                 var pausedSettings = settings with { Paused = request.GetProperty("paused").GetBoolean() };
                 await store.SaveSettingsAsync(pausedSettings);
@@ -106,32 +366,40 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var text = request.GetProperty("text").GetString() ?? "";
                 var url = request.GetProperty("url").GetString();
                 if (text.Length > 16000 || url?.Length > 4096) throw new InvalidDataException("Zbyt długa treść.");
-                var assessment = rules.Analyze(new AnalysisContext("Ręczna analiza", text, DateTimeOffset.UtcNow,
-                    string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url)));
+                var context = new AnalysisContext("Ręczna analiza", text, DateTimeOffset.UtcNow,
+                    string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url));
+                var assessment = await orchestrator.AnalyzeAsync(context, settings.UseLocalAI, settings.LocalAIEndpoint,
+                    settings.LocalAIModel, settings.LocalAITimeoutSeconds);
                 if (Uri.TryCreate(url, UriKind.Absolute, out var target) && target.Scheme is "http" or "https" && reputation.Contains(target.IdnHost, DateTimeOffset.UtcNow))
                     assessment = assessment with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
                         Indicators = assessment.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray(),
                         Explanation = "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska. " + assessment.Explanation };
                 if (assessment.Indicators.Count > 0)
-                    await store.AddLocalOnlyAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, assessment.Risk,
+                    await RecordDetectionAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, assessment.Risk,
                         assessment.Category.ToString(), "Ręczna analiza", assessment.Explanation,
-                        string.Join(" ", assessment.Recommendations), EventStatus.New));
+                        string.Join(" ", assessment.Recommendations), EventStatus.New,
+                        EventId: Guid.NewGuid(), Source: "manual-analysis", RuleVersion: ThreatAnalysisEngine.RulesVersion),
+                        assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
+                        "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
                 await store.ApplyRetentionAsync(settings.RetentionDays);
                 result = assessment;
                 break;
             case "connections":
-                // Read-only system snapshot; no DNS resolution, packet capture or process attribution.
-                result = settings.Paused ? [] : IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpConnections()
-                    .Take(1000).Select(c => new { address = c.RemoteEndPoint.Address.ToString(), port = c.RemoteEndPoint.Port,
-                        state = c.State.ToString(), action = "Obserwacja; bez blokowania i reputacji" }).ToArray();
+                // Read-only, on-demand Windows snapshot; short-lived flows and payloads are not observed.
+                result = settings.Paused ? [] : await ReadConnectionSnapshotAsync(CancellationToken.None);
                 break;
             case "file":
                 var path = request.GetProperty("path").GetString() ?? throw new InvalidDataException();
                 var info = new FileInfo(path);
-                if (!info.Exists || info.Length > 256L * 1024 * 1024) throw new InvalidDataException("Limit pliku: 256 MiB.");
+                if (!info.Exists) throw new FileNotFoundException("Nie znaleziono pliku.");
                 await using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
-                    result = new { name = info.Name, size = info.Length, sha256 = Convert.ToHexString(await SHA256.HashDataAsync(stream)),
-                        verdict = "Hash obliczony. Brak bazy reputacji plików; wynik nie potwierdza bezpieczeństwa." };
+                {
+                    if (stream.Length > 256L * 1024 * 1024) throw new InvalidDataException("Limit pliku: 256 MiB.");
+                    var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream));
+                    var signature = await ReadAuthenticodeSignatureAsync(info.FullName, CancellationToken.None);
+                    result = new { name = info.Name, size = stream.Length, sha256 = hash, signature,
+                        verdict = "Obliczono SHA-256 i sprawdzono stan podpisu Authenticode. Brak audytowanego feedu reputacji; żaden z tych wyników sam nie potwierdza bezpieczeństwa pliku." };
+                }
                 break;
             case "clearHistory": await store.DeleteHistoryAsync(); result = new { deleted = true }; break;
             default: throw new InvalidDataException("Nieznana metoda.");
@@ -144,3 +412,6 @@ while (await Console.In.ReadLineAsync() is { } line)
             ? ex.Message : "Operacja nie powiodła się: " + ex.GetType().Name }, json));
     }
 }
+
+sealed record ConnectionSnapshot(string Protocol, string LocalAddress, int LocalPort, string? RemoteAddress,
+    int? RemotePort, string State, int ProcessId, string? ProcessName);

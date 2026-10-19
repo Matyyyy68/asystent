@@ -1,4 +1,5 @@
 using Sentinel.Core;
+using Sentinel.Core.Analysis;
 
 namespace Sentinel.UrlHost;
 
@@ -27,7 +28,8 @@ public sealed class BrowserHistoryRecorder
         if (explanation.Length == 0) return false;
         var item = new SecurityEvent(0, DateTimeOffset.UtcNow, risk, $"Przeglądarka · {result.Category}", "Rozszerzenie Sentinel AI",
             explanation[..Math.Min(explanation.Length, 2000)],
-            "Nie podawaj danych i zweryfikuj adres przez niezależny, znany kanał.", EventStatus.New);
+            "Nie podawaj danych i zweryfikuj adres przez niezależny, znany kanał.", EventStatus.New,
+            Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion);
         await store.AddLocalOnlyAsync(item, cancellationToken);
         try
         {

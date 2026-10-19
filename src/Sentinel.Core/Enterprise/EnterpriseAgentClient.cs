@@ -48,7 +48,10 @@ public sealed class EnterpriseAgentClient(HttpClient httpClient)
         await EnsureSuccess(response, cancellationToken);
         var enrollment = await response.Content.ReadFromJsonAsync<EnterpriseEnrollment>(JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("Serwer zwrócił pustą odpowiedź rejestracji.");
-        if (enrollment.DeviceToken.Length is < 40 or > 100 || enrollment.DeviceId.Length is < 1 or > 100)
+        if (enrollment.DeviceToken is null || enrollment.DeviceToken.Length is < 40 or > 100 || enrollment.DeviceToken.Any(char.IsControl) ||
+            enrollment.DeviceId is null || enrollment.DeviceId.Length is < 1 or > 100 || enrollment.DeviceId.Any(char.IsControl) ||
+            string.IsNullOrWhiteSpace(enrollment.Group) || enrollment.Group.Length > 120 || enrollment.Group.Any(char.IsControl) ||
+            enrollment.RegisteredAt == default)
             throw new InvalidDataException("Serwer zwrócił nieprawidłowe poświadczenie urządzenia.");
         return enrollment;
     }
@@ -107,8 +110,11 @@ public sealed class EnterpriseAgentClient(HttpClient httpClient)
         }) }, options: JsonOptions);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccess(response, cancellationToken);
-        return await response.Content.ReadFromJsonAsync<EnterpriseEventBatchResult>(JsonOptions, cancellationToken)
+        var result = await response.Content.ReadFromJsonAsync<EnterpriseEventBatchResult>(JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("Serwer zwrócił pusty wynik synchronizacji.");
+        if (result.Accepted < 0 || result.Duplicates < 0 || result.Accepted + result.Duplicates != events.Count)
+            throw new InvalidDataException("Serwer zwrócił niezgodny wynik synchronizacji zdarzeń.");
+        return result;
     }
 
     private static HttpRequestMessage CreateRequest(Uri server, string path, string credential)

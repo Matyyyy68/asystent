@@ -90,6 +90,10 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.False(await recorder.RecordAsync(result with { Id = "2" }));
         var eventRow = Assert.Single(await store.ReadAsync());
         Assert.Equal("Przeglądarka · SuspiciousNavigation", eventRow.Category);
+        Assert.Equal("browser-extension", eventRow.Source);
+        Assert.Equal("2026.10.1", eventRow.RuleVersion);
+        Assert.Equal(1, eventRow.SchemaVersion);
+        Assert.NotEqual(Guid.Empty, eventRow.EventId);
         Assert.DoesNotContain("paypal", eventRow.Explanation, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
     }

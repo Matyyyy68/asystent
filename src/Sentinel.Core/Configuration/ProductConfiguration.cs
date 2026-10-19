@@ -4,14 +4,16 @@ public enum ProductVariant { User, EnterpriseClient }
 public enum SystemFactStatus { Available, Unknown, Unsupported }
 public enum NpuAvailability { Detected, NotDetected, Unknown }
 
-/// <summary>Installation identity is provisioned by the installer and is not an ordinary UI setting.</summary>
-public sealed record InstalledProductProfile(ProductVariant Variant = ProductVariant.User, string? EnterpriseServerUri = null, int SchemaVersion = 1)
+/// <summary>Installation identity is provisioned by the installer or explicit Enterprise pairing, not an ordinary preference.</summary>
+public sealed record InstalledProductProfile(ProductVariant Variant = ProductVariant.User, string? EnterpriseServerUri = null, int SchemaVersion = 1, bool ShareSecurityMetadata = false)
 {
     public InstalledProductProfile Validate()
     {
         if (!Enum.IsDefined(Variant) || SchemaVersion != 1) throw new ArgumentException("Nieobsługiwany profil produktu.");
         if (Variant == ProductVariant.User && EnterpriseServerUri is not null)
             throw new ArgumentException("Wariant User nie może zawierać adresu serwera.");
+        if (Variant == ProductVariant.User && ShareSecurityMetadata)
+            throw new ArgumentException("Wariant User nie może włączać synchronizacji Enterprise.");
         if (EnterpriseServerUri is { } address)
         {
             if (address.Length > 2048 || !Uri.TryCreate(address, UriKind.Absolute, out var uri) ||
@@ -97,11 +99,11 @@ public sealed class ConfigurationRecommendationEngine
             notices.Add("Wykryto lokalnie inne składniki ochrony. Sentinel AI ich nie wyłączy ani nie zmieni ich ustawień.");
         if (variant == ProductVariant.EnterpriseClient)
         {
-            available.Add("Parowanie z serwerem Enterprise przez HTTPS i chronione poświadczenie Windows");
-            available.Add("Synchronizacja w tle ograniczonych metadanych i heartbeat według polityki serwera");
-            available.Add("Egzekwowanie interwału analizy, wykluczeń aplikacji i trybu bez automatycznego udostępniania treści");
-            unavailable.Add("Automatyczna analiza serwerowa treści, zatwierdzanie urządzeń i rotacja poświadczeń");
-            notices.Add("Polityki wymagające przesłania treści nie obchodzą jawnej zgody użytkownika; klient pozostaje przy analizie lokalnej na żądanie.");
+            available.Add("Parowanie Enterprise przez HTTPS, poświadczenie chronione DPAPI, heartbeat i synchronizacja wyłącznie metadanych po świadomej zgodzie");
+            available.Add("Pobieranie lokalnej polityki organizacji i dostarczenie ograniczonych zdarzeń offline po odzyskaniu połączenia");
+            unavailable.Add("Serwerowa analiza treści i automatyczne przyjęcie/odwołanie urządzenia z poziomu klienta");
+            unavailable.Add("Automatyczna aktualizacja klienta z podpisaną paczką; urządzenia oczekujące na zatwierdzenie wymagają weryfikacji w panelu administratora");
+            notices.Add("Wariant Enterprise pozostaje lokalny do czasu HTTPS parowania z jednorazowym zaproszeniem i osobnej zgody na przesyłanie metadanych zdarzeń.");
             if (system.NetworkAvailable == false) notices.Add("Nie wykryto połączenia sieciowego. Lokalna analiza reguł nadal działa offline.");
         }
         return new(variant, available, unavailable, "Lokalne reguły + opcjonalny Ollama loopback", false,
