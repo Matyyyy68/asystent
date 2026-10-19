@@ -1,0 +1,40 @@
+name: Build and publish Sentinel AI installer
+on:
+  push:
+    tags: ['v*.*.*']
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build, test and package
+        shell: pwsh
+        run: ./scripts/build-user.ps1 -Installer
+      - name: Verify the installer payload
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content eng/ProductVersion.props)).Project.PropertyGroup.VersionPrefix
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag $env:GITHUB_REF_NAME does not match product version $version" }
+          $installer = "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
+          if (!(Test-Path $installer)) { throw "Missing installer: $installer" }
+          & $installer --self-test
+          if ($LASTEXITCODE) { throw 'Installer self-test failed' }
+      - name: Publish prerelease assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content eng/ProductVersion.props)).Project.PropertyGroup.VersionPrefix
+          $installer = "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
+          gh release create $env:GITHUB_REF_NAME $installer "$installer.sha256" --verify-tag --prerelease --title "Sentinel AI $version" --notes "Własny instalator Windows per-user z kontrolą integralności. Wydanie testowe; przed użyciem zapoznaj się z ograniczeniami projektu."

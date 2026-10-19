@@ -7,7 +7,7 @@ Rozwojowa aplikacja Windows 10/11 x64. React + TypeScript + Electron jest jedyny
 ## Wymagania i budowanie
 
 - Windows x64, PowerShell, .NET SDK 10.0.300+ z najnowszą dostępną funkcją SDK, Node.js 24 i npm.
-- Internet do pierwszego pobrania zależności. Dla instalatora `electron-builder` pobiera narzędzia NSIS.
+- Internet do pierwszego pobrania zależności. Własny instalator jest publikowany jako pojedynczy plik EXE.
 - Brak wymaganych uprawnień administratora; instalacja jest na konto użytkownika. Polityki organizacji mogą zablokować rejestrację hosta.
 
 ```powershell
@@ -15,7 +15,7 @@ Rozwojowa aplikacja Windows 10/11 x64. React + TypeScript + Electron jest jedyny
 ./scripts/build-user.ps1 -Installer
 ```
 
-Skrypt uruchamia testy .NET, publikuje dwa samodzielne EXE, sprawdza IPC i buduje React. Instalator powinien pojawić się w `artifacts/desktop/`. Samodzielne uruchomienie deweloperskie: po `./scripts/build-user.ps1` wykonaj `./desktop/node_modules/.bin/electron.cmd ./desktop`. Nie uruchamiaj bez skompilowanego `artifacts/engine`.
+Skrypt uruchamia testy .NET, publikuje dwa samodzielne EXE, sprawdza IPC i buduje React. Parametr `-Installer` tworzy własny kreator instalacji (bez MSI/NSIS) jako `artifacts/desktop/Sentinel.AI.Setup.<wersja>.exe`. Program instaluje się dla bieżącego użytkownika, weryfikuje wbudowany pakiet i zachowuje lokalne dane przy odinstalowaniu. Samodzielne uruchomienie deweloperskie: po `./scripts/build-user.ps1` wykonaj `./desktop/node_modules/.bin/electron.cmd ./desktop`. Nie uruchamiaj bez skompilowanego `artifacts/engine`.
 
 Na pierwszym uruchomieniu obserwacja DNS jest wstrzymana, lista reputacji pusta. Użytkownik może ją pobrać w sekcji „Baza wiedzy”; aplikacja łączy się wtedy wyłącznie z `hole.cert.pl`. Baza pozostaje użyteczna przez 48 godzin od pobrania, potem jest oznaczana jako wygasła. Każdy import jest atomowy, poprzednią wersję można przywrócić. Historia i pliki bazy trafiają do `%LOCALAPPDATA%\SentinelAI\data`; historia zawiera oceny, a nie surową treść wiadomości ani pełny URL. Baza nie jest szyfrowana. Retencja jest konfigurowalna.
 

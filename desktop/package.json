@@ -1,6 +1,6 @@
 {
   "name": "sentinel-ai-user",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -8,7 +8,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "start": "electron .",
-    "package": "npm run build && electron-builder --win nsis",
+    "package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1",
     "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/preload.cjs"
   },
   "dependencies": {
@@ -45,20 +45,6 @@
         "to": "BrowserExtension"
       }
     ],
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "deleteAppDataOnUninstall": false,
-      "include": "installer.nsh",
-      "installerLanguages": [
-        "pl_PL"
-      ],
-      "uninstallerIcon": "assets/sentinel.ico",
-      "installerIcon": "assets/sentinel.ico",
-      "installerSidebar": "assets/installer-sidebar.bmp",
-      "uninstallerSidebar": "assets/installer-sidebar.bmp"
-    },
     "win": {
       "icon": "assets/sentinel.ico",
       "signExecutable": false

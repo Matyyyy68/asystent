@@ -1,7 +1,7 @@
 # Znane ograniczenia — 2026-10-18
 
-- To wersja rozwojowa. Instalator zbudowano, lecz nie potwierdzono instalacji/aktualizacji/odinstalowania na czystym Windows, autostartu po logowaniu ani działania rozszerzenia w prawdziwym Chrome/Edge. Pełny UX na różnych rozmiarach okien wymaga manualnego przejścia.
-- Electron wymaga, by sandbox Chromium miał odczyt i wykonanie w katalogu programu. Instalator dodaje ograniczony ACE dla `ALL APPLICATION PACKAGES`; uruchomienie z katalogu builda przeszło smoke test po zastosowaniu tego wpisu. Instalacja i odinstalowanie NSIS nadal wymagają testu na czystym Windows.
+- To wersja rozwojowa. Własny instalator ma kontrolę SHA-256, instalację per-user, skróty oraz niestandardową deinstalację, ale jego pełny cykl instalacji/aktualizacji/usuwania, autostart i działanie rozszerzenia wymagają testu na czystym Windows.
+- Instalator nie używa MSI ani NSIS i nie wykonuje rekurencyjnej zmiany uprawnień. Polityki organizacji mogą nadal ograniczać uruchamianie niepodpisanych aplikacji lub rejestrację hosta przeglądarki.
 - DNS to próbkowany cache Windows, nie strumień zapytań. DoH, VPN, wpisy cache usunięte między próbkami i połączenia po IP mogą zostać pominięte. Nie ma PID ani pełnego URL. TCP pokazuje tylko metadane bieżących połączeń i nie jest oceniane reputacyjnie.
 - WFP, blokowanie ruchu i filtr jądra nie są wdrożone. Nie modyfikujemy ustawień DNS. Ostrzeżenie rozszerzenia może nastąpić już po rozpoczęciu ładowania strony.
 - Lista CERT Polska zawiera domeny powiązane z phishingiem i oszustwami; jest dostępna po ręcznej aktualizacji. Po 48 h jest uznawana za wygasłą. URLhaus wymaga własnego Auth-Key i kontroli zasad użycia; nie jest podłączony. Nie ma bazy reputacji IP, pełnych URL malware ani plików.

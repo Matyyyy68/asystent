@@ -6,6 +6,8 @@ on:
       - '.github/workflows/pages.yml'
       - 'website/**'
   workflow_dispatch:
+  release:
+    types: [published]
 permissions:
   contents: read
   pages: write
