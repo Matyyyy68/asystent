@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "dev": "node ../scripts/copy-media.mjs website && vite --host 127.0.0.1",
+    "build": "node ../scripts/copy-media.mjs website && vite build",
     "test": "node test.mjs",
     "lint": "node --check vite.config.js && node --check test.mjs"
   },

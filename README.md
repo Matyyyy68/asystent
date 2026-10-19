@@ -37,6 +37,6 @@ Przed testem na czystym komputerze przeczytaj [procedurę Windows](docs/USER-VAL
 
 ## Witryna
 
-Źródła są w `website/`. `npm.cmd run dev` uruchamia serwer lokalny, `npm.cmd test` sprawdza linki i zasoby, a `npm.cmd run build -- --base=/asystent/` buduje stronę pod ścieżką repozytorium. `.github/workflows/pages.yml` uruchamia się tylko ręcznie (`workflow_dispatch`) i wymaga włączenia GitHub Pages → GitHub Actions w ustawieniach repozytorium. Nie zawiera linku do niezweryfikowanego instalatora.
+Źródła są w `website/`, a wspólne ilustracje i obiekty w `media/`. `npm.cmd run dev` uruchamia serwer lokalny, `npm.cmd test` sprawdza linki i zasoby, a `npm.cmd run build -- --base=/asystent/` buduje stronę razem z mediami pod ścieżką repozytorium. `.github/workflows/pages.yml` publikuje zmiany strony i katalogu `media/`; GitHub Pages musi mieć źródło ustawione na GitHub Actions w ustawieniach repozytorium.
 
 Serwer Enterprise w `server/` nie jest częścią tej wersji User i nie jest budowany przez skrypt klienta.

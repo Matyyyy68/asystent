@@ -5,8 +5,8 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "dev": "node ../scripts/copy-media.mjs desktop && vite --host 127.0.0.1",
+    "build": "tsc --noEmit && node ../scripts/copy-media.mjs desktop && vite build",
     "start": "electron .",
     "package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1",
     "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/preload.cjs"

@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/pages.yml'
       - 'website/**'
+      - 'media/**'
+      - 'scripts/copy-media.mjs'
   workflow_dispatch:
   release:
     types: [published]
