@@ -13,6 +13,7 @@ public sealed class TcpConnectionSnapshotMonitor
     private const int MaximumEventsPerSample = 100;
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(10);
     private readonly Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture;
+    private readonly Func<int, DateTimeOffset, bool> wasRecentlyObservedStart;
     private readonly TimeProvider timeProvider;
     private HashSet<ConnectionKey>? knownConnections;
     private DateTimeOffset? lastAttempt;
@@ -22,10 +23,12 @@ public sealed class TcpConnectionSnapshotMonitor
 
     public TcpConnectionSnapshotMonitor(
         Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Func<int, DateTimeOffset, bool>? wasRecentlyObservedStart = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.wasRecentlyObservedStart = wasRecentlyObservedStart ?? ((_, _) => false);
     }
 
     public async Task<int> CollectAsync(LocalStore store, bool enabled, bool paused, string excludedApplications,
@@ -70,12 +73,18 @@ public sealed class TcpConnectionSnapshotMonitor
         var newConnections = current.Except(knownConnections).ToArray();
         var added = newConnections.Take(MaximumEventsPerSample).ToArray();
         var newlyDroppedEvents = newConnections.Length - added.Length;
-        var events = added.Select(connection => new SecurityEvent(0, now, RiskLevel.Information,
-            "Zaobserwowano połączenie TCP", connection.ProcessName,
-            $"Nowa migawka TCP: {connection.LocalAddress}:{connection.LocalPort} → {connection.RemoteAddress}:{connection.RemotePort}, stan {connection.State}, PID {connection.ProcessId}.",
-            "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.", EventStatus.New,
-            EventId: Guid.NewGuid(), Source: "tcp-connection-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
-            ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName)).ToArray();
+        var events = added.Select(connection =>
+        {
+            var processContext = wasRecentlyObservedStart(connection.ProcessId, now)
+                ? " W ostatnich 60 sekundach zapisano zdarzenie pojawienia się tego PID; to wyłącznie korelacja czasowa, nie ocena zagrożenia."
+                : "";
+            return new SecurityEvent(0, now, RiskLevel.Information,
+                "Zaobserwowano połączenie TCP", connection.ProcessName,
+                $"Nowa migawka TCP: {connection.LocalAddress}:{connection.LocalPort} → {connection.RemoteAddress}:{connection.RemotePort}, stan {connection.State}, PID {connection.ProcessId}.{processContext}",
+                "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.", EventStatus.New,
+                EventId: Guid.NewGuid(), Source: "tcp-connection-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName);
+        }).ToArray();
 
         if (events.Length > 0)
         {

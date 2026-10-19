@@ -29,7 +29,8 @@ var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
 var reputation = new DomainReputation(directory);
 var processMonitor = new ProcessSnapshotMonitor();
 var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationToken =>
-    (IReadOnlyCollection<ConnectionSnapshot>)await ReadConnectionSnapshotAsync(cancellationToken));
+    (IReadOnlyCollection<ConnectionSnapshot>)await ReadConnectionSnapshotAsync(cancellationToken),
+    wasRecentlyObservedStart: processMonitor.WasRecentlyObservedStart);
 using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);

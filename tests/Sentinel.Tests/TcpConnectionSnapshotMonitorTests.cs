@@ -6,8 +6,8 @@ namespace Sentinel.Tests;
 public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), "sentinel-tcp-monitor-" + Guid.NewGuid());
-    private static ConnectionSnapshot Connection(int port, string remote = "198.51.100.7", string process = "browser") =>
-        new("TCP", "192.0.2.10", 50_000 + port, remote, port, "Established", 1234, process);
+    private static ConnectionSnapshot Connection(int port, string remote = "198.51.100.7", string process = "browser", int processId = 1234) =>
+        new("TCP", "192.0.2.10", 50_000 + port, remote, port, "Established", processId, process);
 
     [Fact]
     public async Task RequiresOptInUsesBaselineAndRecordsOnlyNewExternalTcpMetadata()
@@ -74,6 +74,30 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
         Assert.Contains("baza początkowa", monitor.State);
         Assert.Equal(100, (await store.ReadAsync()).Count);
+    }
+
+    [Fact]
+    public async Task CorrelatesNewTcpConnectionWithRecentlyObservedProcessStartAsInformationalContext()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var processSnapshot = new Dictionary<int, string>();
+        var processMonitor = new ProcessSnapshotMonitor(() => new(processSnapshot));
+        processSnapshot.Add(1234, "browser");
+        Assert.Equal(1, await processMonitor.CollectAsync(store, paused: false, excludedApplications: ""));
+
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample = [];
+        var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock,
+            processMonitor.WasRecentlyObservedStart);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        sample = [Connection(443, processId: 1234)];
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var eventItem = Assert.Single(await store.ReadAsync(), item => item.Source == "tcp-connection-snapshot");
+        Assert.Contains("korelacja czasowa", eventItem.Explanation);
+        Assert.Equal(RiskLevel.Information, eventItem.Risk);
+        Assert.False(processMonitor.WasRecentlyObservedStart(1234, clock.GetUtcNow().AddSeconds(61)));
     }
 
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }

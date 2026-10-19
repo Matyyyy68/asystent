@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-10-19 — kandydat 0.15.11
+
+- Zdarzenie nowego połączenia TCP zawiera teraz informację, gdy ten sam PID został zapisany jako nowy proces w ciągu poprzednich 60 sekund. To lokalna korelacja czasowa, jawnie oznaczona jako informacyjna; nie zmienia oceny ryzyka. Pamięć korelacji jest ograniczona do 60 sekund i resetuje się wraz z silnikiem.
+- Testy .NET: 158/158; Engine IPC i produkcyjne buildy wymagają potwierdzenia dla tej wersji.
+
 ## 2026-10-19 — kandydat 0.15.10
 
 - Obserwatory procesów i TCP zachowują punkt odniesienia, dopóki nowe zdarzenia nie zostaną zapisane w historii. Przy `SQLITE_FULL` pokazują stan błędu i ponawiają zapis po odzyskaniu miejsca; test potwierdza zapis zdarzenia procesu po zwolnieniu miejsca.

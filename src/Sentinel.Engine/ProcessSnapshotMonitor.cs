@@ -9,6 +9,7 @@ public sealed class ProcessSnapshotMonitor
     private const int MaximumEventsPerSample = 100;
     private Dictionary<int, string> knownProcesses;
     private long droppedEvents;
+    private readonly Dictionary<int, DateTimeOffset> recentlyObservedStarts = [];
     private readonly Func<Dictionary<int, string>> capture;
 
     public string State { get; private set; } = "Próbkowanie procesów nie zostało uruchomione.";
@@ -19,6 +20,14 @@ public sealed class ProcessSnapshotMonitor
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         knownProcesses = CaptureSnapshot();
+    }
+
+    public bool WasRecentlyObservedStart(int processId, DateTimeOffset timestamp)
+    {
+        var cutoff = timestamp.AddSeconds(-60);
+        foreach (var stale in recentlyObservedStarts.Where(entry => entry.Value < cutoff).Select(entry => entry.Key).ToArray())
+            recentlyObservedStarts.Remove(stale);
+        return recentlyObservedStarts.TryGetValue(processId, out var startedAt) && startedAt <= timestamp && startedAt >= cutoff;
     }
 
     public async Task<int> CollectAsync(LocalStore store, bool paused, string excludedApplications, CancellationToken cancellationToken = default)
@@ -51,6 +60,8 @@ public sealed class ProcessSnapshotMonitor
         var toStore = changes.Take(MaximumEventsPerSample).ToArray();
         var newlyDroppedEvents = Math.Max(0, changes.Count - toStore.Length);
         var now = DateTimeOffset.UtcNow;
+        foreach (var processId in recentlyObservedStarts.Where(entry => entry.Value < now.AddSeconds(-60)).Select(entry => entry.Key).ToArray())
+            recentlyObservedStarts.Remove(processId);
         var events = toStore.Select(change =>
         {
             var explanation = change.Action == "Proces zaobserwowany"
@@ -71,6 +82,8 @@ public sealed class ProcessSnapshotMonitor
 
         knownProcesses = current;
         droppedEvents += newlyDroppedEvents;
+        foreach (var change in toStore.Where(change => change.Action == "Proces zaobserwowany"))
+            recentlyObservedStarts[change.ProcessId] = now;
         var capped = current.Count >= MaximumProcesses ? " Limit snapshotu osiągnięty." : "";
         State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, pominięto łącznie {droppedEvents}.{capped}";
         return toStore.Length;
