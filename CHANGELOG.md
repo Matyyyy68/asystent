@@ -3,7 +3,7 @@
 ## 2026-10-19 — kandydat 0.15.9
 
 - Ograniczono wzrost lokalnej historii SQLite do 512 MiB; przy pełnym dysku lub limicie transakcja jest odrzucana bez automatycznego kasowania starszych zdarzeń, a użytkownik dostaje czytelny komunikat. Test wymuszonego SQLITE_FULL potwierdza rollback batcha i zachowanie wcześniejszych wpisów.
-- Testy .NET: 156/156; Engine IPC i build silnika PASS. Build/lint oraz Windows CI i Pages wymagają potwierdzenia.
+- Testy .NET: 156/156; Engine IPC, build silnika i oba UI buildy PASS. Windows CI i Pages PASS; prerelease [v0.15.9](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.9) zawiera instalator 262488179 B, SHA-256 `12531dae03efe9323f5e92572145edd5c2088e132285c298b63cebbb6c866a3f`.
 
 - Dodano jawny opt-in dla próbkowania TCP co 10 s. Natywny IP Helper zastępuje PowerShell przy snapshotach; nowe zewnętrzne połączenia `Established`/`SynSent` zapisują lokalnie tylko metadane, bez payloadu. Monitoring domyślnie pozostaje wyłączony, a krótkie połączenia mogą zostać pominięte.
 - UI, README i strona opisują działanie oraz ograniczenia. Test live w Windows potwierdza wykrycie kontrolowanego nie-loopback połączenia. Testy .NET: 155/155; build silnika, IPC, lint UI i produkcyjny build UI PASS. Windows CI i Pages PASS; opublikowano prerelease [v0.15.8](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.8). Instalator ma 262487667 B, SHA-256 `9ea670966be6a7cb3cd818cc01d32a3276b1a0c78d94d1c6d68b3238d61c2d9a`.
