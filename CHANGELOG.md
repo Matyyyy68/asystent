@@ -1,9 +1,9 @@
 # CHANGELOG
 
-## 2026-10-19 — kandydat wydania 0.15.4
+## 2026-10-19 — wydanie testowe 0.15.4
 
 - Ograniczono wzrost lokalnej bazy wiedzy: maksymalnie 100 dokumentów i 20 mln indeksowanych znaków. Odrzucony import nie narusza zapisanych danych.
-- Testy klienta przechodzą 150/150; build wydania i workflow CI dla v0.15.4 pozostają do wykonania.
+- Testy klienta przechodzą 150/150, a GitHub Actions potwierdził Windows build/test/self-test i opublikował prerelease [v0.15.4](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.4). Instalator CI ma 262480499 B, SHA-256 `5ba6884efb926f3b6cf1814a611433f713a374b35593e8bfbd45df3d10821c7b`; workflow Pages również zakończył się sukcesem.
 
 ## 2026-10-19 — ograniczenie wzrostu lokalnej bazy wiedzy
 
