@@ -1,7 +1,7 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-19  
-**Etap:** audyt bazowy wykonany; kandydat 0.15.8 dodaje opt-in monitoring TCP; 0.15.7 pozostaje ostatnim opublikowanym wydaniem do czasu weryfikacji CI.
+**Etap:** audyt bazowy wykonany; prerelease 0.15.8 opublikowane z opt-in monitoringiem TCP; dalsze plany pozostają w realizacji.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest jeszcze w pełni zamknięty; 4 plany mają wdrożone i przetestowane etapy. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
@@ -45,7 +45,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## W trakcie / zablokowane
 
-- **Kandydat 0.15.8:** 155/155 testów .NET, Engine IPC z kontrolowanym nie-loopback TCP testem, `check-product`, UI lint i produkcyjny build PASS. IP Helper zastąpił PowerShell w odczycie endpointów. Observer TCP jest domyślnie wyłączony, próbuje co 10 s wykrywać nowe zewnętrzne połączenia `Established`/`SynSent` i zapisuje lokalnie tylko metadane. CI / instalator / Pages dla 0.15.8 jeszcze niezweryfikowane.
+- **Wydanie 0.15.8:** 155/155 testów .NET, Engine IPC z kontrolowanym nie-loopback TCP testem, `check-product`, UI lint i produkcyjne buildy PASS. Windows CI build/test/self-test i Pages PASS. Prerelease [v0.15.8](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.8): instalator 262487667 B, GitHub SHA-256 `9ea670966be6a7cb3cd818cc01d32a3276b1a0c78d94d1c6d68b3238d61c2d9a`. Observer TCP jest domyślnie wyłączony, próbuje co 10 s wykrywać nowe zewnętrzne połączenia `Established`/`SynSent` i zapisuje lokalnie tylko metadane.
 - Zaktualizowano README, witrynę, audyt luk i PLAN-001; krótkie połączenia nadal mogą umknąć, a UDP pozostaje ręcznym snapshotem.
 
 - W trakcie: szczegółowe wdrożenia planów 001–010; PLAN-001 ma snapshot TCP/UDP, próbkowane zdarzenia procesu i test awarii/odzyskania źródła; PLAN-004/005 mają wdrożone i przetestowane etapy, a PLAN-007 ma eksport, kopie/restore obu baz, diagnostykę, limit importu wiedzy i testy współbieżności. Limity bazy historii/dysku, brak miejsca i ACL nadal wymagają pracy.
@@ -57,5 +57,5 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## Następny konkretny krok
 
-Zweryfikować wydanie 0.15.8 w Windows CI i Pages, a następnie wykonać soak test observera TCP i przejść do limitów historii/dysku/ACL z PLAN-007. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
+Wykonać soak test observera TCP i przejść do limitów historii/dysku/ACL z PLAN-007. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
 
