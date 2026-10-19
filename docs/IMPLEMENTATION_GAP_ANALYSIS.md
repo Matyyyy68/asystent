@@ -1,7 +1,7 @@
 # Audyt luk i plan realizacji Sentinel AI
 
 **Data audytu:** 2026-10-19  
-**Audytowany commit:** `e618cbf` plus lokalna poprawka testów Enterprise opisana w [planie 10](implementation-plans/PLAN-010-enterprise-client-and-server.md).  
+**Audytowany stan:** commit `6e4e8a0` plus poprawka skryptu przywracania backupu serwera i testów Windows przygotowana w tym etapie.
 **Zakres:** aktualny klient `0.15.0`, osobny katalog `server/`, rozszerzenie MV3, instalator, witryna i dostępne testy Windows.  
 **Wniosek:** projekt jest działającym prototypem ochrony lokalnej, nie produkcyjnym antywirusem ani monitorem całego ruchu. Nie wykrywa wszystkich zagrożeń, nie filtruje ani nie blokuje ruchu.
 

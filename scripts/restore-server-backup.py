@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Restore an offline Sentinel Server SQLite backup with a pre-restore safety copy."""
 import argparse
+from contextlib import closing
 import os
 import sqlite3
 import sys
@@ -18,22 +19,23 @@ def readonly_uri(path: Path) -> str:
 def validate_database(path: Path) -> None:
     if not path.is_file() or path.stat().st_size == 0:
         raise ValueError("Plik bazy nie istnieje albo jest pusty.")
-    with sqlite3.connect(readonly_uri(path), uri=True, timeout=5) as connection:
-        result = connection.execute("PRAGMA integrity_check").fetchone()
-        if result is None or result[0] != "ok":
-            raise ValueError("Baza nie przechodzi kontroli integralności SQLite.")
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (5, 6, 7):
-            raise ValueError(f"Nieobsługiwana wersja schematu bazy: {version}.")
-        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        missing = REQUIRED_TABLES - tables
-        if missing:
-            raise ValueError("Plik nie jest bazą Sentinel Server; brak wymaganych tabel.")
+    with closing(sqlite3.connect(readonly_uri(path), uri=True, timeout=5)) as connection:
+        with connection:
+            result = connection.execute("PRAGMA integrity_check").fetchone()
+            if result is None or result[0] != "ok":
+                raise ValueError("Baza nie przechodzi kontroli integralności SQLite.")
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version not in (5, 6, 7):
+                raise ValueError(f"Nieobsługiwana wersja schematu bazy: {version}.")
+            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            missing = REQUIRED_TABLES - tables
+            if missing:
+                raise ValueError("Plik nie jest bazą Sentinel Server; brak wymaganych tabel.")
 
 
 def snapshot(source: Path, destination: Path) -> None:
-    with sqlite3.connect(readonly_uri(source), uri=True, timeout=5) as src:
-        with sqlite3.connect(destination, timeout=5) as dst:
+    with closing(sqlite3.connect(readonly_uri(source), uri=True, timeout=5)) as src:
+        with closing(sqlite3.connect(destination, timeout=5)) as dst:
             src.backup(dst)
             dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             dst.commit()
@@ -63,7 +65,8 @@ def restore(backup: Path, database: Path) -> Path | None:
     try:
         snapshot(backup, staged)
         validate_database(staged)
-        with staged.open("rb") as stream:
+        with staged.open("rb+") as stream:
+            stream.flush()
             os.fsync(stream.fileno())
         for suffix in ("-wal", "-shm"):
             sidecar = Path(str(database) + suffix)
