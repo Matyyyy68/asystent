@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-10-19 — kandydat wydania 0.15.7
+
+- Pusta tabela domen nie jest już raportowana jako świeży feed, nawet jeśli pozostał aktualny znacznik pobrania. Dopasowanie domen pozostaje wyłączone w takim stanie.
+- Dodano regresyjny test pustej bazy reputacji; pełny zestaw .NET przechodzi 152/152, `check-product`, TypeScript/lint i produkcyjny build UI PASS. Windows CI i publikacja prerelease v0.15.7 pozostają do wykonania.
+
 ## 2026-10-19 — wydanie testowe 0.15.6
 
 - Dodano integracyjny test limitu 20 mln indeksowanych znaków. Test wypełnia FTS5 do limitu i sprawdza, że nadmiarowy import jest odrzucony bez naruszenia istniejącego indeksu.

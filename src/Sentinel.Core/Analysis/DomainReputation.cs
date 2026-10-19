@@ -42,8 +42,9 @@ public sealed class DomainReputation
         cmd.CommandText = "SELECT (SELECT COUNT(*) FROM domains), fetched, version FROM metadata WHERE id=1";
         using var r = cmd.ExecuteReader();
         if (!r.Read()) return new(0, null, null, true);
+        var count = r.GetInt32(0);
         var fetched = DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture);
-        return new(r.GetInt32(0), fetched, r.GetString(2), now < fetched || now - fetched > TimeSpan.FromHours(48));
+        return new(count, fetched, r.GetString(2), count == 0 || now < fetched || now - fetched > TimeSpan.FromHours(48));
     }
     public bool Contains(string domain, DateTimeOffset now)
     {

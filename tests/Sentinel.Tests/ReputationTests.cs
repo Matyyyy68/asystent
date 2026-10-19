@@ -18,6 +18,27 @@ public sealed class ReputationTests : IDisposable
         Assert.False(store.Contains("evil.test", now.AddDays(3)));
     }
     [Fact]
+    public void EmptyImportedDomainTableIsNeverReportedAsCurrent()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = new DomainReputation(directory);
+        store.Import("example.test\nmalware.test\n", now);
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(directory, "reputation.db")};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM domains";
+            command.ExecuteNonQuery();
+        }
+
+        var status = store.Status(now);
+
+        Assert.Equal(0, status.Count);
+        Assert.Equal(now, status.FetchedAt);
+        Assert.True(status.Expired);
+        Assert.False(store.Contains("example.test", now));
+    }
+    [Fact]
     public void FailedImportPreservesSnapshotAndRollbackRestoresPrevious()
     {
         var store = new DomainReputation(directory); var now = DateTimeOffset.UtcNow;
