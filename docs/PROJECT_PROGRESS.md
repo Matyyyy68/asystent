@@ -1,11 +1,17 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-20
-**Ostatnie opublikowane wydanie:** prerelease [v0.15.31](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.31). Windows CI `39467119852`, Pages `39467119876` i installer build/self-test/release `39467120476` PASS. Instalator 262536309 B, SHA-256 `a82c91f25b6425f30ef4fb7ee3bc924b2c937598ad511d3055b37b13047309fc` i sidecar `.sha256` dostępne. Lokalny instalator 279336825 B, SHA-256 `8A0F654D49F8F6431E5E9076DB1CF4E3F83B25DC23BB02713DAC6FCFFDD43D5F`; desktop 4/4, .NET 186/186, Engine IPC i autotest instalatora PASS.
+**Ostatnie opublikowane wydanie:** prerelease [v0.15.32](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.32). Windows validation `39472685283` i installer build/self-test/release `39472689007` PASS. Instalator 262539381 B, SHA-256 `efda654ec6e03cdcc5f9d865fb8adccff4665ecc3f8e346d4bb0ed9eadbcc396` oraz sidecar `.sha256` są dostępne. Lokalny instalator 279339897 B, SHA-256 `4FA4BCB6CA8C77A2A9CCBC914D7FAC1ACA5A8CB1DF6733D5BE08601E6DEC73CF`; client .NET 190/190, server tests 20/20, Release build, HTTP API smoke i self-test instalatora PASS. Website test/lint/build PASS dla linków v0.15.32; Pages deploy czeka na push.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest w pełni zamknięty. Wydanie v0.15.23 dodało trwały baseline Downloads (SQLite v9), wznowienie porównania po restarcie i atomowy zapis dopasowania; v0.15.24 naprawia ponowienie startu watchera po błędzie SQLite, v0.15.25 ponawia je automatycznie podczas kolejnego collect, v0.15.26–v0.15.27 zapewniają restart procesu silnika po awarii lub zawieszeniu, a v0.15.28 pokazuje bezpieczny lifecycle silnika w UI diagnostycznym. Weryfikacja audytu wykazała też, że baza FTS5 jest już używana jako leksykalne źródło kontekstu dla Ollama; brak semantycznego rankingu pozostaje. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
 Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryteriów, a udział UI zawyżałby gotowość produktu bezpieczeństwa. Postęp liczę przez zweryfikowane przepływy i jawne ograniczenia.
+
+## Ostatni etap — 2026-10-20
+
+- W v0.15.32 zdarzenia Enterprise zachowują wersję schematu, dozwolone źródło i bezpieczną wersję reguły od trwałej kolejki klienta do API, bazy serwera i widoku administratora. Migracje lokalna v9→v10 i serwerowa v7→v8 zachowują stare rekordy z wartościami domyślnymi; backup/restore obsługuje v10.
+- Release workflow Windows i walidacja głównej gałęzi PASS; instalator i checksum zostały opublikowane. Testowany live Chrome/Edge, pełny cykl instalacji GUI oraz live-check Pages pozostają niewykonane.
+- Następny konkretny krok: uruchomić test/lint/build witryny v0.15.32, wypchnąć aktualizację i potwierdzić Pages; następnie kontynuować Plan-004 nad wspólnym kontraktem/deduplikacją i weryfikować kolejne P1 braki.
 
 ## Zweryfikowane przepływy
 
