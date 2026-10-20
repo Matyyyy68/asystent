@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Rozszerzono izolowany self-test instalatora o aktualizację istniejącego katalogu, zachowanie plików spoza payloadu i rollback po anulowaniu po zamianie katalogów. Test sprawdza też, że anulowanie loguje etap transakcji, a nie ekstrakcji.
+- Instalator wstępnie wybiera teraz zarejestrowaną lokalizację Sentinel AI, jeśli znajduje się ona w profilu użytkownika; test odrzuca lokalizację systemową.
 
 ## 0.15.38 — prerelease (2026-10-20)
 

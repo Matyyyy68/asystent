@@ -66,6 +66,11 @@ internal static class Program
         try
         {
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
+            var fallbackDirectory = DefaultDirectory;
+            if (!ResolveInstallDirectory(root, fallbackDirectory).Equals(Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase)
+                || !ResolveInstallDirectory(Environment.GetFolderPath(Environment.SpecialFolder.System), fallbackDirectory)
+                    .Equals(Path.GetFullPath(fallbackDirectory), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Wykrywanie istniejącej lokalizacji instalacji nie działa poprawnie.");
             Install(root, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None, testMode: true);
             var preservedFile = Path.Combine(root, "self-test-user-file.txt");
             File.WriteAllText(preservedFile, "preserve across update and rollback");
@@ -188,6 +193,29 @@ internal static class Program
     }
 
     internal static string Clean(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
+
+    internal static string GetPreferredInstallDirectory()
+    {
+        var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")
+            ?.GetValue("InstallLocation") as string;
+        return ResolveInstallDirectory(registered, DefaultDirectory);
+    }
+
+    internal static string ResolveInstallDirectory(string? registered, string fallback)
+    {
+        var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        var defaultDirectory = Path.GetFullPath(fallback);
+        if (!string.IsNullOrWhiteSpace(registered))
+        {
+            try
+            {
+                var candidate = Path.GetFullPath(registered);
+                if (candidate.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return candidate;
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
+        return defaultDirectory;
+    }
 
     internal static void Install(string target, bool desktopShortcut, bool autoStart, Action<string, int> progress,
         CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null)
@@ -485,7 +513,7 @@ internal static class Program
 
 internal sealed class SetupWizard : Form
 {
-    private readonly TextBox folder = new() { Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Sentinel AI") };
+    private readonly TextBox folder = new() { Text = Program.GetPreferredInstallDirectory() };
     private readonly CheckBox desktop = new() { Text = "Utwórz skrót na pulpicie", Checked = true, AutoSize = true };
     private readonly CheckBox start = new() { Text = "Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true };
     private readonly Label status = new() { AutoSize = true, Text = "Gotowy do instalacji" };
