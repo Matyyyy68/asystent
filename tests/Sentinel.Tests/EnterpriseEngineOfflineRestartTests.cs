@@ -14,7 +14,8 @@ public sealed class EnterpriseEngineOfflineRestartTests
     [Fact]
     public async Task EnterpriseQueueSurvivesEngineRestartWhileOfflineAndConsentStopsRetry()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows())
+            throw Xunit.Sdk.SkipException.ForSkip("The active Engine DPAPI integration test requires Windows.");
         var repository = FindRepositoryRoot();
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Release";
         var engineDll = Path.Combine(repository, "src", "Sentinel.Engine", "bin", configuration, "net10.0", "Sentinel.Engine.dll");
