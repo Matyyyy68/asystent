@@ -1,9 +1,9 @@
 # CHANGELOG
-## 0.15.34 — kandydat (2026-10-20)
+## 0.15.34 — prerelease (2026-10-20)
 
 - Procesy pojawiające się w migawce i nowe połączenia TCP i endpointy UDP z tego samego PID oraz nazwą procesu są łączone identyfikatorem korelacji, jeśli obserwacje są oddalone o najwyżej 60 sekund. Identyfikator jest lokalny; UI nazywa to korelacją czasową i wyjaśnia, że nie dowodzi związku przyczynowego.
 - SQLite v11 zapisuje identyfikator korelacji w historii i kopiach zapasowych; eksport JSON/CSV go zachowuje. Restore nadal przyjmuje kopie v6–v11.
-- Weryfikacja lokalna: .NET 195/195, desktop 4/4, TypeScript/lint i build UI PASS, server tests 20/20, HTTP API smoke PASS. Lokalny installer build i self-test PASS; 279352697 B, SHA-256 `18931A566F82CE34459E4C0450D147ECE43DC54328274924D70761CC633D17C3`. Windows CI i release workflow oczekują.
+- Weryfikacja: .NET 195/195, desktop 4/4, TypeScript/lint i build UI PASS, server tests 20/20, HTTP API smoke PASS. Windows CI `39479871584` i installer build/self-test/release `39479900365` PASS. [GitHub Release v0.15.34](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.34) udostępnia instalator 262552181 B, SHA-256 `1c37638e3ea642697a96a1f9cd420b2d0270f4d4cb9275f81c98f8b8fea3c4cb` i sidecar `.sha256`. Lokalny instalator jest osobnym buildem: 279352697 B, SHA-256 `18931A566F82CE34459E4C0450D147ECE43DC54328274924D70761CC633D17C3`.
 
 ## 0.15.33 — prerelease (2026-10-20)
 
