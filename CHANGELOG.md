@@ -1,4 +1,9 @@
 # CHANGELOG
+## 0.15.36 — kandydat (2026-10-20)
+
+- Rozszerzenie MV3 nie traci już celu, wskaźników i działań ostrzeżenia po uśpieniu service workera: stan tokenu jest przechowywany w `chrome.storage.session`, wygasa po 10 minutach i jest usuwany po zamknięciu karty lub kontynuowaniu nawigacji. Dane pozostają ograniczone do sesji przeglądarki.
+- Dodano regresyjny test restartu workera, odzyskania szczegółów i przycisków oraz odrzucania nieważnych i wygasłych tokenów; wymagane minimum Chrome to 102 (Edge Chromium od tej samej generacji). .NET 198/198, desktop Node tests 6/6, desktop UI build, website test/lint/build, check-product, engine IPC i lokalny installer build/self-test PASS. Lokalny instalator: 279356281 B, SHA-256 `49F014D0CF0A4274E13ECE0D55603A69D112A9DF3F1795B2DC637065162FF957`. Windows CI, test rzeczywistej nawigacji Chrome/Edge i publikacja jeszcze nie wykonane.
+
 ## 0.15.35 — prerelease (2026-10-20)
 
 - Lokalny model zdarzenia zapisuje uporządkowane, walidowane kody dowodowe bez treści ani URL-i. Monitoring procesu, TCP/UDP, DNS, pobranych plików i ręczna analiza dodają kody właściwe dla źródła; historia pokazuje je użytkownikowi, a eksport JSON/CSV i kopie je zachowują.

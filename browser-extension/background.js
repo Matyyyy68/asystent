@@ -1,13 +1,35 @@
 const HOST = "com.sentinelai.urlcheck";
+const WARNING_TARGET_PREFIX = "warningTarget:";
 const pending = new Map();
 const latestByTab = new Map();
 const oneTimeAllow = new Map();
-const warnedTargets = new Map();
 let port = null;
 let nextId = 0;
 let hostAvailable = null;
 let integrationEnabled = true;
 chrome.storage.local.get('integrationEnabled').then(data => { integrationEnabled = data.integrationEnabled !== false; });
+
+function warningTargetKey(token) {
+  return typeof token === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)
+    ? `${WARNING_TARGET_PREFIX}${token}` : null;
+}
+
+async function getWarningTarget(token) {
+  const key = warningTargetKey(token);
+  if (!key) return null;
+  const stored = await chrome.storage.session.get(key);
+  const target = stored[key];
+  if (!target || !Number.isFinite(target.expiresAt) || target.expiresAt <= Date.now()) {
+    if (target) await chrome.storage.session.remove(key);
+    return null;
+  }
+  return target;
+}
+
+async function removeWarningTarget(token) {
+  const key = warningTargetKey(token);
+  if (key) await chrome.storage.session.remove(key);
+}
 
 function connect() {
   if (port) return port;
@@ -71,17 +93,19 @@ chrome.webNavigation.onBeforeNavigate.addListener((event) => {
   request("analyze", event.url).then(async (result) => {
     if (!result || !result.available || latestByTab.get(event.tabId) !== event.url || !result.shouldWarn) return;
     const token = crypto.randomUUID();
-    warnedTargets.set(token, {
+    const target = {
       tabId: event.tabId,
       url: event.url,
       risk: result.risk,
       indicators: result.indicators ?? [],
-      rulesVersion: result.rulesVersion
-    });
+      rulesVersion: result.rulesVersion,
+      expiresAt: Date.now() + 10 * 60 * 1000
+    };
     try {
+      await chrome.storage.session.set({ [`${WARNING_TARGET_PREFIX}${token}`]: target });
       await chrome.tabs.update(event.tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}`) });
     } catch {
-      warnedTargets.delete(token);
+      await removeWarningTarget(token).catch(() => {});
     }
   });
 });
@@ -89,7 +113,12 @@ chrome.webNavigation.onBeforeNavigate.addListener((event) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   latestByTab.delete(tabId);
   oneTimeAllow.delete(tabId);
-  for (const [token, target] of warnedTargets) if (target.tabId === tabId) warnedTargets.delete(token);
+  chrome.storage.session.get(null).then((items) => {
+    const keys = Object.entries(items)
+      .filter(([key, target]) => key.startsWith(WARNING_TARGET_PREFIX) && target?.tabId === tabId)
+      .map(([key]) => key);
+    if (keys.length) return chrome.storage.session.remove(keys);
+  }).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -102,9 +131,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   if (message?.type === "details" && typeof message.token === "string") {
-    const target = warnedTargets.get(message.token);
-    sendResponse(target ? { risk: target.risk, indicators: target.indicators, rulesVersion: target.rulesVersion } : null);
-    return false;
+    getWarningTarget(message.token).then((target) =>
+      sendResponse(target ? { risk: target.risk, indicators: target.indicators, rulesVersion: target.rulesVersion } : null)
+    ).catch(() => sendResponse(null));
+    return true;
   }
   if (message?.type === "status") {
     request("status").then((result) => sendResponse({
@@ -115,20 +145,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "continue" && typeof message.token === "string") {
-    const target = warnedTargets.get(message.token);
-    if (!target) { sendResponse({ ok: false }); return false; }
-    warnedTargets.delete(message.token);
-    oneTimeAllow.set(target.tabId, { url: target.url, expiresAt: Date.now() + 5000 });
-    chrome.tabs.update(target.tabId, { url: target.url })
-      .then(() => sendResponse({ ok: true }))
-      .catch(() => sendResponse({ ok: false }));
+    getWarningTarget(message.token).then(async (target) => {
+      if (!target) { sendResponse({ ok: false }); return; }
+      await removeWarningTarget(message.token);
+      oneTimeAllow.set(target.tabId, { url: target.url, expiresAt: Date.now() + 5000 });
+      await chrome.tabs.update(target.tabId, { url: target.url });
+      sendResponse({ ok: true });
+    }).catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "close-warning" && typeof message.token === "string") {
-    const target = warnedTargets.get(message.token);
-    if (!target) { sendResponse({ ok: false }); return false; }
-    warnedTargets.delete(message.token);
-    chrome.tabs.remove(target.tabId).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    getWarningTarget(message.token).then(async (target) => {
+      if (!target) { sendResponse({ ok: false }); return; }
+      await removeWarningTarget(message.token);
+      await chrome.tabs.remove(target.tabId);
+      sendResponse({ ok: true });
+    }).catch(() => sendResponse({ ok: false }));
     return true;
   }
   return false;
