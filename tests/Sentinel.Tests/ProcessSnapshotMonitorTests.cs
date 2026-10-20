@@ -9,6 +9,55 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     private readonly string directory = Path.Combine(Path.GetTempPath(), "sentinel-process-monitor-" + Guid.NewGuid());
 
     [Fact]
+    public async Task ProcessBaselineSurvivesRestartAndCapturesChangesSinceLastRun()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string> { [41] = "existing-process" };
+        var first = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await first.CollectAsync(store, paused: false, excludedApplications: ""));
+
+        snapshot.Add(42, "started-while-engine-stopped");
+        var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(1, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(42, Assert.Single(await store.ReadAsync()).ProcessId);
+
+        var restartedAgain = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await restartedAgain.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task PausedProcessMonitoringAdvancesPersistentBaselineWithoutAlerts()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string> { [41] = "existing-process" };
+        var first = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await first.CollectAsync(store, paused: false, excludedApplications: ""));
+
+        snapshot.Add(42, "started-during-pause");
+        Assert.Equal(0, await first.CollectAsync(store, paused: true, excludedApplications: ""));
+        var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Empty(await store.ReadAsync());
+        Assert.Equal(2, (await store.ReadProcessMonitorSnapshotAsync()).Processes.Count);
+    }
+
+    [Fact]
+    public async Task ExcludedProcessesAreNotWrittenToPersistentBaseline()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string> { [41] = "password-manager", [42] = "ordinary-app" };
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false, excludedApplications: "password-manager"));
+
+        var persisted = await store.ReadProcessMonitorSnapshotAsync();
+        Assert.True(persisted.Initialized);
+        Assert.DoesNotContain(41, persisted.Processes.Keys);
+        Assert.Equal("ordinary-app", persisted.Processes[42]);
+    }
+
+    [Fact]
     public async Task TenThousandProcessChangesAreCappedAndRecordedWithoutLosingStatus()
     {
         var snapshot = new Dictionary<int, string>();

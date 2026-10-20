@@ -11,5 +11,5 @@
 9. **Testy:** migracja starych baz, brak utraty historii, enum/version validation, idempotence, retencja, eksport redaction, cross-contract fixtures.
 10. **Akceptacja:** wszystkie nowe źródła zapisują v1 zdarzenia; legacy odczyt działa; false positive i source są widoczne; feed/API nie przyjmują nadmiarowych pól.
 11. **Ryzyka:** migracje i zgodność z istniejącymi danymi; schemat API wymaga wersjonowania.
-12. **Status:** `IN_PROGRESS` — wdrożono lokalny kontrakt zdarzenia v1 w SQLite v6: jawna schemaVersion, GUID, źródło, wersja reguły, opcjonalny confidence oraz proces ID/nazwa. Migracje v3 i v5 zachowują historię; odczyt, eksport i UI przenoszą metadane, UI obsługuje false positive przez IPC. Confidence pozostaje puste bez kalibracji. Nadal do zrobienia: adapter Enterprise i korelacja/deduplikacja.
+12. **Status:** `IN_PROGRESS` — wdrożono lokalny kontrakt zdarzenia v1 w SQLite v8: jawna schemaVersion, GUID, źródło, wersja reguły, opcjonalny confidence oraz proces ID/nazwa. Migracje v3, v5, v7 i v8 zachowują historię; odczyt, eksport i UI przenoszą metadane, UI obsługuje false positive przez IPC. Zapis zmian monitorów i zdarzeń jest atomowy. Confidence pozostaje puste bez kalibracji. Nadal do zrobienia: adapter Enterprise i korelacja/deduplikacja między źródłami.
 

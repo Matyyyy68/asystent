@@ -143,6 +143,24 @@ public sealed class StoreTests : IDisposable
         Assert.Contains("TCP:valid-key", committed.EndpointKeys);
         Assert.Single(await store.ReadAsync());
     }
+    [Fact] public async Task ProcessMonitorSnapshotAdvancesAtomicallyWithEventBatch()
+    {
+        var store = await Store();
+        var duplicateId = Guid.NewGuid();
+        await Assert.ThrowsAsync<SqliteException>(() => store.CommitProcessMonitorChangesAsync(
+            [Event() with { EventId = duplicateId }, Event() with { EventId = duplicateId }], [new(412, "synthetic")], []));
+
+        var snapshot = await store.ReadProcessMonitorSnapshotAsync();
+        Assert.False(snapshot.Initialized);
+        Assert.Empty(snapshot.Processes);
+        Assert.Empty(await store.ReadAsync());
+
+        await store.CommitProcessMonitorChangesAsync([Event()], [new(412, "synthetic")], []);
+        var committed = await store.ReadProcessMonitorSnapshotAsync();
+        Assert.True(committed.Initialized);
+        Assert.Equal("synthetic", committed.Processes[412]);
+        Assert.Single(await store.ReadAsync());
+    }
     [Fact] public async Task NewEventsPersistStableIdentityAndProvenance()
     {
         var s = await Store();

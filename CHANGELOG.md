@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- Stan bazowy endpointów TCP/UDP jest trwale przechowywany w SQLite i aktualizowany atomowo wraz ze zdarzeniami; restart silnika nie powtarza alertów dla endpointów już znanych. Wyłączenie monitoringu lub źródła unieważnia bazę przed następnym opt-in.
+- Baseline procesów jest teraz przechowywany w SQLite v8 i aktualizowany atomowo ze zdarzeniami. Restart silnika pozwala wykryć różnice od ostatniej próbki; pauza przesuwa baseline bez generowania alertów. Procesy wykluczone z monitorowania nie są zapisywane w baseline. Testy .NET 174/174, pełny build i self-test instalatora PASS.
+
+## 0.15.15 — prerelease (2026-10-20)
+
+- Sieciowy baseline TCP/UDP jest trwale przechowywany w SQLite v7 i zapisywany atomowo ze zdarzeniami; restart silnika nie powtarza alertów dla wcześniej widzianych endpointów. Wyłączenie monitoringu lub utrata źródła unieważnia baseline przed kolejnym opt-in.
+- Testy .NET 170/170 oraz pełny build/self-test lokalnie PASS. GitHub Actions `39425895322` zakończył Windows build/test/self-test sukcesem i opublikował [prerelease v0.15.15](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.15). Instalator CI: 262509685 B, SHA-256 `2735afde7a3ee51044eab8afbc5c96567686836c27ce2e364bf2c147e96b1beb`; dostępny jest także plik `.sha256`.
 
 ## 0.15.14 — prerelease (2026-10-20)
 
