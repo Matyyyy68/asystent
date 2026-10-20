@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.15.13 — prerelease (2026-10-20)
+
+- Naprawiono ekstrakcję instalatora: przed sprawdzeniem rozmiaru pliku opróżniany jest bufor zapisu, a błąd podaje rozmiar skopiowany i oczekiwany.
+- Self-test instalatora sprawdza teraz wskaźnik katalogu danych oraz prawidłowy nagłówek SQLite dla historii i lokalnej bazy wiedzy po uruchomieniu aplikacji w izolowanym katalogu.
+- Pełny lokalny build instalatora oraz jego self-test PASS; klient .NET 163/163, serwer 19/19, Engine IPC, desktop lint/build i website test/lint/build PASS.
+- Lokalny instalator: 279296377 B, SHA-256 `3c9f9d84f515a2496bde98332ffd9171b27c1aa706e9642283c404bdece5b218`. To odrębny build; instalator CI i release workflow pozostają do potwierdzenia dla taga `v0.15.13`.
+
 ## 0.15.12 — prerelease (2026-10-20)
 
 - Ręczny skan pliku może teraz sprawdzić SHA-256 w jawnie importowanej lokalnej liście (20 MiB/250 000 hashy); import jest walidowany i atomowy. Nieznany/brakujący hash nie jest oceną bezpieczeństwa, a źródło listy nie jest niezależnie weryfikowane.

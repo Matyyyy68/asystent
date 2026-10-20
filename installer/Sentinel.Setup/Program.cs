@@ -95,6 +95,13 @@ internal static class Program
             if (process.ExitCode != 0 || !output.Contains("PASS: Electron renderer", StringComparison.Ordinal)
                 || !File.Exists(Path.Combine(data, "smoke-test.passed")))
                 throw new InvalidOperationException($"Smoke test nie powiódł się (kod {process.ExitCode}). {error.Trim()}");
+            var databaseDirectory = Path.Combine(data, "data");
+            var dataPathPointer = Path.Combine(data, "data-path.txt");
+            if (!File.Exists(dataPathPointer) || !Path.GetFullPath(File.ReadAllText(dataPathPointer).Trim())
+                    .Equals(Path.GetFullPath(databaseDirectory), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Aplikacja zapisała nieprawidłową ścieżkę lokalnych danych.");
+            VerifySmokeDatabase(databaseDirectory, "sentinel.db");
+            VerifySmokeDatabase(databaseDirectory, "knowledge.db");
             Log("SELF_TEST_SUCCESS payload=true chromiumAcl=true appSmoke=true");
             return 0;
         }
@@ -104,6 +111,15 @@ internal static class Program
             return 1;
         }
         finally { TryDelete(root); TryDelete(data); }
+    }
+
+    private static void VerifySmokeDatabase(string dataDirectory, string fileName)
+    {
+        var database = Path.Combine(dataDirectory, fileName);
+        using var stream = new FileStream(database, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Span<byte> header = stackalloc byte[16];
+        if (stream.Read(header) != header.Length || !header[..15].SequenceEqual("SQLite format 3"u8) || header[15] != 0)
+            throw new InvalidDataException($"Aplikacja nie utworzyła poprawnej bazy SQLite {fileName} w izolowanym katalogu danych.");
     }
 
     private static void ApplyChromiumPermissions(string directory)
@@ -196,7 +212,10 @@ internal static class Program
                         var percent = totalBytes == 0 ? 75 : 10 + (int)(copied * 65.0 / totalBytes);
                         progress($"Kopiowanie plików… {copied / 1_048_576:N0} z {totalBytes / 1_048_576:N0} MB", Math.Min(75, percent));
                     }
-                    if (new FileInfo(destination).Length != entry.Length) throw new IOException($"Nie skopiowano kompletnego pliku {entry.FullName}.");
+                    output.Flush();
+                    var copiedLength = new FileInfo(destination).Length;
+                    if (copiedLength != entry.Length)
+                        throw new IOException($"Nie skopiowano kompletnego pliku {entry.FullName} ({copiedLength} z {entry.Length} bajtów).");
                 }
                 if (Directory.Exists(target))
                 {
