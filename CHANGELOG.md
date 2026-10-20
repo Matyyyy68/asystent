@@ -8,7 +8,7 @@
 
 - Monitoring Downloads zapisuje lokalny baseline ścieżek, rozmiarów i czasów modyfikacji. Po restarcie silnika porównuje pliki z ostatnim stanem i wykrywa nowe lub zmienione pliki; wyłączenie i pauza czyszczą baseline. Wykrycie i postęp baseline'u zapisują się atomowo. Migracja SQLite v9 zachowuje dotychczasową historię.
 - UI jawnie informuje, że ścieżki baseline'u są przechowywane lokalnie bez szyfrowania.
-- Testy .NET 183/183, Engine IPC, desktop lint/build i website test/lint/build PASS. Pełny Windows build-user z instalatorem i self-testem PASS. Lokalny instalator 279335801 B, SHA-256 `DCEF8FA77BB4BD5AF9A6AFDC965221ADFE92DCC86F4DF4DBAB27E1F336F800ED`. GitHub CI, publikacja release i Pages pozostają do sprawdzenia po pushu.
+- Testy .NET 183/183, Engine IPC, desktop lint/build i website test/lint/build PASS. Windows CI `39451059431`, Pages `39450039001`, installer build/self-test/release `39451070868` PASS. [Release v0.15.23](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.23) zawiera instalator 262535285 B, SHA-256 `7bec3d5ba09b2099441ae07149ab5f0a63f7c4372532716709ef108dd9980f50` i sidecar `.sha256`. Lokalny self-testowany instalator: 279335801 B, SHA-256 `DB38738EC079110CBD091D79014AE3DCD6AA9068626D032161973DA49315857A`.
 
 ## 0.15.22 — prerelease (2026-10-20)
 
