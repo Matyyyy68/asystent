@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using Sentinel.Core;
@@ -15,9 +16,36 @@ public sealed class DownloadedFileMonitor : IDisposable
     private readonly string directory;
     private readonly ConcurrentDictionary<string, DateTimeOffset> pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> processedFingerprints = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object pendingGate = new();
+    private long droppedPendingFiles;
     private FileSystemWatcher? watcher;
 
     public string State { get; private set; } = "Monitoring pobranych plików wyłączony.";
+
+    public static string GetKnownDownloadsDirectory()
+    {
+        var fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        if (!OperatingSystem.IsWindows()) return fallback;
+        var downloads = new Guid("374DE290-123F-4565-9164-39C4925E467B");
+        try
+        {
+            var result = SHGetKnownFolderPath(ref downloads, 0, IntPtr.Zero, out var pointer);
+            if (result != 0) Marshal.ThrowExceptionForHR(result);
+            try
+            {
+                var path = Marshal.PtrToStringUni(pointer);
+                return string.IsNullOrWhiteSpace(path) ? fallback : path;
+            }
+            finally { Marshal.FreeCoTaskMem(pointer); }
+        }
+        catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or COMException)
+        {
+            return fallback;
+        }
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+    private static extern int SHGetKnownFolderPath(ref Guid rfid, uint flags, IntPtr token, out IntPtr path);
 
     public DownloadedFileMonitor(string directory) => this.directory = Path.GetFullPath(directory);
 
@@ -54,7 +82,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             next.Error += (_, _) => State = "Monitoring pobranych plików utracił część zdarzeń systemu plików; nowe zdarzenia będą nadal obserwowane.";
             next.EnableRaisingEvents = true;
             watcher = next;
-            State = "Monitoring Downloads działa; pliki są sprawdzane lokalnie względem listy hashy.";
+            State = $"Monitoring Downloads działa; pliki są sprawdzane lokalnie względem listy hashy. Pominięto {Interlocked.Read(ref droppedPendingFiles)} zdarzeń przy pełnej kolejce.";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {
@@ -69,7 +97,7 @@ public sealed class DownloadedFileMonitor : IDisposable
         if (reputation.Status().HashCount == 0)
         {
             pending.Clear();
-            State = "Monitoring Downloads działa; zaimportuj lokalną listę hashy, aby sprawdzać pliki.";
+            State = $"Monitoring Downloads działa; zaimportuj lokalną listę hashy, aby sprawdzać pliki. Pominięto {Interlocked.Read(ref droppedPendingFiles)} zdarzeń przy pełnej kolejce.";
             return 0;
         }
         var cutoff = DateTimeOffset.UtcNow - SettleTime;
@@ -154,9 +182,17 @@ public sealed class DownloadedFileMonitor : IDisposable
     private void Queue(string path)
     {
         if (Directory.Exists(path)) return;
-        pending[Path.GetFullPath(path)] = DateTimeOffset.UtcNow;
-        if (pending.Count > MaximumPendingFiles)
-            foreach (var key in pending.Keys.Take(pending.Count - MaximumPendingFiles)) pending.TryRemove(key, out _);
+        var fullPath = Path.GetFullPath(path);
+        lock (pendingGate)
+        {
+            if (!pending.ContainsKey(fullPath) && pending.Count >= MaximumPendingFiles)
+            {
+                droppedPendingFiles++;
+                State = $"Monitoring Downloads: kolejka jest pełna; pominięto łącznie {droppedPendingFiles} zdarzeń plików.";
+                return;
+            }
+            pending[fullPath] = DateTimeOffset.UtcNow;
+        }
     }
 
     public void Dispose()

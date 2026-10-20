@@ -27,7 +27,7 @@ var knowledge = new LocalKnowledgeBase(directory);
 await knowledge.InitializeAsync();
 if (!File.Exists(pointer)) await File.WriteAllTextAsync(pointer, directory);
 var downloadsDirectory = Environment.GetEnvironmentVariable("SENTINEL_DOWNLOADS_PATH") ??
-    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+    DownloadedFileMonitor.GetKnownDownloadsDirectory();
 using var downloadedFileMonitor = new DownloadedFileMonitor(downloadsDirectory);
 var settings = await store.LoadSettingsAsync();
 downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
