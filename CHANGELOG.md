@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rozszerzono izolowany self-test instalatora o deinstalację: usuwa wszystkie pliki z payloadu i kopię deinstalatora, zachowuje plik spoza pakietu oraz obie bazy danych. Tryb testowy nie zmienia wpisów rejestru, skrótów ani rejestracji Native Messaging. Pełne `npm run package` zakończyło się PASS; artefakt testowy 281218937 B, SHA-256 `36BD25EFA75A9259A0D95B023E017052D8C69A90664FFCFA96AB52E8A02FA493`. Nie jest to nowe wydanie.
 - Workflow GitHub Pages po wdrożeniu sprawdza publiczną stronę, wszystkie jej zewnętrzne linki HTTPS, dostępność wersjonowanego instalatora i sidecara SHA-256 oraz format sidecara. Pages run `39505227865` PASS z pełnym checkiem wszystkich linków; Windows CI `39505227855` PASS. Wcześniejszy run `39504764915` sprawdzał poprzednią wersję checku.
 - Wyniki lokalnej analizy AI mogą teraz wskazywać ponumerowane fragmenty FTS5: silnik dopuszcza tylko indeksy źródeł faktycznie przekazane w bieżącym żądaniu, a UI pokazuje nazwę dokumentu, fragment i cytowany tekst przy wskaźniku. Etykieta wyjaśnia, że wskazanie modelu nie jest niezależną weryfikacją źródła. Testy .NET 207/207, Engine IPC, desktop 6/6, UI production build i autotest instalatora PASS; pełny npm audit 0 podatności.
 - Live TLS E2E Enterprise odtwarza teraz przerwę w dostępności: test wyłącza i wznawia API z tą samą bazą, ponawia zachowany batch i potwierdza idempotencję. Tymczasowy certyfikat liścia jest przypięty w pamięci klienta testowego; żaden magazyn zaufanych Windows nie jest modyfikowany. Pełny zestaw testów serwera 21/21 PASS poza sandboxem.

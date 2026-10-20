@@ -143,7 +143,21 @@ internal static class Program
                 || File.ReadAllText(preservedFile) != "preserve across update and rollback")
                 throw new InvalidDataException("Rollback nie odtworzył poprzedniego katalogu instalacji.");
 
-            Log("SELF_TEST_SUCCESS payload=true chromiumAcl=true update=true rollback=true appSmoke=true");
+            Uninstall(root, testMode: true);
+            if (File.Exists(app) || File.Exists(engineExecutable) || !File.Exists(preservedFile) ||
+                File.ReadAllText(preservedFile) != "preserve across update and rollback" || !Directory.Exists(root))
+                throw new InvalidDataException("Deinstalacja nie usunęła plików aplikacji albo zmieniła plik spoza pakietu.");
+            using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
+            using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
+                foreach (var entry in archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)))
+                {
+                    var installedPath = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
+                    if (File.Exists(installedPath)) throw new InvalidDataException($"Deinstalacja pozostawiła plik aplikacji: {entry.FullName}.");
+                }
+            VerifySmokeDatabase(databaseDirectory, "sentinel.db");
+            VerifySmokeDatabase(databaseDirectory, "knowledge.db");
+
+            Log("SELF_TEST_SUCCESS payload=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
             return 0;
         }
         catch (Exception ex)
@@ -448,20 +462,23 @@ internal static class Program
         System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
     }
 
-    private static void Uninstall(string target)
+    private static void Uninstall(string target, bool testMode = false)
     {
         target = Path.GetFullPath(target);
         if (!target.StartsWith(Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Odmowa usunięcia folderu poza profilem użytkownika.");
-        var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+        var registered = testMode ? null : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
         if (!string.IsNullOrWhiteSpace(registered) && !Path.GetFullPath(registered).Equals(target, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Lokalizacja w rejestrze nie zgadza się z uruchomionym deinstalatorem.");
         Log($"UNINSTALL_START target={target}");
-        RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000);
-        using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) run.DeleteValue("Sentinel AI", false);
-        Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI", false);
-        DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk"), target);
-        DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk"), target);
+        if (!testMode)
+        {
+            RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000);
+            using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) run.DeleteValue("Sentinel AI", false);
+            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI", false);
+            DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk"), target);
+            DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk"), target);
+        }
         using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
         {
@@ -478,6 +495,14 @@ internal static class Program
                 try { Directory.Delete(directory, recursive: false); } catch (IOException) { }
 
         var uninstallPath = Path.Combine(target, "Uninstall Sentinel AI.exe");
+        if (testMode)
+        {
+            if (File.Exists(uninstallPath)) File.Delete(uninstallPath);
+            foreach (var directory in Directory.GetDirectories(target, "*", SearchOption.AllDirectories).OrderByDescending(x => x.Length))
+                try { Directory.Delete(directory, recursive: false); } catch (IOException) { }
+            Log("UNINSTALL_SUCCESS testMode=true appFilesRemoved=true userFilesPreserved=true");
+            return;
+        }
         var script = "$id=" + Environment.ProcessId + "; try { Wait-Process -Id $id -Timeout 120 -ErrorAction Stop } catch {}; $p=" + PowerShellQuote(uninstallPath) + "; for($i=0;$i -lt 30 -and (Test-Path -LiteralPath $p);$i++){try{Remove-Item -LiteralPath $p -Force -ErrorAction Stop;break}catch{Start-Sleep -Milliseconds 500}}; $d=Split-Path -Parent $p; $r=" + PowerShellQuote(target) + "; while($d.StartsWith($r,[StringComparison]::OrdinalIgnoreCase)){try{if((Get-ChildItem -LiteralPath $d -Force | Measure-Object).Count -ne 0){break}; Remove-Item -LiteralPath $d -Force; $d=Split-Path -Parent $d}catch{break}}";
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         var cleanup = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
