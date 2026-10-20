@@ -7,7 +7,7 @@
 ## 0.15.25 — prerelease (2026-10-20)
 
 - Downloads monitor samoczynnie ponawia inicjalizację podczas kolejnego cyklu collect po przejściowym błędzie SQLite lub dostępu do katalogu. Nie wymaga ręcznego przełączania ustawienia ani restartu procesu.
-- Testy .NET 184/184, `check-product`, website lint/test/build i desktop lint/build PASS. Pełny Windows build-user z Engine IPC, instalatorem i self-testem PASS. Lokalny instalator: 279335801 B, SHA-256 `084617E5E987BD4A6FBCF1E09E2D2FE8F6D15D9331CED98BB51312223D651183`. GitHub CI i publikacja v0.15.25 oczekują na weryfikację.
+- Testy .NET 184/184, `check-product`, website lint/test/build PASS. Pełny Windows build-user z Engine IPC, instalatorem i self-testem PASS. Lokalny instalator: 279335801 B, SHA-256 `084617E5E987BD4A6FBCF1E09E2D2FE8F6D15D9331CED98BB51312223D651183`. Windows CI `39455405422`, Pages `39455405535` i installer build/self-test/release `39455410177` PASS. [Release v0.15.25](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.25): instalator 262535285 B, SHA-256 `a8efcf946b60e54f5f12206aae1d9c2631f28a84b0a322c473033e954de4a5d0` i sidecar `.sha256`.
 
 ## 0.15.24 — prerelease (2026-10-20)
 
