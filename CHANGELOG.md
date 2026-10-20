@@ -2,7 +2,7 @@
 
 ## 0.15.31 — prerelease (2026-10-20)
 
-- Ponowiony zapis lokalnego zdarzenia z tym samym jawnym `eventId` zwraca istniejący rekord i nie tworzy duplikatu; test sprawdza stabilność ID. Pełny build/self-test PASS, .NET 186/186 i desktop 4/4. Lokalny instalator 279 MiB, SHA-256 `8A0F654D49F8F6431E5E9076DB1CF4E3F83B25DC23BB02713DAC6FCFFDD43D5F`.
+- Ponowiony zapis lokalnego zdarzenia z tym samym jawnym `eventId` zwraca istniejący rekord i nie tworzy duplikatu; test sprawdza stabilność ID. Pełny build/self-test PASS, .NET 186/186 i desktop 4/4. Windows CI `39467119852`, Pages `39467119876`, installer build/self-test/release `39467120476` PASS. [Release v0.15.31](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.31): instalator 262536309 B, SHA-256 `a82c91f25b6425f30ef4fb7ee3bc924b2c937598ad511d3055b37b13047309fc` i sidecar. Lokalny instalator 279336825 B, SHA-256 `8A0F654D49F8F6431E5E9076DB1CF4E3F83B25DC23BB02713DAC6FCFFDD43D5F`.
 - Test integracyjny bazy wiedzy dowodzi, że trafienia FTS5 trafiają do promptu jawnie włączonej Ollama jako niezaufane źródła; poprawiono opis F11, który błędnie twierdził, że wyszukiwany indeks nie jest używany w analizie.
 
 ## 0.15.30 — prerelease (2026-10-20)
