@@ -7,7 +7,8 @@
 ## 0.15.17 — prerelease (2026-10-20)
 
 - Dodano domyślnie wyłączony watcher Downloads. Po opt-in sprawdza wyłącznie nowe pliki w głównym katalogu Downloads i wyłącznie względem lokalnej listy SHA-256. Nie wysyła pliku ani hasha do sieci; zapisuje lokalne zdarzenie tylko przy dopasowaniu. Pauza zatrzymuje watcher.
-- Watcher ogranicza kolejkę i liczbę plików na próbkę, pomija symlinki/reparse points i pliki ponad 256 MiB, czeka na ustanie zmian pliku oraz respektuje wyłączenie opcji. Pełny GUI/product validation i release CI są w trakcie.
+- Watcher ogranicza kolejkę do 1000 pozycji, skanuje maksymalnie 10 plików i 512 MiB na próbkę, pomija symlinki/reparse points i pliki ponad 256 MiB, czeka 750 ms od ostatniej zmiany i respektuje wyłączenie opcji.
+- .NET 176/176, Engine IPC, desktop/website lint/build i Windows CI `39433555518` PASS. Release CI `39434090207` PASS, w tym instalator self-test. [Release v0.15.17](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.17) zawiera instalator 262518901 B, SHA-256 `e34b86c62f24d426dd1a2c8888e4fcf8353110beae609587aee331004c6cd189` i sidecar `.sha256`.
 
 ## 0.15.16 — prerelease (2026-10-20)
 
