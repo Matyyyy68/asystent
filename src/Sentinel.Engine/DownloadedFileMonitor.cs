@@ -8,13 +8,14 @@ using Sentinel.Core.Analysis;
 /// <summary>Opt-in, local-only watcher for new files directly in the user's Downloads folder.</summary>
 public sealed class DownloadedFileMonitor : IDisposable
 {
-    private const int MaximumBaselineFiles = 100_000;
+    private const int DefaultMaximumBaselineFiles = 100_000;
     private const int MaximumFilesPerSample = 10;
     private const long MaximumFileBytes = 256L * 1024 * 1024;
     private const long MaximumBytesPerSample = 512L * 1024 * 1024;
     private static readonly TimeSpan SettleTime = TimeSpan.FromMilliseconds(750);
     private readonly string directory;
     private readonly int maximumPendingFiles;
+    private readonly int maximumBaselineFiles;
     private readonly ConcurrentDictionary<string, DateTimeOffset> pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> processedFingerprints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileFingerprint> baseline = new(StringComparer.OrdinalIgnoreCase);
@@ -53,11 +54,13 @@ public sealed class DownloadedFileMonitor : IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHGetKnownFolderPath(ref Guid rfid, uint flags, IntPtr token, out IntPtr path);
 
-    public DownloadedFileMonitor(string directory, int maximumPendingFiles = 1000)
+    public DownloadedFileMonitor(string directory, int maximumPendingFiles = 1000, int maximumBaselineFiles = DefaultMaximumBaselineFiles)
     {
         if (maximumPendingFiles < 1) throw new ArgumentOutOfRangeException(nameof(maximumPendingFiles));
+        if (maximumBaselineFiles < 1) throw new ArgumentOutOfRangeException(nameof(maximumBaselineFiles));
         this.directory = Path.GetFullPath(directory);
         this.maximumPendingFiles = maximumPendingFiles;
+        this.maximumBaselineFiles = maximumBaselineFiles;
     }
 
     public void SetEnabled(bool enabled)
@@ -104,7 +107,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                 next.Dispose();
                 watcher = null;
                 baseline.Clear();
-                State = $"Monitoring pobranych plików niedostępny: nie można bezpiecznie ustalić stanu początkowego folderu (limit {MaximumBaselineFiles} plików lub błąd odczytu).";
+                State = $"Monitoring pobranych plików niedostępny: nie można bezpiecznie ustalić stanu początkowego folderu (limit {maximumBaselineFiles} plików lub błąd odczytu).";
                 return;
             }
             State = $"Monitoring Downloads działa; pliki są sprawdzane lokalnie względem listy hashy. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
@@ -141,7 +144,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                 if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
                 if (info.Length > MaximumFileBytes)
                 {
-                    baseline[info.FullName] = Fingerprint(info);
+                    if (!RememberBaseline(info.FullName, Fingerprint(info))) break;
                     continue;
                 }
                 if (info.Length > MaximumBytesPerSample - bytesScanned)
@@ -150,7 +153,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                     break;
                 }
                 var fileFingerprint = Fingerprint(info);
-                baseline[info.FullName] = fileFingerprint;
+                if (!RememberBaseline(info.FullName, fileFingerprint)) break;
                 var fingerprint = ToProcessedFingerprint(info.FullName, fileFingerprint);
                 if (processedFingerprints.ContainsKey(fingerprint)) continue;
 
@@ -210,7 +213,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             {
                 var info = new FileInfo(path);
                 if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                if (baseline.Count >= MaximumBaselineFiles) return false;
+                if (baseline.Count >= maximumBaselineFiles) return false;
                 baseline[info.FullName] = Fingerprint(info);
             }
             return true;
@@ -231,9 +234,9 @@ public sealed class DownloadedFileMonitor : IDisposable
             foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (++scannedFiles > MaximumBaselineFiles)
+                if (++scannedFiles > maximumBaselineFiles)
                 {
-                    State = $"Monitoring Downloads nie może zakończyć odtwarzania: folder przekracza limit {MaximumBaselineFiles} plików.";
+                    State = $"Monitoring Downloads nie może zakończyć odtwarzania: folder przekracza limit {maximumBaselineFiles} plików.";
                     return;
                 }
                 var info = new FileInfo(path);
@@ -242,7 +245,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                 if (baseline.TryGetValue(info.FullName, out var previous) && previous == fingerprint) continue;
                 if (processedFingerprints.ContainsKey(ToProcessedFingerprint(info.FullName, fingerprint)))
                 {
-                    baseline[info.FullName] = fingerprint;
+                    if (!RememberBaseline(info.FullName, fingerprint)) return;
                     continue;
                 }
                 lock (pendingGate)
@@ -250,7 +253,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                     if (!pending.ContainsKey(info.FullName) && pending.Count >= maximumPendingFiles) return;
                     pending[info.FullName] = DateTimeOffset.UtcNow;
                 }
-                baseline[info.FullName] = fingerprint;
+                if (!RememberBaseline(info.FullName, fingerprint)) return;
             }
             Interlocked.Exchange(ref rescanCompletedVersion, requestedVersion);
             State = $"Monitoring Downloads działa; ponowne sprawdzenie katalogu odtworzyło zmiany po przepełnieniu kolejki. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
@@ -262,6 +265,20 @@ public sealed class DownloadedFileMonitor : IDisposable
     }
 
     private static FileFingerprint Fingerprint(FileInfo info) => new(info.Length, info.LastWriteTimeUtc.Ticks);
+
+    private bool RememberBaseline(string path, FileFingerprint fingerprint)
+    {
+        if (baseline.ContainsKey(path) || baseline.Count < maximumBaselineFiles)
+        {
+            baseline[path] = fingerprint;
+            return true;
+        }
+        watcher?.Dispose();
+        watcher = null;
+        pending.Clear();
+        State = $"Monitoring Downloads zatrzymano: osiągnięto limit {maximumBaselineFiles} ścieżek stanu; zmniejsz lub wyczyść katalog i włącz monitor ponownie.";
+        return false;
+    }
 
     private static string ToProcessedFingerprint(string path, FileFingerprint fingerprint) =>
         $"{path}\0{fingerprint.Length}\0{fingerprint.LastWriteTicks}";

@@ -47,6 +47,31 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         Assert.Contains("odtworzyło", monitor.State, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task BaselineGrowthStopsMonitoringAtConfiguredBound()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        var payload = "bounded baseline sample";
+        var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        reputation.Import(payloadHash, DateTimeOffset.UtcNow);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+        await File.WriteAllTextAsync(Path.Combine(downloads, "old-1.bin"), payload);
+        await File.WriteAllTextAsync(Path.Combine(downloads, "old-2.bin"), payload);
+
+        using var monitor = new DownloadedFileMonitor(downloads, maximumBaselineFiles: 2);
+        monitor.SetEnabled(true);
+        await File.WriteAllTextAsync(Path.Combine(downloads, "new.bin"), payload);
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+
+        Assert.Equal(0, await monitor.CollectAsync(store, reputation));
+        Assert.Contains("osiągnięto limit 2", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await store.ReadAsync());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
