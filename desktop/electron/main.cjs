@@ -16,6 +16,7 @@ app.whenReady().then(() => {
   const call = (method, data) => engine.call(method, data);
   ipcMain.handle('sentinel', async (event, method, data) => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
+    if (method === 'engineStatus') return engine.diagnostics();
     if (method === 'autostart') { app.setLoginItemSettings({ openAtLogin: data.enabled === true, args: ['--minimized'], name: 'Sentinel AI' }); return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin; }
     if (method === 'getAutostart') return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin;
     if (method === 'chooseFile') {

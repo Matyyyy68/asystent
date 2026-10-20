@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.15.28 — prerelease (2026-10-20)
+
+- Diagnostyka desktop pokazuje stan procesu silnika, kod ostatniego zakończenia oraz sam fakt wystąpienia stderr bez ujawniania jego treści. Stan jest dostępny także podczas ponawiania startu. Dodano regresyjne testy snapshotu diagnostycznego i prywatności.
+
 ## 0.15.27 — prerelease (2026-10-20)
 
 - Watchdog żądań wykrywa zawieszony silnik .NET: po 45 s odrzuca żądanie, kończy proces i ponawia start z backoffem. Testy desktop 4/4, .NET 184/184, Engine IPC, desktop build i installer self-test PASS. Windows CI `39459914877`, Pages `39459915119` i installer build/self-test/release `39459920461` PASS. [Release v0.15.27](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.27): instalator 262536309 B, SHA-256 `fc3e4719a63a5f4e6a9cc4e7a0ba9831d108e9622014a32cab38f8d6c49b7a16` i sidecar `.sha256`. Lokalny instalator: 279336825 B, SHA-256 `B57B04E6CEB4235384D5AA5C1356A45FD0D7950911074EBE937FB18BD3F8B934`.

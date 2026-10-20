@@ -42,6 +42,7 @@ test('restarts the engine with backoff and serves requests after recovery', asyn
   assert.deepEqual(await client.call('status'), { method: 'status' });
   engines[0].emit('exit', 23, null);
   assert.equal(client.status, 'restarting');
+  assert.deepEqual(client.diagnostics(), { status: 'restarting', lastExitCode: '23', stderrObserved: false });
   assert.equal(timers.size, 1);
   const [restartId, restart] = timers.entries().next().value;
   assert.equal(restart.delay, 1000);
@@ -92,6 +93,8 @@ test('records only that stderr existed and never exposes its contents in state',
   client.start();
   child.stderr.write('private path or token');
   assert.equal(client.stderrObserved, true);
+  assert.deepEqual(client.diagnostics(), { status: 'starting', lastExitCode: null, stderrObserved: true });
+  assert.equal(JSON.stringify(client.diagnostics()).includes('private path'), false);
   assert.equal(JSON.stringify(client.status).includes('private path'), false);
   client.dispose();
 });

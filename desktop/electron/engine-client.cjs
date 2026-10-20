@@ -34,6 +34,14 @@ class EngineClient {
     catch { /* State reporting must not destabilize the engine lifecycle. */ }
   }
 
+  diagnostics() {
+    return {
+      status: this.status,
+      lastExitCode: this.lastExitCode === null ? null : String(this.lastExitCode).slice(0, 40),
+      stderrObserved: this.stderrObserved
+    };
+  }
+
   launch() {
     if (this.disposed || this.engine) return;
     this.restartTimer = null;
