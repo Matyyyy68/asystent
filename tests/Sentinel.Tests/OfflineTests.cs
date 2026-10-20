@@ -5,6 +5,9 @@ using Xunit;
 
 namespace Sentinel.Tests;
 
+[CollectionDefinition("NetworkAudit", DisableParallelization = true)]
+public sealed class NetworkAuditCollection { }
+
 [Collection("NetworkAudit")]
 public sealed class OfflineTests
 {

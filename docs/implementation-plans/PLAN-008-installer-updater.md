@@ -1,7 +1,7 @@
 # PLAN-008 — instalator, naprawa i updater
 
 1. **Cel:** cykl install/update/rollback/uninstall bez utraty danych i z weryfikowalnym artefaktem.
-2. **Stan obecny:** `installer/Sentinel.Setup` wykonuje staging, per-user, hash payloadu, ACL, log, cancel, preservation plików i self-test. Self-test 0.15.12 ujawnił powtarzalne odrzucenie `chrome_100_percent.pak`; przyczyną był odczyt długości przed opróżnieniem bufora `FileStream`. Dodano `Flush()` przed weryfikacją rozmiaru oraz asercje wskaźnika danych i nagłówków obu baz SQLite po smoke teście. Pełny lokalny build i self-test 0.15.13–0.15.16 przechodzą; wynik workflow taga v0.15.15 nie został tu potwierdzony, a 0.15.16 czeka na CI. Czysty Windows pełny cykl nie został wykonany.
+2. **Stan obecny:** `installer/Sentinel.Setup` wykonuje staging, per-user, hash payloadu, ACL, log, cancel, preservation plików i self-test. Self-test 0.15.12 ujawnił powtarzalne odrzucenie `chrome_100_percent.pak`; przyczyną był odczyt długości przed opróżnieniem bufora `FileStream`. Dodano `Flush()` przed weryfikacją rozmiaru oraz asercje wskaźnika danych i nagłówków obu baz SQLite po smoke teście. Pełny lokalny build i self-test 0.15.13–0.15.16 przechodzą; Windows CI/release workflow v0.15.15 i v0.15.16 zakończyły się sukcesem. Czysty Windows pełny cykl nie został wykonany.
 3. **Braki:** naprawa z GUI, podpis cyfrowy, autoupdate i rollback wersji; hand-tested shortcut/autostart/hosts/uninstall.
 4. **Decyzje:** nie aktualizować po cichu; podpisany manifest + hash przed update; zachować dane; nie robić self-update z uruchomionego pliku bez atomowego helpera.
 5. **Zależności:** certyfikat Authenticode, release workflow, schema version, czysty Windows VM.

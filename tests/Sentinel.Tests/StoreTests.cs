@@ -289,6 +289,31 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(restoredSettings, await target.LoadSettingsAsync());
         Assert.Equal(Sentinel.Core.Configuration.ProductVariant.User, (await target.GetInstallationProfileAsync()).Variant);
     }
+    [Theory] [InlineData(6)] [InlineData(7)]
+    public async Task RestoreAcceptsLegacyV6AndV7Backups(int version)
+    {
+        var sourceDirectory = Path.Combine(dir, $"legacy-v{version}-source");
+        var source = new LocalStore(sourceDirectory);
+        await source.InitializeAsync();
+        await source.AddAsync(Event() with { Category = $"LegacyV{version}Event" });
+        var backupPath = Path.Combine(dir, $"legacy-v{version}.db");
+        await source.BackupAsync(backupPath);
+
+        await using (var legacy = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath, Pooling = false }.ToString()))
+        {
+            await legacy.OpenAsync();
+            using var shape = legacy.CreateCommand();
+            shape.CommandText = version == 6
+                ? "DROP TABLE process_snapshot; DROP TABLE process_monitor_metadata; DROP TABLE network_endpoint_snapshot; DROP TABLE network_monitor_metadata; PRAGMA user_version=6;"
+                : "DROP TABLE process_snapshot; DROP TABLE process_monitor_metadata; PRAGMA user_version=7;";
+            await shape.ExecuteNonQueryAsync();
+        }
+
+        var target = await Store();
+        await target.AddAsync(Event() with { Category = "DiscardedEvent" });
+        Assert.Equal(1, await target.RestoreAsync(backupPath));
+        Assert.Equal($"LegacyV{version}Event", Assert.Single(await target.ReadAsync()).Category);
+    }
     [Fact] public async Task InvalidRestoreSourceDoesNotChangeCurrentEvents()
     {
         var target = await Store(); await target.AddAsync(Event() with { Category = "KeepCurrentEvent" });
