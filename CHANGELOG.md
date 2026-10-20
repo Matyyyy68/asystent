@@ -1,7 +1,8 @@
 # CHANGELOG
 
-## Unreleased
+## 0.15.31 — prerelease (2026-10-20)
 
+- Ponowiony zapis lokalnego zdarzenia z tym samym jawnym `eventId` zwraca istniejący rekord i nie tworzy duplikatu; test sprawdza stabilność ID. Pełny build/self-test PASS, .NET 186/186 i desktop 4/4. Lokalny instalator 279 MiB, SHA-256 `8A0F654D49F8F6431E5E9076DB1CF4E3F83B25DC23BB02713DAC6FCFFDD43D5F`.
 - Test integracyjny bazy wiedzy dowodzi, że trafienia FTS5 trafiają do promptu jawnie włączonej Ollama jako niezaufane źródła; poprawiono opis F11, który błędnie twierdził, że wyszukiwany indeks nie jest używany w analizie.
 
 ## 0.15.30 — prerelease (2026-10-20)

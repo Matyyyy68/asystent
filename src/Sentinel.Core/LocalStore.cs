@@ -391,11 +391,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(cancellationToken);
         using (var insert = c.CreateCommand())
         {
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
             AddEventParameters(insert, item, eventId, source);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT last_insert_rowid()"; var id = (long)(await cmd.ExecuteScalarAsync(cancellationToken))!;
+        using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id FROM events WHERE event_id=$eventId";
+        cmd.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+        var storedId = await cmd.ExecuteScalarAsync(cancellationToken);
+        if (storedId is null) throw new InvalidDataException("Nie udało się odczytać zapisanego zdarzenia.");
+        var id = Convert.ToInt64(storedId, CultureInfo.InvariantCulture);
         string? profileJson = null;
         if (enqueueEnterprise)
         {

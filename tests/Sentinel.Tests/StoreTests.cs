@@ -19,6 +19,20 @@ public sealed class StoreTests : IDisposable
         Assert.True((await (await Store()).LoadSettingsAsync()).MonitorNetworkConnections);
     }
     [Fact] public async Task EventsAndFeedbackPersist() { var s = await Store(); var id = await s.AddAsync(Event()); await s.SetStatusAsync(id,EventStatus.FalsePositive); var next = await Store(); Assert.Equal(EventStatus.FalsePositive,Assert.Single(await next.ReadAsync()).Status); }
+    [Fact] public async Task RepeatedEventIdReturnsExistingRecordWithoutCreatingDuplicate()
+    {
+        var store = await Store();
+        var eventId = Guid.NewGuid();
+        var item = Event() with { EventId = eventId, Source = "test.retry" };
+
+        var firstId = await store.AddLocalOnlyAsync(item);
+        var retryId = await store.AddLocalOnlyAsync(item);
+
+        Assert.Equal(firstId, retryId);
+        var saved = Assert.Single(await store.ReadAsync());
+        Assert.Equal(eventId, saved.EventId);
+        Assert.Equal("test.retry", saved.Source);
+    }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
         var store = await Store();
@@ -208,6 +222,7 @@ public sealed class StoreTests : IDisposable
                 CREATE TABLE events(id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, risk INTEGER NOT NULL, category TEXT NOT NULL,
                   application TEXT NOT NULL, explanation TEXT NOT NULL, recommendation TEXT NOT NULL, status INTEGER NOT NULL,
                   event_id TEXT, source TEXT, rule_version TEXT, confidence INTEGER, schema_version INTEGER NOT NULL DEFAULT 1);
+                CREATE UNIQUE INDEX ux_events_event_id ON events(event_id) WHERE event_id IS NOT NULL;
                 INSERT INTO events VALUES(9,'2026-10-01T00:00:00.0000000+00:00',0,'Legacy','Test','Keep','Review',0,'00000000-0000-0000-0000-000000000009','legacy','rules-1',NULL,1);
                 PRAGMA user_version=5;
                 """;
