@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.15.12 — kandydat rozwojowy (2026-10-20)
+## 0.15.12 — prerelease (2026-10-20)
 
 - Ręczny skan pliku może teraz sprawdzić SHA-256 w jawnie importowanej lokalnej liście (20 MiB/250 000 hashy); import jest walidowany i atomowy. Nieznany/brakujący hash nie jest oceną bezpieczeństwa, a źródło listy nie jest niezależnie weryfikowane.
 - Dodano Windows test potwierdzający, że SQLite nie inicjalizuje historii, gdy bieżący użytkownik nie może tworzyć plików w katalogu danych; test zawsze przywraca pierwotne ACL.
@@ -8,7 +8,8 @@
 - Rozszerzono `scripts/benchmark-engine.cjs` o `--tcp-monitor`, aby włączyć observer i zweryfikować kontrolowane nowe połączenie podczas profilu.
 - Pięciominutowy soak TCP: 60 próbek co 5 s, kontrolowane połączenie zapisane, observer pozostał aktywny, 13 wpisów TCP bez pominiętych zmian; CPU 0,056%, working set 45,2–57 MiB, mediana collect 5,6 ms / max 675,9 ms. Jest to pojedynczy pomiar lokalny.
 - Testy .NET: 163/163 PASS; Engine IPC potwierdza import i dopasowanie syntetycznego pliku. UI lint i produkcyjny build PASS. Fizyczny test pełnego wolumenu i ACL ścieżki po instalacji pozostają do wykonania.
-- Po ponownej publikacji silnika i hosta w wersji `0.15.12`, lokalny instalator został przebudowany i autotest PASS: 279295353 B, SHA-256 `E35ED5617C1D061694A021ECCED5092F0139134015B718AFB9972A2BB01E6FE9`. Kandydat nie został opublikowany jako GitHub Release.
+- GitHub Actions Windows build/test/self-test oraz publikacja prerelease PASS. Opublikowany instalator: 262494837 B, SHA-256 `a795f35ed94634e9f847763dbb34117c89aa08d0fc1d8e8be66e081501b01464`. Lokalny artefakt (279295353 B) był odrębnym buildem.
+- Naprawiono linki pobrania i sumy na statycznej witrynie, które nadal wskazywały v0.15.3. Lokalny website test/lint/build z bazą `/asystent/` PASS; Pages workflow uruchomi się po pushu.
 
 ## 2026-10-19 — kandydat 0.15.11
 

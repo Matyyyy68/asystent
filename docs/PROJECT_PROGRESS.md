@@ -1,7 +1,7 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-20
-**Etap:** kandydat 0.15.12 w realizacji; ostatnie opublikowane prerelease to 0.15.11, a funkcje i plany nadal są weryfikowane.
+**Etap:** prerelease 0.15.12 opublikowane; plany wdrożeniowe nadal są w realizacji.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest jeszcze w pełni zamknięty; 4 plany mają wdrożone i przetestowane etapy. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
@@ -45,7 +45,8 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 - PLAN-007: test ACL odmawia bieżącemu użytkownikowi wyłącznie tworzenia plików, potwierdza bezpieczne niepowodzenie inicjalizacji SQLite i przywraca oryginalny ACL. Test retry procesu dochodzi teraz do odmowy zapisu małego zdarzenia, zamiast zakładać, że błąd dużego wpisu oznacza brak miejsca na każdy mniejszy wpis. Oba testy i pełny zestaw 159/159 przechodzą.
 - PLAN-001: `scripts/benchmark-engine.cjs --duration=300 --tcp-monitor` utrzymał testowy observer TCP przez 5 minut (60 próbek co 5 s), zapisał kontrolowane nowe połączenie, zachował stan aktywny i nie zgłosił pominiętych zmian. CPU 0,056% łącznej mocy procesorów; working set 45,2–57 MiB; `collect` mediana 5,6 ms, maksimum 675,9 ms. To pomiar pojedynczej sesji lokalnej.
 - PLAN-003: dodano lokalny import tekstowej listy SHA-256, ograniczony do 20 MiB/250 000 wpisów, z walidacją i atomową podmianą. Ręczny skan pliku pokazuje dopasowanie, brak dopasowania lub brak listy; brak dopasowania nie jest werdyktem bezpieczeństwa, a źródło listy nie jest uwierzytelniane. Testy .NET 4/4 oraz Engine IPC dla syntetycznego pliku PASS; UI lint i produkcyjny build PASS.
-- Kandydat 0.15.12: `check-product`, pełny zestaw .NET 163/163, Engine IPC import/dopasowanie, UI lint/build i ponownie przebudowany lokalny installer self-test PASS. EXE 279295353 B, SHA-256 `E35ED5617C1D061694A021ECCED5092F0139134015B718AFB9972A2BB01E6FE9`; wydanie GitHub nieopublikowane.
+- Wydanie 0.15.12: `check-product`, pełny zestaw .NET 163/163, Engine IPC import/dopasowanie, UI lint/build i installer self-test PASS. Windows CI build/test/self-test oraz publikacja prerelease PASS: [v0.15.12](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.12), 262494837 B, SHA-256 `a795f35ed94634e9f847763dbb34117c89aa08d0fc1d8e8be66e081501b01464`. Lokalny artefakt był osobnym buildem.
+- Strona publiczna miała statyczne linki do starego instalatora v0.15.3; zaktualizowano installer, checksumę i notatki do v0.15.12. Website test, lint i produkcyjny build z Pages base path PASS; deploy po pushu wymaga potwierdzenia.
 
 ## W trakcie / zablokowane
 
@@ -64,5 +65,5 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## Następny konkretny krok
 
-Wykonać fizyczny test braku miejsca na odizolowanym wolumenie; zweryfikować ACL rzeczywistej lokalizacji danych po instalacji. Dalszy krok PLAN-003 wymaga audytowanego źródła/licencji hashy lub bezpiecznego feedu publicznego; nie dołączać niezweryfikowanej listy do produktu. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
+Potwierdzić Pages deploy z linkiem do v0.15.12 i live URL; wykonać fizyczny test braku miejsca na odizolowanym wolumenie oraz zweryfikować ACL rzeczywistej lokalizacji danych po instalacji. Dalszy krok PLAN-003 wymaga audytowanego źródła/licencji hashy lub bezpiecznego feedu publicznego. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
 
