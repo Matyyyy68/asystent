@@ -15,7 +15,7 @@ public sealed class TcpConnectionSnapshotMonitor
     private const int MaximumEventsPerSample = 100;
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(10);
     private readonly Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture;
-    private readonly Func<int, DateTimeOffset, bool> wasRecentlyObservedStart;
+    private readonly Func<int, string?, DateTimeOffset, Guid?> wasRecentlyObservedStart;
     private readonly TimeProvider timeProvider;
     private HashSet<string>? knownConnections;
     private HashSet<string>? knownUdpEndpoints;
@@ -28,11 +28,11 @@ public sealed class TcpConnectionSnapshotMonitor
     public TcpConnectionSnapshotMonitor(
         Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture,
         TimeProvider? timeProvider = null,
-        Func<int, DateTimeOffset, bool>? wasRecentlyObservedStart = null)
+        Func<int, string?, DateTimeOffset, Guid?>? wasRecentlyObservedStart = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.timeProvider = timeProvider ?? TimeProvider.System;
-        this.wasRecentlyObservedStart = wasRecentlyObservedStart ?? ((_, _) => false);
+        this.wasRecentlyObservedStart = wasRecentlyObservedStart ?? ((_, _, _) => null);
     }
 
     public async Task<int> CollectAsync(LocalStore store, bool enabled, bool paused, string excludedApplications,
@@ -138,7 +138,8 @@ public sealed class TcpConnectionSnapshotMonitor
         var events = added.Select(item =>
         {
             var connection = item.Connection;
-            var processContext = !item.IsUdp && wasRecentlyObservedStart(connection.ProcessId, now)
+            var correlationId = connection.ProcessId >= 0 ? wasRecentlyObservedStart(connection.ProcessId, connection.ProcessName, now) : null;
+            var processContext = !item.IsUdp && correlationId is not null
                 ? " W ostatnich 60 sekundach zapisano zdarzenie pojawienia się tego PID; to wyłącznie korelacja czasowa, nie ocena zagrożenia."
                 : "";
             var category = item.IsUdp ? "Zaobserwowano endpoint UDP" : "Zaobserwowano połączenie TCP";
@@ -152,7 +153,8 @@ public sealed class TcpConnectionSnapshotMonitor
                 explanation, recommendation, EventStatus.New,
                 EventId: Guid.NewGuid(), Source: item.IsUdp ? "udp-endpoint-snapshot" : "tcp-connection-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion,
-                ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName);
+                ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName,
+                CorrelationId: correlationId);
         }).ToArray();
 
         if (events.Length > 0)

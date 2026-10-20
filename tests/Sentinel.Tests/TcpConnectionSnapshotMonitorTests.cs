@@ -97,7 +97,35 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         var eventItem = Assert.Single(await store.ReadAsync(), item => item.Source == "tcp-connection-snapshot");
         Assert.Contains("korelacja czasowa", eventItem.Explanation);
         Assert.Equal(RiskLevel.Information, eventItem.Risk);
-        Assert.False(processMonitor.WasRecentlyObservedStart(1234, clock.GetUtcNow().AddSeconds(61)));
+        var processEvent = Assert.Single(await store.ReadAsync(), item => item.Source == "process-snapshot");
+        Assert.NotNull(eventItem.CorrelationId);
+        Assert.Equal(processEvent.CorrelationId, eventItem.CorrelationId);
+        Assert.Null(processMonitor.WasRecentlyObservedStart(1234, clock.GetUtcNow().AddSeconds(61)));
+    }
+
+    [Theory]
+    [InlineData("different-process")]
+    [InlineData("unknown")]
+    [InlineData(null)]
+    public async Task DoesNotCorrelateReusedPidWhenProcessNameCannotBeMatched(string? processName)
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var processMonitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        snapshot.Add(1234, "browser");
+        Assert.Equal(1, await processMonitor.CollectAsync(store, paused: false, excludedApplications: ""));
+
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample = [];
+        var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock, processMonitor.WasRecentlyObservedStart);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        sample = [Connection(443, processId: 1234) with { ProcessName = processName }];
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var connectionEvent = Assert.Single(await store.ReadAsync(), item => item.Source == "tcp-connection-snapshot");
+        Assert.Null(connectionEvent.CorrelationId);
+        Assert.DoesNotContain("korelacja czasowa", connectionEvent.Explanation);
     }
 
     [Fact]

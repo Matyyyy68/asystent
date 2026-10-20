@@ -1,4 +1,10 @@
 # CHANGELOG
+## 0.15.34 — kandydat (2026-10-20)
+
+- Procesy pojawiające się w migawce i nowe połączenia TCP i endpointy UDP z tego samego PID oraz nazwą procesu są łączone identyfikatorem korelacji, jeśli obserwacje są oddalone o najwyżej 60 sekund. Identyfikator jest lokalny; UI nazywa to korelacją czasową i wyjaśnia, że nie dowodzi związku przyczynowego.
+- SQLite v11 zapisuje identyfikator korelacji w historii i kopiach zapasowych; eksport JSON/CSV go zachowuje. Restore nadal przyjmuje kopie v6–v11.
+- Weryfikacja lokalna: .NET 195/195, desktop 4/4, TypeScript/lint i build UI PASS, server tests 20/20, HTTP API smoke PASS. Lokalny installer build i self-test PASS; 279352697 B, SHA-256 `18931A566F82CE34459E4C0450D147ECE43DC54328274924D70761CC633D17C3`. Windows CI i release workflow oczekują.
+
 ## 0.15.33 — prerelease (2026-10-20)
 
 - Client and Enterprise API now compile against one shared, typed `EnterpriseEventV1` contract. The same source defines the batch/result DTOs, event source allowlist, rule-version sanitization, schema validation and accepted date/risk/category/rule-code bounds.

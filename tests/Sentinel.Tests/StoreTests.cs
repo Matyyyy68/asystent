@@ -178,16 +178,19 @@ public sealed class StoreTests : IDisposable
     [Fact] public async Task NewEventsPersistStableIdentityAndProvenance()
     {
         var s = await Store();
-        var id = await s.AddLocalOnlyAsync(Event() with { Source = "process-snapshot", RuleVersion = "2026.10.1", ProcessId = 4242, ProcessName = "synthetic-process" });
+        var correlationId = Guid.NewGuid();
+        var id = await s.AddLocalOnlyAsync(Event() with { Source = "process-snapshot", RuleVersion = "2026.10.1", ProcessId = 4242, ProcessName = "synthetic-process", CorrelationId = correlationId });
         var item = Assert.Single(await (await Store()).ReadAsync());
         Assert.Equal(id, item.Id); Assert.NotEqual(Guid.Empty, item.EventId);
         Assert.Equal("process-snapshot", item.Source); Assert.Equal("2026.10.1", item.RuleVersion);
         Assert.Equal(4242, item.ProcessId); Assert.Equal("synthetic-process", item.ProcessName);
+        Assert.Equal(correlationId, item.CorrelationId);
         Assert.Null(item.Confidence); // No calibrated confidence is claimed by deterministic rules.
         var export = Path.Combine(dir, "provenance.json"); await s.ExportAsync(export);
         var exported = Assert.Single(System.Text.Json.JsonSerializer.Deserialize<SecurityEvent[]>(await File.ReadAllTextAsync(export))!);
         Assert.Equal(item.EventId, exported.EventId); Assert.Equal(item.Source, exported.Source); Assert.Equal(item.RuleVersion, exported.RuleVersion);
         Assert.Equal(item.ProcessId, exported.ProcessId); Assert.Equal(item.ProcessName, exported.ProcessName);
+        Assert.Equal(correlationId, exported.CorrelationId);
     }
     [Fact] public async Task VersionThreeHistoryMigratesWithoutLosingEvents()
     {
@@ -319,7 +322,8 @@ public sealed class StoreTests : IDisposable
     [Fact] public async Task CsvExportQuotesFieldsAndPreventsSpreadsheetFormulas()
     {
         var s = await Store();
-        await s.AddLocalOnlyAsync(Event() with { Explanation = "=HYPERLINK(\"https://evil.test\")", Recommendation = "quoted, value\nand second line", Application = " \t=HYPERLINK(\"https://evil.test\")", ProcessName = "-SUM(A1:A2)" });
+        var correlationId = Guid.NewGuid();
+        await s.AddLocalOnlyAsync(Event() with { Explanation = "=HYPERLINK(\"https://evil.test\")", Recommendation = "quoted, value\nand second line", Application = " \t=HYPERLINK(\"https://evil.test\")", ProcessName = "-SUM(A1:A2)", CorrelationId = correlationId });
         var export = Path.Combine(dir, "events.csv"); await s.ExportCsvAsync(export);
         var bytes = await File.ReadAllBytesAsync(export);
         Assert.True(bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }));
@@ -328,6 +332,7 @@ public sealed class StoreTests : IDisposable
         Assert.Contains("\"'-SUM(A1:A2)\"", csv);
         Assert.Contains("\"' \t=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
         Assert.Contains("\"quoted, value\nand second line\"", csv);
+        Assert.Contains(correlationId.ToString("D"), csv);
     }
     [Fact] public async Task RestoreReplacesHistoryAndSettingsButPreservesInstalledIdentity()
     {
@@ -335,7 +340,8 @@ public sealed class StoreTests : IDisposable
         var source = new LocalStore(backupDirectory);
         await source.InitializeAsync(new Sentinel.Core.Configuration.InstalledProductProfile(Sentinel.Core.Configuration.ProductVariant.EnterpriseClient,
             "https://sentinel.example", ShareSecurityMetadata: true));
-        await source.AddAsync(Event() with { Risk = RiskLevel.High, Category = "BackupEvent", Source = "process-snapshot", RuleVersion = "2026.10.1" });
+        var correlationId = Guid.NewGuid();
+        await source.AddAsync(Event() with { Risk = RiskLevel.High, Category = "BackupEvent", Source = "process-snapshot", RuleVersion = "2026.10.1", CorrelationId = correlationId });
         var restoredSettings = new AppSettings(RetentionDays: 30, Notifications: false, Paused: false);
         await source.SaveSettingsAsync(restoredSettings);
         var backupPath = Path.Combine(dir, "restore.db"); await source.BackupAsync(backupPath);
@@ -345,6 +351,7 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(1, await target.RestoreAsync(backupPath));
 
         Assert.Equal("BackupEvent", Assert.Single(await target.ReadAsync()).Category);
+        Assert.Equal(correlationId, Assert.Single(await target.ReadAsync()).CorrelationId);
         var restoredQueueItem = Assert.Single(await target.ReadPendingEnterpriseEventsAsync());
         Assert.Equal("process-snapshot", restoredQueueItem.Source);
         Assert.Equal("2026.10.1", restoredQueueItem.RuleVersion);
@@ -399,10 +406,49 @@ public sealed class StoreTests : IDisposable
         }
         await store.InitializeAsync();
         Assert.Single(await store.ReadAsync());
+        Assert.Null(Assert.Single(await store.ReadAsync()).CorrelationId);
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(10L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+    }
+    [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { Category = "BeforeCorrelationMigration" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; PRAGMA user_version=10;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        var migrated = Assert.Single(await store.ReadAsync());
+        Assert.Equal("BeforeCorrelationMigration", migrated.Category);
+        Assert.Null(migrated.CorrelationId);
+        await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+    }
+    [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
+    {
+        var source = await Store();
+        await source.AddLocalOnlyAsync(Event() with { Category = "LegacyV10Event" });
+        var backupPath = Path.Combine(dir, "legacy-v10.db");
+        await source.BackupAsync(backupPath);
+        await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
+        {
+            await backup.OpenAsync(); using var command = backup.CreateCommand();
+            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; PRAGMA user_version=10;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var target = await Store();
+        Assert.Equal(1, await target.RestoreAsync(backupPath));
+        var restored = Assert.Single(await target.ReadAsync());
+        Assert.Equal("LegacyV10Event", restored.Category);
+        Assert.Null(restored.CorrelationId);
     }
     [Fact] public async Task MonitoringSettingsSurviveReopening()
     {

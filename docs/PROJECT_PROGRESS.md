@@ -11,7 +11,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 - W v0.15.32 zdarzenia Enterprise zachowują wersję schematu, dozwolone źródło i bezpieczną wersję reguły od trwałej kolejki klienta do API, bazy serwera i widoku administratora. Migracje lokalna v9→v10 i serwerowa v7→v8 zachowują stare rekordy z wartościami domyślnymi; backup/restore obsługuje v10.
 - W v0.15.33 klient i API korzystają ze wspólnego typowanego Enterprise DTO i walidatora. Client .NET 190/190, server tests 20/20, Release build API, HTTP smoke, pełny build desktop i lokalny self-test instalatora PASS. Release v0.15.33, Windows CI `39476307294` i Pages `39476306945` PASS; live strona sprawdzona. Testy rozszerzenia Chrome/Edge i pełny cykl instalacji GUI pozostają niewykonane.
-- Następny konkretny krok: kontynuować Plan-004 nad deduplikacją zdarzeń między źródłami, korelacją i strukturalnym evidence; równolegle domknąć weryfikację Pages/CI.
+- Kandydat v0.15.34 dodaje correlationId dla startu procesu i TCP/UDP tego samego PID oraz nazwy w 60 s; SQLite v11, historia JSON/CSV i backup zachowują ID. Lokalne testy .NET 195/195, desktop 4/4, TypeScript/lint/build, testy serwera 20/20, HTTP smoke i installer self-test PASS (279352697 B, SHA-256 `18931A566F82CE34459E4C0450D147ECE43DC54328274924D70761CC633D17C3`). CI Windows oraz release dla nowego kandydata wymagają uruchomienia przed publikacją.
 
 ## Zweryfikowane przepływy
 

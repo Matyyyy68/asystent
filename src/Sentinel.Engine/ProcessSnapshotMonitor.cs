@@ -12,7 +12,7 @@ public sealed class ProcessSnapshotMonitor
     private bool storeBaselineLoaded;
     private bool storeBaselineInitialized;
     private long droppedEvents;
-    private readonly Dictionary<int, DateTimeOffset> recentlyObservedStarts = [];
+    private readonly Dictionary<int, (DateTimeOffset Timestamp, Guid CorrelationId, string ProcessName)> recentlyObservedStarts = [];
     private readonly Func<Dictionary<int, string>> capture;
 
     public string State { get; private set; } = "Próbkowanie procesów nie zostało uruchomione.";
@@ -25,12 +25,18 @@ public sealed class ProcessSnapshotMonitor
         knownProcesses = CaptureSnapshot();
     }
 
-    public bool WasRecentlyObservedStart(int processId, DateTimeOffset timestamp)
+    public Guid? WasRecentlyObservedStart(int processId, DateTimeOffset timestamp)
+        => WasRecentlyObservedStart(processId, null, timestamp);
+
+    public Guid? WasRecentlyObservedStart(int processId, string? processName, DateTimeOffset timestamp)
     {
         var cutoff = timestamp.AddSeconds(-60);
-        foreach (var stale in recentlyObservedStarts.Where(entry => entry.Value < cutoff).Select(entry => entry.Key).ToArray())
+        foreach (var stale in recentlyObservedStarts.Where(entry => entry.Value.Timestamp < cutoff).Select(entry => entry.Key).ToArray())
             recentlyObservedStarts.Remove(stale);
-        return recentlyObservedStarts.TryGetValue(processId, out var startedAt) && startedAt <= timestamp && startedAt >= cutoff;
+        return recentlyObservedStarts.TryGetValue(processId, out var started) && started.Timestamp <= timestamp && started.Timestamp >= cutoff &&
+            !string.IsNullOrWhiteSpace(processName) && !string.Equals(processName, "unknown", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(started.ProcessName, processName, StringComparison.OrdinalIgnoreCase)
+            ? started.CorrelationId : null;
     }
 
     public async Task<int> CollectAsync(LocalStore store, bool paused, string excludedApplications, CancellationToken cancellationToken = default)
@@ -60,6 +66,7 @@ public sealed class ProcessSnapshotMonitor
         var (upserts, removed) = GetPersistedDelta(persistedProcesses, persistedCurrent);
         if (paused)
         {
+            recentlyObservedStarts.Clear();
             try
             {
                 if (!storeBaselineInitialized || upserts.Length > 0 || removed.Length > 0)
@@ -80,10 +87,14 @@ public sealed class ProcessSnapshotMonitor
         var toStore = changes.Take(MaximumEventsPerSample).ToArray();
         var newlyDroppedEvents = Math.Max(0, changes.Count - toStore.Length);
         var now = DateTimeOffset.UtcNow;
-        foreach (var processId in recentlyObservedStarts.Where(entry => entry.Value < now.AddSeconds(-60)).Select(entry => entry.Key).ToArray())
+        foreach (var processId in recentlyObservedStarts.Where(entry => entry.Value.Timestamp < now.AddSeconds(-60)).Select(entry => entry.Key).ToArray())
             recentlyObservedStarts.Remove(processId);
+        var correlationIds = toStore.Where(change => change.Action == "Proces zaobserwowany")
+            .ToDictionary(change => change.ProcessId, _ => Guid.NewGuid());
         var events = toStore.Select(change =>
         {
+            var correlationId = correlationIds.TryGetValue(change.ProcessId, out var newCorrelationId)
+                ? newCorrelationId : WasRecentlyObservedStart(change.ProcessId, now);
             var explanation = change.Action == "Proces zaobserwowany"
                 ? $"Windows pokazał nowy PID {change.ProcessId} o nazwie {change.ProcessName} od poprzedniej próbki. Krótkie procesy mogą zostać pominięte."
                 : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
@@ -91,7 +102,8 @@ public sealed class ProcessSnapshotMonitor
                 change.Action, change.ProcessName, explanation,
                 "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
-                ProcessId: change.ProcessId, ProcessName: change.ProcessName);
+                ProcessId: change.ProcessId, ProcessName: change.ProcessName,
+                CorrelationId: correlationId);
         }).ToArray();
         try
         {
@@ -109,7 +121,7 @@ public sealed class ProcessSnapshotMonitor
         storeBaselineInitialized = true;
         droppedEvents += newlyDroppedEvents;
         foreach (var change in toStore.Where(change => change.Action == "Proces zaobserwowany"))
-            recentlyObservedStarts[change.ProcessId] = now;
+            recentlyObservedStarts[change.ProcessId] = (now, correlationIds[change.ProcessId], change.ProcessName);
         var capped = current.Count >= MaximumProcesses ? " Limit snapshotu osiągnięty." : "";
         State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, pominięto łącznie {droppedEvents}.{capped}";
         return toStore.Length;
