@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+- Stan bazowy endpointów TCP/UDP jest trwale przechowywany w SQLite i aktualizowany atomowo wraz ze zdarzeniami; restart silnika nie powtarza alertów dla endpointów już znanych. Wyłączenie monitoringu lub źródła unieważnia bazę przed następnym opt-in.
+
+## 0.15.14 — prerelease (2026-10-20)
+
 - Dodano opcjonalne, ręczne sprawdzanie SHA-256 w MalwareBazaar. Klucz jest chroniony DPAPI; zapytanie wymaga zgody i wysyła wyłącznie hash do stałego endpointu HTTPS. Nieznany hash nie jest oznaczany jako bezpieczny.
 - Opt-in obserwacja TCP zapisuje teraz także pojawienie się lokalnego endpointu UDP. Zdarzenie jasno informuje, że migawka endpointu nie dowodzi wysłania datagramu ani nie ujawnia zdalnego celu.
 - Odświeżono `docs/KNOWN-LIMITATIONS.md`: opisy aktywnego lokalnego AI, bazy wiedzy, skanowania plików i wydania instalatora odpowiadają aktualnemu kodowi oraz zakresowi testów.
-- Testy mock API sprawdzają stały host, pola hash-only, dopasowanie, no-results i odrzucenie niezgodnego hashy. Test historii UDP przechodzi. Release .NET 167/167, Engine IPC oraz pełny `scripts/build-user.ps1 -Installer` z self-testem PASS. Lokalny kandydat `0.15.14` ma nowy build z obserwacją endpointów UDP; nie jest opublikowany. Live MalwareBazaar wymaga autoryzowanego klucza.
+- Testy mock API sprawdzają stały host, pola hash-only, dopasowanie, no-results i odrzucenie niezgodnego hashy. Test historii UDP przechodzi. Release .NET 167/167, Engine IPC oraz pełny build/self-test PASS. Opublikowany jako testowy prerelease v0.15.14; realny MalwareBazaar wymaga autoryzowanego klucza.
 
 ## 0.15.13 — prerelease (2026-10-20)
 

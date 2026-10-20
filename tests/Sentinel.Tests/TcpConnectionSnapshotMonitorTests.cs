@@ -121,6 +121,55 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Equal(RiskLevel.Information, item.Risk);
     }
 
+    [Fact]
+    public async Task PersistsTcpUdpBaselineWithEventsAndResumesWithoutDuplicatesAfterRestart()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var existingTcp = Connection(443);
+        var existingUdp = new ConnectionSnapshot("UDP", "192.0.2.10", 53_000, null, null, "Endpoint", 1234, "dns-client");
+        IReadOnlyCollection<ConnectionSnapshot> sample = [existingTcp, existingUdp];
+        var firstRun = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+        Assert.Equal(0, await firstRun.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var addedTcp = Connection(8443);
+        var addedUdp = existingUdp with { LocalPort = 53_001 };
+        sample = [existingTcp, existingUdp, addedTcp, addedUdp];
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, await firstRun.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var restartedMonitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, await restartedMonitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Equal(2, (await store.ReadAsync()).Count);
+
+        sample = sample.Append(Connection(9443)).ToArray();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await restartedMonitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Equal(3, (await store.ReadAsync()).Count);
+    }
+
+    [Fact]
+    public async Task DisabledMonitoringInvalidatesPersistedBaselineBeforeNextOptIn()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample = [Connection(443)];
+        var first = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+        Assert.Equal(0, await first.CollectAsync(store, enabled: true, paused: false, ""));
+
+        sample = sample.Append(Connection(8443)).ToArray();
+        Assert.Equal(0, await first.CollectAsync(store, enabled: false, paused: false, ""));
+        var resumed = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+        Assert.Equal(0, await resumed.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Empty(await store.ReadAsync());
+
+        sample = sample.Append(Connection(9443)).ToArray();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await resumed.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Single(await store.ReadAsync());
+    }
+
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
 
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider

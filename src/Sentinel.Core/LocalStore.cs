@@ -50,7 +50,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 6) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 7) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -60,6 +60,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             CREATE TABLE IF NOT EXISTS installation_profile(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS enterprise_event_queue(event_id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL,
               category TEXT NOT NULL, risk_level INTEGER NOT NULL, rule_code TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS network_endpoint_snapshot(endpoint_key TEXT PRIMARY KEY CHECK(length(endpoint_key) BETWEEN 1 AND 2048));
+            CREATE TABLE IF NOT EXISTS network_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)));
+            INSERT OR IGNORE INTO network_monitor_metadata(id,initialized) VALUES(1,0);
             INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
             COMMIT;
             """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
@@ -84,6 +87,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         {
             await Execute(c, "BEGIN IMMEDIATE; ALTER TABLE events ADD COLUMN process_id INTEGER CHECK(process_id IS NULL OR process_id >= 0); ALTER TABLE events ADD COLUMN process_name TEXT CHECK(process_name IS NULL OR length(process_name) <= 260); PRAGMA user_version=6; COMMIT;", ct);
         }
+        if (v < 7)
+            await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=7; COMMIT;", ct);
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -162,6 +167,66 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         await transaction.CommitAsync(cancellationToken);
         return validated.Length;
+    }
+    public async Task<NetworkMonitorSnapshot> ReadNetworkMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized FROM network_monitor_metadata WHERE id=1";
+        var initializedValue = await metadata.ExecuteScalarAsync(ct) ?? throw new InvalidDataException("Brak metadanych migawki sieci.");
+        var initialized = Convert.ToInt32(initializedValue, CultureInfo.InvariantCulture) == 1;
+        using var query = c.CreateCommand(); query.CommandText = "SELECT endpoint_key FROM network_endpoint_snapshot ORDER BY endpoint_key LIMIT 20000";
+        using var reader = await query.ExecuteReaderAsync(ct); var keys = new HashSet<string>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(ct)) keys.Add(reader.GetString(0));
+        return new(initialized, keys);
+    }
+    public async Task ResetNetworkMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "DELETE FROM network_endpoint_snapshot; UPDATE network_monitor_metadata SET initialized=0 WHERE id=1";
+        await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    /// <summary>Atomically records monitor events and advances the persisted endpoint baseline.</summary>
+    public async Task CommitNetworkMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
+        IReadOnlyCollection<string> addedEndpointKeys, IReadOnlyCollection<string> removedEndpointKeys,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(events); ArgumentNullException.ThrowIfNull(addedEndpointKeys); ArgumentNullException.ThrowIfNull(removedEndpointKeys);
+        if (events.Count > 100 || addedEndpointKeys.Count > 20_000 || removedEndpointKeys.Count > 20_000)
+            throw new ArgumentOutOfRangeException(nameof(events), "Przekroczono limit zmian migawki monitoringu sieci.");
+        static void ValidateKeys(IEnumerable<string> keys)
+        {
+            foreach (var key in keys)
+                if (string.IsNullOrEmpty(key) || key.Length > 2048 || key.Any(char.IsControl))
+                    throw new ArgumentException("Nieprawidłowy klucz endpointu sieciowego.", nameof(keys));
+        }
+        ValidateKeys(addedEndpointKeys); ValidateKeys(removedEndpointKeys);
+        var validated = events.Select(item => (Item: item, Metadata: ValidateEvent(item))).ToArray();
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var (item, (eventId, source)) in validated)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName)";
+            AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var key in removedEndpointKeys)
+        {
+            using var remove = c.CreateCommand(); remove.Transaction = transaction;
+            remove.CommandText = "DELETE FROM network_endpoint_snapshot WHERE endpoint_key=$key";
+            remove.Parameters.AddWithValue("$key", key); await remove.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var key in addedEndpointKeys)
+        {
+            using var add = c.CreateCommand(); add.Transaction = transaction;
+            add.CommandText = "INSERT OR IGNORE INTO network_endpoint_snapshot(endpoint_key) VALUES($key)";
+            add.Parameters.AddWithValue("$key", key); await add.ExecuteNonQueryAsync(ct);
+        }
+        using (var initialized = c.CreateCommand())
+        {
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE network_monitor_metadata SET initialized=1 WHERE id=1";
+            await initialized.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
     }
     private async Task<long> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise, CancellationToken cancellationToken)
     {
@@ -341,7 +406,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6 backup, preserving the installed product identity.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6 or v7 backup, preserving the installed product identity.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -357,11 +422,14 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (!string.Equals(await integrity.ExecuteScalarAsync(ct) as string, "ok", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
-            if (Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != 6)
+            var backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+            if (backupVersion is not (6 or 7))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
-            required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
-            if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != 4)
+            required.CommandText = backupVersion == 7
+                ? "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata')"
+                : "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
+            if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != (backupVersion == 7 ? 6 : 4))
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
             if (await savedSettings.ExecuteScalarAsync(ct) is string json)

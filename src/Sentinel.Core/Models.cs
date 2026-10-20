@@ -23,6 +23,7 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     bool StartWithWindows = false,
     int DnsPollIntervalSeconds = 15,
     bool MonitorNetworkConnections = false);
+public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys);
 public interface IEventRepository
 {
     Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);
