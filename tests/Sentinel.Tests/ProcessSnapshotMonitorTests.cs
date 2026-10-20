@@ -85,14 +85,26 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         }
         Assert.True(full);
 
-        snapshot.Add(42, "new-process");
-        Assert.Equal(0, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        int? rejectedProcessId = null;
+        for (var processId = 42; processId < 10_000; processId++)
+        {
+            snapshot.Add(processId, "new-process");
+            var stored = await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+            if (stored == 0)
+            {
+                rejectedProcessId = processId;
+                break;
+            }
+            Assert.Equal(processId, Assert.Single(await store.ReadAsync(), item => item.ProcessId == processId).ProcessId);
+        }
+
+        Assert.NotNull(rejectedProcessId);
         Assert.Contains("pozostają do ponowienia", monitor.State);
-        Assert.DoesNotContain(await store.ReadAsync(), item => item.ProcessId == 42);
+        Assert.DoesNotContain(await store.ReadAsync(), item => item.ProcessId == rejectedProcessId);
 
         await store.DeleteHistoryAsync();
         Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
-        Assert.Equal(42, Assert.Single(await store.ReadAsync()).ProcessId);
+        Assert.Equal(rejectedProcessId, Assert.Single(await store.ReadAsync()).ProcessId);
     }
 
     public void Dispose()

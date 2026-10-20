@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-10-20 — weryfikacja ACL lokalnej historii
+
+- Dodano Windows test potwierdzający, że SQLite nie inicjalizuje historii, gdy bieżący użytkownik nie może tworzyć plików w katalogu danych; test zawsze przywraca pierwotne ACL.
+- Uodporniono test retry monitora procesu: wykrywa faktyczny brak miejsca dla małego zdarzenia, zamiast zakładać go po nieudanym większym zapisie.
+- Pełny zestaw .NET: 159/159 PASS. Fizyczny test pełnego wolumenu, ACL ścieżki po instalacji i długotrwały soak pozostają do wykonania.
+
 ## 2026-10-19 — kandydat 0.15.11
 
 - Zdarzenie nowego połączenia TCP zawiera teraz informację, gdy ten sam PID został zapisany jako nowy proces w ciągu poprzednich 60 sekund. To lokalna korelacja czasowa, jawnie oznaczona jako informacyjna; nie zmienia oceny ryzyka. Pamięć korelacji jest ograniczona do 60 sekund i resetuje się wraz z silnikiem.
