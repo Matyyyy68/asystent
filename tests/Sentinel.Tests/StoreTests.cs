@@ -166,7 +166,8 @@ public sealed class StoreTests : IDisposable
     [Fact]
     public async Task HistoryStoreFailsClosedWhenCurrentUserCannotCreateFilesInDirectory()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows())
+            throw Xunit.Sdk.SkipException.ForSkip("The filesystem ACL integration test requires Windows.");
         Directory.CreateDirectory(dir);
         var directory = new DirectoryInfo(dir);
         var originalAcl = FileSystemAclExtensions.GetAccessControl(directory);

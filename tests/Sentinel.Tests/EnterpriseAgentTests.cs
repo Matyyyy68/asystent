@@ -148,7 +148,8 @@ public sealed class EnterpriseAgentTests
     [Fact]
     public async Task WindowsCredentialStoreProtectsTokenAtRestAndSupportsDelete()
     {
-        if (!OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsWindows())
+            throw Xunit.Sdk.SkipException.ForSkip("Windows DPAPI credential storage is only available on Windows.");
         var directory = Path.Combine(Path.GetTempPath(), "sentinel-dpapi-" + Guid.NewGuid().ToString("N"));
         const string token = "device-token-01234567890123456789012345678901234567890123456789";
         try
@@ -157,7 +158,7 @@ public sealed class EnterpriseAgentTests
             Assert.Null(await credentials.ReadAsync());
             try { await credentials.WriteAsync(token); }
             catch (System.Security.Cryptography.CryptographicException ex) when (ex.Message.Contains("error 2", StringComparison.Ordinal))
-            { return; } // Restricted runners without a loaded Windows user profile cannot exercise DPAPI; verified separately in the interactive context.
+            { throw Xunit.Sdk.SkipException.ForSkip("Windows DPAPI requires a loaded user profile; this runner cannot exercise the credential store."); }
             var path = Path.Combine(directory, "enterprise-credential.bin");
             Assert.DoesNotContain(token, Encoding.UTF8.GetString(await File.ReadAllBytesAsync(path)), StringComparison.Ordinal);
             Assert.Equal(token, await credentials.ReadAsync());
