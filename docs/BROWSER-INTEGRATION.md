@@ -30,3 +30,5 @@ Otwórz `edge://extensions` albo `chrome://extensions`, włącz **Tryb deweloper
 ## Testy i budowa
 
 `node scripts/check-product.cjs` sprawdza Manifest V3, identyfikator rozszerzenia, uprawnienia i składnię JavaScript. Testy .NET znajdują się w `tests/Sentinel.Tests`; `node scripts/test-engine.cjs` sprawdza protokół i przepływ do lokalnej bazy. `./scripts/build-user.ps1 -Installer` buduje pakiet Windows. Pełny test instalacji i interakcji z kartami wymaga interaktywnego Windows z Edge lub Chrome.
+
+Weryfikacja E2E 2026-10-20: Chrome 155.0.8059.85 i Edge 155.0.4283.62 przeszły test na osobnych profilach tymczasowych. Test ładował rozszerzenie przez CDP, kierował domenę `paypal.com.evil.test` do lokalnego fixture, uruchamiał opublikowany host Native Messaging i potwierdzał treść ostrzeżenia. Proxy odrzucało ruch poza loopback, a `LOCALAPPDATA` wskazywało katalog testowy; po teście usunięto profile, manifest i tymczasowy wpis rejestru. Nie jest to test ręcznej instalacji ani dowód blokowania nawigacji.
