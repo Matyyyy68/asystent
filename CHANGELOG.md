@@ -4,6 +4,11 @@
 
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
+## 0.15.24 — prerelease (2026-10-20)
+
+- Monitoring Downloads czyści stan pamięci przy błędzie odczytu SQLite podczas startu i pozwala ponowić inicjalizację bez restartu procesu. Dodano regresję, która uruchamia watcher po naprawie bazy.
+- Testy .NET 184/184, `check-product`, website lint/test i desktop lint PASS. Pełny Windows build-user z Engine IPC, installerem i self-testem PASS. Lokalny instalator: 279335801 B, SHA-256 `1F6ABC982453385886AF26FC42039E51C2AE17351A3810C90BECA00221A71FE6`. GitHub CI i publikacja v0.15.24 oczekują na weryfikację.
+
 ## 0.15.23 — prerelease (2026-10-20)
 
 - Monitoring Downloads zapisuje lokalny baseline ścieżek, rozmiarów i czasów modyfikacji. Po restarcie silnika porównuje pliki z ostatnim stanem i wykrywa nowe lub zmienione pliki; wyłączenie i pauza czyszczą baseline. Wykrycie i postęp baseline'u zapisują się atomowo. Migracja SQLite v9 zachowuje dotychczasową historię.

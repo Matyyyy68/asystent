@@ -136,6 +136,9 @@ public sealed class DownloadedFileMonitor : IDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or SqliteException or InvalidDataException)
         {
             next?.Dispose();
+            if (ReferenceEquals(watcher, next)) watcher = null;
+            pending.Clear();
+            baseline.Clear();
             State = "Monitoring pobranych plików niedostępny: " + exception.GetType().Name;
         }
     }

@@ -118,6 +118,24 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task MonitorRetriesStartupAfterDatabaseFailure()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        var store = new LocalStore(data);
+        using var monitor = new DownloadedFileMonitor(downloads);
+
+        await monitor.SetEnabledAsync(store, true);
+        Assert.Contains("niedostępny", monitor.State, StringComparison.OrdinalIgnoreCase);
+
+        await store.InitializeAsync();
+        await monitor.SetEnabledAsync(store, true);
+        Assert.Contains("monitoring Downloads działa", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.True((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
+    }
+
+    [Fact]
     public async Task DisablingMonitorClearsPersistedBaselineAndResumeExcludesExistingFiles()
     {
         var downloads = Path.Combine(root, "Downloads");
