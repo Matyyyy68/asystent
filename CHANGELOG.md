@@ -2,7 +2,7 @@
 ## 0.15.33 — prerelease (2026-10-20)
 
 - Client and Enterprise API now compile against one shared, typed `EnterpriseEventV1` contract. The same source defines the batch/result DTOs, event source allowlist, rule-version sanitization, schema validation and accepted date/risk/category/rule-code bounds.
-- Verification: client .NET 190/190, server tests 20/20, Release server build and HTTP API smoke PASS. Local full installer build and self-test PASS; 279351161 B, SHA-256 `EB2D6D5FF846534BB464FEC38130A3C7F5FEA89E24D0E18027C5EFF6926C23E3`. GitHub release verification pending.
+- Verification: client .NET 190/190, server tests 20/20, Release server build and HTTP API smoke PASS. Local full installer build and self-test PASS; 279351161 B, SHA-256 `EB2D6D5FF846534BB464FEC38130A3C7F5FEA89E24D0E18027C5EFF6926C23E3`. GitHub release `v0.15.33` zweryfikowany: 262550645 B, SHA-256 `e87457c78c69962a1eac317cb59ea997407ec018a98788b3693773985a219608`; sidecar `.sha256` opublikowany. Windows validation `39475468088` PASS.
 
 ## 0.15.32 — prerelease (2026-10-20)
 
