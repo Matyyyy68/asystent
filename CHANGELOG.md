@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-- Baseline procesów jest teraz przechowywany w SQLite v8 i aktualizowany atomowo ze zdarzeniami. Restart silnika pozwala wykryć różnice od ostatniej próbki; pauza przesuwa baseline bez generowania alertów. Procesy wykluczone z monitorowania nie są zapisywane w baseline. Testy .NET 174/174, pełny build i self-test instalatora PASS.
+- `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
+
+## 0.15.16 — prerelease (2026-10-20)
+
+- Baseline procesów jest przechowywany w SQLite v8 i aktualizowany atomowo ze zdarzeniami. Restart silnika pozwala wykryć różnice od ostatniej próbki; pauza przesuwa baseline bez generowania alertów, a wykluczone aplikacje nie są zapisywane w baseline.
+- Testy .NET 174/174, pełny build/self-test instalatora, Engine IPC i UI build PASS. GitHub Actions `39428078633` zakończył Windows build/test/self-test i publikację sukcesem. [Release v0.15.16](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.16) zawiera instalator CI 262514293 B, SHA-256 `abff53d5f71d4f7edb30f9b939d48e6f81900d99c3dc5680353f22115322f7c6` oraz sidecar `.sha256`.
 
 ## 0.15.15 — prerelease (2026-10-20)
 
@@ -106,7 +111,7 @@
 - Podłączono opcjonalny provider Ollama do aktywnej analizy. Wybór modelu i opt-in są jawne; endpoint musi być loopback, a awaria modelu wraca do lokalnych reguł.
 - Rozszerzony IPC smoke test weryfikuje odrzucenie zdalnego endpointu, działanie fałszywych alarmów oraz import/search/delete wiedzy.
 - Zbudowano i uruchomiono `--self-test` instalatora 0.15.0 po integracji Enterprise i Authenticode: 279275383 B, SHA-256 `9DD5FFFA070DADA8CD818F09BFA46A4AB42550E78C172EFB30FA13ACF9DC013C`.
-- Audyt npm wskazał 8 umiarkowanych alertów w dev-only łańcuchu electron-builder/sprintf-js bez opublikowanej poprawki; szczegóły i ograniczenie opisano w raporcie audytu.
+- `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 - Ulepszono ręczny snapshot Windows do 800 połączeń TCP i 200 lokalnych punktów UDP z PID/nazwą procesu, jeśli dostępne. Loopback integration test potwierdza korelację obu protokołów; nie jest to monitoring ciągły.
 - Dodano próbki widocznych procesów co 5 sekund z informacyjnymi zdarzeniami pojawienia/zniknięcia PID, pauzą, wykluczeniami i limitem 100 zdarzeń/próbkę. Test potomnego procesu weryfikuje oba przejścia.
 - Dodano eksport historii JSON oraz kopie lokalnych baz historii/ustawień i wiedzy przez systemowy wybór pliku. UI ostrzega, że pliki są nieszyfrowane; testy IPC sprawdzają redakcję eksportu i format kopii SQLite, a test Core ponownie otwiera kopię bazy wiedzy.
