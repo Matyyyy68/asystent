@@ -7,7 +7,7 @@
 ## 0.15.24 — prerelease (2026-10-20)
 
 - Monitoring Downloads czyści stan pamięci przy błędzie odczytu SQLite podczas startu i pozwala ponowić inicjalizację bez restartu procesu. Dodano regresję, która uruchamia watcher po naprawie bazy.
-- Testy .NET 184/184, `check-product`, website lint/test i desktop lint PASS. Pełny Windows build-user z Engine IPC, installerem i self-testem PASS. Lokalny instalator: 279335801 B, SHA-256 `1F6ABC982453385886AF26FC42039E51C2AE17351A3810C90BECA00221A71FE6`. GitHub CI i publikacja v0.15.24 oczekują na weryfikację.
+- Testy .NET 184/184, `check-product`, website lint/test i desktop lint PASS. Pełny Windows build-user z Engine IPC, installerem i self-testem PASS. Windows CI `39453439410`, Pages `39453439395`, installer build/self-test/release `39453444163` PASS. [Release v0.15.24](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.24): instalator 262535285 B, SHA-256 `3d7f261d6ffb465faff3f6903d1095b1a3796de35afab199c39d4da21f24b82b` i sidecar `.sha256`. Lokalny instalator: 279335801 B, SHA-256 `1F6ABC982453385886AF26FC42039E51C2AE17351A3810C90BECA00221A71FE6`.
 
 ## 0.15.23 — prerelease (2026-10-20)
 
