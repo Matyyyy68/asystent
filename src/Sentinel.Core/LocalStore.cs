@@ -43,6 +43,18 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (key, value) in values) cmd.Parameters.AddWithValue(key, value);
         await cmd.ExecuteNonQueryAsync(ct);
     }
+    private static async Task EnsureColumnAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken ct)
+    {
+        var found = false;
+        using (var inspect = connection.CreateCommand())
+        {
+            inspect.CommandText = $"PRAGMA table_info({table})";
+            await using var reader = await inspect.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+        }
+        if (!found) await Execute(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition}", ct);
+    }
     public Task InitializeAsync(CancellationToken ct = default) => InitializeAsync(null, ct);
     public async Task InitializeAsync(InstalledProductProfile? initialProfile, CancellationToken ct = default)
     {
@@ -50,7 +62,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 9) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 10) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -99,6 +111,18 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=8; COMMIT;", ct);
         if (v < 9)
             await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=9; COMMIT;", ct);
+        if (v < 10)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "enterprise_event_queue", "source", "TEXT NOT NULL DEFAULT 'unknown'", ct);
+                await EnsureColumnAsync(c, "enterprise_event_queue", "rule_version", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "enterprise_event_queue", "schema_version", "INTEGER NOT NULL DEFAULT 1 CHECK(schema_version=1)", ct);
+                await Execute(c, "PRAGMA user_version=10; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -419,7 +443,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 _ => "message"
             };
             var ruleCode = "local." + category;
-            await EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, item.Timestamp, category, (int)item.Risk, ruleCode), cancellationToken);
+            await EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, item.Timestamp, category, (int)item.Risk, ruleCode,
+                EnterpriseEventMetadata.NormalizeSource(source), EnterpriseEventMetadata.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
         }
         return id;
     }
@@ -452,9 +477,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var c = await Open(ct); using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT event_id,occurred_at,category,risk_level,rule_code FROM enterprise_event_queue WHERE sent=0 ORDER BY occurred_at LIMIT $limit";
+        cmd.CommandText = "SELECT event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version FROM enterprise_event_queue WHERE sent=0 ORDER BY occurred_at LIMIT $limit";
         cmd.Parameters.AddWithValue("$limit", limit); using var reader = await cmd.ExecuteReaderAsync(ct); var rows = new List<PendingEnterpriseEvent>();
-        while (await reader.ReadAsync(ct)) rows.Add(new(Guid.Parse(reader.GetString(0)), DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture), reader.GetString(2), reader.GetInt32(3), reader.GetString(4)));
+        while (await reader.ReadAsync(ct)) rows.Add(new(Guid.Parse(reader.GetString(0)), DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture), reader.GetString(2), reader.GetInt32(3), reader.GetString(4),
+            reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7)));
         return rows;
     }
     public async Task MarkEnterpriseEventsSentAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
@@ -474,6 +500,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (item.EventId == Guid.Empty || item.Category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
             item.RiskLevel is < 2 or > 4 || item.RuleCode.Length is < 1 or > 80 ||
             item.RuleCode.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '_' or '-')) ||
+            item.SchemaVersion != 1 ||
             item.OccurredAt > DateTimeOffset.UtcNow.AddMinutes(5) || item.OccurredAt < DateTimeOffset.UtcNow.AddDays(-30))
             throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(item));
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
@@ -502,9 +529,12 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             { await transaction.CommitAsync(ct); return false; }
         }
         using var command = c.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "INSERT OR IGNORE INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code) VALUES($id,$time,$category,$risk,$rule)";
+        command.CommandText = "INSERT OR IGNORE INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version) VALUES($id,$time,$category,$risk,$rule,$source,$ruleVersion,$schemaVersion)";
         command.Parameters.AddWithValue("$id", item.EventId.ToString("D")); command.Parameters.AddWithValue("$time", item.OccurredAt.ToUniversalTime().ToString("O"));
         command.Parameters.AddWithValue("$category", item.Category); command.Parameters.AddWithValue("$risk", item.RiskLevel); command.Parameters.AddWithValue("$rule", item.RuleCode);
+        command.Parameters.AddWithValue("$source", EnterpriseEventMetadata.NormalizeSource(item.Source));
+        command.Parameters.AddWithValue("$ruleVersion", (object?)EnterpriseEventMetadata.NormalizeRuleVersion(item.RuleVersion) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
         var inserted = await command.ExecuteNonQueryAsync(ct) == 1; await transaction.CommitAsync(ct); return inserted;
     }
     public async Task<int> CountPendingEnterpriseEventsAsync(CancellationToken ct = default)
@@ -593,7 +623,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v8 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v10 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -601,6 +631,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (string.Equals(sourcePath, DatabasePath, StringComparison.OrdinalIgnoreCase))
             throw new IOException("Nie można przywrócić bazy z jej aktywnego pliku.");
 
+        var backupVersion = 0;
         await using (var source = new SqliteConnection(new SqliteConnectionStringBuilder
         { DataSource = sourcePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
         {
@@ -609,8 +640,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (!string.Equals(await integrity.ExecuteScalarAsync(ct) as string, "ok", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
-            var backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9))
+            backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -618,11 +649,11 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 : backupVersion == 7
                     ? "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata')"
                     : "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
-            if (backupVersion == 9)
+            if (backupVersion is 9 or 10)
             {
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata')";
             }
-            var expectedTables = backupVersion == 9 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            var expectedTables = backupVersion is 9 or 10 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
@@ -648,6 +679,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 SELECT COUNT(*) FROM restore_source.events;
                 """;
             var count = Convert.ToInt32(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+            var queueRestore = backupVersion >= 10
+                ? "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent,source,rule_version,schema_version) SELECT event_id,occurred_at,category,risk_level,rule_code,sent,source,rule_version,schema_version FROM restore_source.enterprise_event_queue;"
+                : "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent) SELECT event_id,occurred_at,category,risk_level,rule_code,sent FROM restore_source.enterprise_event_queue;";
             command.CommandText = """
                 DELETE FROM events;
                 INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name)
@@ -655,9 +689,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 DELETE FROM settings;
                 INSERT INTO settings(id,json) SELECT id,json FROM restore_source.settings;
                 DELETE FROM enterprise_event_queue;
-                INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent)
-                    SELECT event_id,occurred_at,category,risk_level,rule_code,sent FROM restore_source.enterprise_event_queue;
-                """;
+                """ + queueRestore;
             await command.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
             return count;

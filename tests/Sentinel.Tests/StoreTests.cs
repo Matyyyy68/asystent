@@ -239,12 +239,35 @@ public sealed class StoreTests : IDisposable
     {
         var s = await Store();
         await s.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
-        await s.AddAsync(new(0, DateTimeOffset.UtcNow, RiskLevel.High, "URL", "Synthetic", "private text and URL", "local advice", EventStatus.New));
+        await s.AddAsync(new(0, DateTimeOffset.UtcNow, RiskLevel.High, "URL", "Synthetic", "private text and URL", "local advice", EventStatus.New,
+            Source: "process-snapshot", RuleVersion: "2026.10.1"));
         var queued = await s.ReadPendingEnterpriseEventsAsync();
         var item = Assert.Single(queued); Assert.Equal("url", item.Category); Assert.Equal(3, item.RiskLevel); Assert.Equal("local.url", item.RuleCode);
+        Assert.Equal("process-snapshot", item.Source); Assert.Equal("2026.10.1", item.RuleVersion); Assert.Equal(1, item.SchemaVersion);
         Assert.DoesNotContain("private", System.Text.Json.JsonSerializer.Serialize(item));
         Assert.Equal(Assert.Single(await s.ReadAsync()).EventId, item.EventId);
         await s.MarkEnterpriseEventsSentAsync([item.EventId]); Assert.Empty(await s.ReadPendingEnterpriseEventsAsync());
+    }
+    [Fact] public async Task VersionNineDatabaseMigratesPendingEnterpriseQueueWithSafeDefaults()
+    {
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "sentinel.db");
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False"))
+        {
+            await connection.OpenAsync(); await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE enterprise_event_queue(event_id TEXT PRIMARY KEY, occurred_at TEXT NOT NULL,
+                  category TEXT NOT NULL, risk_level INTEGER NOT NULL, rule_code TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0);
+                INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code)
+                  VALUES('00000000-0000-0000-0000-000000000123','2026-10-20T10:00:00.0000000+00:00','url',3,'local.url');
+                PRAGMA user_version=9;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var store = new LocalStore(dir); await store.InitializeAsync();
+        var item = Assert.Single(await store.ReadPendingEnterpriseEventsAsync());
+        Assert.Equal("unknown", item.Source); Assert.Null(item.RuleVersion); Assert.Equal(1, item.SchemaVersion);
     }
     [Fact] public async Task EnterpriseMetadataQueueRequiresExplicitOptIn()
     {
@@ -259,6 +282,13 @@ public sealed class StoreTests : IDisposable
         await s.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
         await s.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url"));
         Assert.Single(await s.ReadPendingEnterpriseEventsAsync());
+    }
+    [Fact] public async Task EnterpriseQueueRejectsUnsupportedEventSchema()
+    {
+        var s = await Store(); await s.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
+        var item = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url", SchemaVersion: 2);
+        await Assert.ThrowsAsync<ArgumentException>(() => s.EnqueueEnterpriseEventAsync(item));
+        Assert.Empty(await s.ReadPendingEnterpriseEventsAsync());
     }
     [Fact] public async Task EnterpriseOfflineQueueIsBoundedWithoutEvictingPendingEvents()
     {
@@ -303,8 +333,9 @@ public sealed class StoreTests : IDisposable
     {
         var backupDirectory = Path.Combine(dir, "backup-source"); Directory.CreateDirectory(backupDirectory);
         var source = new LocalStore(backupDirectory);
-        await source.InitializeAsync(new Sentinel.Core.Configuration.InstalledProductProfile(Sentinel.Core.Configuration.ProductVariant.EnterpriseClient, "https://sentinel.example"));
-        await source.AddAsync(Event() with { Category = "BackupEvent" });
+        await source.InitializeAsync(new Sentinel.Core.Configuration.InstalledProductProfile(Sentinel.Core.Configuration.ProductVariant.EnterpriseClient,
+            "https://sentinel.example", ShareSecurityMetadata: true));
+        await source.AddAsync(Event() with { Risk = RiskLevel.High, Category = "BackupEvent", Source = "process-snapshot", RuleVersion = "2026.10.1" });
         var restoredSettings = new AppSettings(RetentionDays: 30, Notifications: false, Paused: false);
         await source.SaveSettingsAsync(restoredSettings);
         var backupPath = Path.Combine(dir, "restore.db"); await source.BackupAsync(backupPath);
@@ -314,6 +345,10 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(1, await target.RestoreAsync(backupPath));
 
         Assert.Equal("BackupEvent", Assert.Single(await target.ReadAsync()).Category);
+        var restoredQueueItem = Assert.Single(await target.ReadPendingEnterpriseEventsAsync());
+        Assert.Equal("process-snapshot", restoredQueueItem.Source);
+        Assert.Equal("2026.10.1", restoredQueueItem.RuleVersion);
+        Assert.Equal(1, restoredQueueItem.SchemaVersion);
         Assert.Equal(restoredSettings, await target.LoadSettingsAsync());
         Assert.Equal(Sentinel.Core.Configuration.ProductVariant.User, (await target.GetInstallationProfileAsync()).Variant);
     }
@@ -367,7 +402,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(9L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(10L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task MonitoringSettingsSurviveReopening()
     {

@@ -219,12 +219,14 @@ try:
         "eventId": "7bc2141e-cb9d-4d10-b9e0-47e4d2ce4100",
         "occurredAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "category": "url", "riskLevel": 3, "ruleCode": "url.suspicious_domain",
+        "source": "manual-analysis", "ruleVersion": "2026.10.1", "schemaVersion": 1,
     }
     assert request("/api/v1/agents/events", "POST", {"events": [event]}, device["deviceToken"]) == {"accepted": 1, "duplicates": 0}
     assert request("/api/v1/agents/events", "POST", {"events": [event]}, device["deviceToken"]) == {"accepted": 0, "duplicates": 1}
     request("/api/v1/agents/events", "POST", {"events": [event]}, "invalid-event-agent-token-123456789012345", 401)
     events = request("/api/v1/admin/events", token=system_session)
     assert len(events) == 1 and events[0]["deviceId"] == device["deviceId"]
+    assert events[0]["source"] == "manual-analysis" and events[0]["ruleVersion"] == "2026.10.1" and events[0]["schemaVersion"] == 1
     request(f"/api/v1/admin/events/{device['deviceId']}/{event['eventId']}/status", "PUT",
             {"status": "false_positive"}, security_session, 204)
     assert request("/api/v1/admin/events", token=system_session)[0]["status"] == "false_positive"

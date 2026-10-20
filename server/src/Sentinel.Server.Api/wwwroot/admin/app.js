@@ -397,9 +397,10 @@ async function renderEvents() {
   pagedTable(host, events, [
     { title: "Czas", render: e => tableCell(new Date(e.occurredAt).toLocaleString("pl-PL")) }, { title: "Urządzenie", key: "deviceId" },
     { title: "Kategoria", key: "category" }, { title: "Ryzyko", render: e => tableCell(statusBadge(`${e.riskLevel}/4`, e.riskLevel >= 3 ? "danger" : e.riskLevel >= 2 ? "warning" : "info")) },
-    { title: "Reguła", key: "ruleCode" }, { title: "Status", render: e => tableCell(statusBadge(e.status, e.status === "open" ? "warning" : e.status === "false_positive" ? "danger" : "success")) },
+    { title: "Reguła", key: "ruleCode" }, { title: "Pochodzenie", render: e => tableCell(`${e.source} · ${e.ruleVersion ?? "wersja nieznana"} · schemat v${e.schemaVersion}`) },
+    { title: "Status", render: e => tableCell(statusBadge(e.status, e.status === "open" ? "warning" : e.status === "false_positive" ? "danger" : "success")) },
     { title: "Oznacz", render: e => { const td = node("td"); if (canSecurity() && e.status !== "false_positive") td.append(actionButton("Fałszywy alarm", async () => { await setEventStatus(e, "false_positive"); })); if (canSecurity() && e.status !== "resolved") td.append(actionButton("Rozwiązane", async () => { await setEventStatus(e, "resolved"); })); return td; } }
-  ], e => `${e.deviceId} ${e.category} ${e.ruleCode} ${e.status}`, "Brak zdarzeń", "Serwer nie otrzymał jeszcze metadanych zdarzeń.", [
+  ], e => `${e.deviceId} ${e.category} ${e.ruleCode} ${e.source} ${e.ruleVersion ?? ""} ${e.status}`, "Brak zdarzeń", "Serwer nie otrzymał jeszcze metadanych zdarzeń.", [
     { label: "Filtruj według statusu", options: [["all","Wszystkie statusy"],["open","Otwarte"],["resolved","Rozwiązane"],["false_positive","Fałszywe alarmy"]], getValue: e => e.status },
     { label: "Filtruj według poziomu ryzyka", options: [["all","Każde ryzyko"],["4","Krytyczne"],["3","Wysokie"],["2","Średnie"],["1","Niskie"],["0","Informacyjne"]], getValue: e => e.riskLevel }
   ]);

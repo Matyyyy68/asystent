@@ -32,7 +32,7 @@ public sealed class SqliteServerStore : IServerStore
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
-        if (version > 7) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
+        if (version > 8) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
         command.Parameters.Clear();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -75,7 +75,9 @@ public sealed class SqliteServerStore : IServerStore
             CREATE TABLE IF NOT EXISTS security_events(
               event_id TEXT NOT NULL, device_id TEXT NOT NULL REFERENCES devices(id), occurred_at TEXT NOT NULL, received_at TEXT NOT NULL,
               category TEXT NOT NULL, risk_level INTEGER NOT NULL CHECK(risk_level BETWEEN 0 AND 4), rule_code TEXT NOT NULL,
-              status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved','false_positive')), PRIMARY KEY(device_id,event_id));
+              status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved','false_positive')),
+              source TEXT NOT NULL DEFAULT 'unknown', rule_version TEXT NULL, schema_version INTEGER NOT NULL DEFAULT 1 CHECK(schema_version=1),
+              PRIMARY KEY(device_id,event_id));
             CREATE INDEX IF NOT EXISTS ix_security_events_time ON security_events(occurred_at DESC);
             CREATE INDEX IF NOT EXISTS ix_security_events_device_time ON security_events(device_id,occurred_at DESC);
             INSERT OR IGNORE INTO device_groups(id,name,created_at)
@@ -87,12 +89,15 @@ public sealed class SqliteServerStore : IServerStore
         await EnsureColumnAsync(connection, "invitations", "requires_approval", "INTEGER NOT NULL DEFAULT 0 CHECK(requires_approval IN (0,1))", cancellationToken);
         await EnsureColumnAsync(connection, "devices", "approved", "INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1))", cancellationToken);
         await EnsureColumnAsync(connection, "devices", "candidate_token_hash", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "security_events", "source", "TEXT NOT NULL DEFAULT 'unknown'", cancellationToken);
+        await EnsureColumnAsync(connection, "security_events", "rule_version", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "security_events", "schema_version", "INTEGER NOT NULL DEFAULT 1 CHECK(schema_version=1)", cancellationToken);
         await using (var candidateIndex = connection.CreateCommand())
         {
             candidateIndex.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_candidate_token ON devices(candidate_token_hash) WHERE candidate_token_hash IS NOT NULL";
             await candidateIndex.ExecuteNonQueryAsync(cancellationToken);
         }
-        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=7";
+        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=8";
         await setVersion.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -723,8 +728,8 @@ public sealed class SqliteServerStore : IServerStore
             {
                 await using var command = connection.CreateCommand(); command.Transaction = (SqliteTransaction)transaction;
                 command.CommandText = """
-                    INSERT INTO security_events(event_id,device_id,occurred_at,received_at,category,risk_level,rule_code)
-                    SELECT $event,$device,$occurred,$received,$category,$risk,$rule
+                    INSERT INTO security_events(event_id,device_id,occurred_at,received_at,category,risk_level,rule_code,source,rule_version,schema_version)
+                    SELECT $event,$device,$occurred,$received,$category,$risk,$rule,$source,$ruleVersion,$schemaVersion
                     WHERE EXISTS(SELECT 1 FROM devices WHERE id=$device AND revoked=0)
                     ON CONFLICT(device_id,event_id) DO NOTHING
                     """;
@@ -732,6 +737,8 @@ public sealed class SqliteServerStore : IServerStore
                 command.Parameters.AddWithValue("$device", deviceId); command.Parameters.AddWithValue("$occurred", item.OccurredAt.ToUniversalTime().ToString("O"));
                 command.Parameters.AddWithValue("$received", receivedAt.ToUniversalTime().ToString("O")); command.Parameters.AddWithValue("$category", item.Category);
                 command.Parameters.AddWithValue("$risk", item.RiskLevel); command.Parameters.AddWithValue("$rule", item.RuleCode);
+                command.Parameters.AddWithValue("$source", item.Source); command.Parameters.AddWithValue("$ruleVersion", (object?)item.RuleVersion ?? DBNull.Value);
+                command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
                 accepted += await command.ExecuteNonQueryAsync(cancellationToken);
             }
             await transaction.CommitAsync(cancellationToken);
@@ -746,14 +753,15 @@ public sealed class SqliteServerStore : IServerStore
         var events = new List<SecurityEvent>(); await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT event_id,device_id,occurred_at,received_at,category,risk_level,rule_code,status
+            SELECT event_id,device_id,occurred_at,received_at,category,risk_level,rule_code,status,source,rule_version,schema_version
             FROM security_events WHERE ($device IS NULL OR device_id=$device) ORDER BY occurred_at DESC LIMIT $limit
             """;
         command.Parameters.AddWithValue("$device", (object?)deviceId ?? DBNull.Value); command.Parameters.AddWithValue("$limit", limit);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
             events.Add(new(reader.GetString(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
-                reader.GetString(4), reader.GetInt32(5), reader.GetString(6), reader.GetString(7)));
+                reader.GetString(4), reader.GetInt32(5), reader.GetString(6), reader.GetString(7), reader.GetString(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9), reader.GetInt32(10)));
         return events;
     }
 

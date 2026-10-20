@@ -1,4 +1,8 @@
 # CHANGELOG
+## 0.15.32 — prerelease (2026-10-20)
+
+- Enterprise event v1 now carries a schema version, allowlisted source code and sanitized rule version from the client’s durable queue through the API into server storage and the admin event view. Local and server SQLite upgrades preserve existing pending/history records; old queued events receive safe defaults.
+- Verification: client .NET 190/190, server tests 20/20, Release solution build, HTTP API smoke test and local installer build/self-test PASS. Local installer: 279339897 B, SHA-256 `4FA4BCB6CA8C77A2A9CCBC914D7FAC1ACA5A8CB1DF6733D5BE08601E6DEC73CF`.
 
 ## 0.15.31 — prerelease (2026-10-20)
 

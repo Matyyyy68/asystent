@@ -6,9 +6,24 @@ using System.Text.Json;
 namespace Sentinel.Core.Enterprise;
 
 public sealed record EnterpriseEnrollment(string DeviceId, string DeviceToken, string Group, DateTimeOffset RegisteredAt);
-public sealed record PendingEnterpriseEvent(Guid EventId, DateTimeOffset OccurredAt, string Category, int RiskLevel, string RuleCode);
+public sealed record PendingEnterpriseEvent(Guid EventId, DateTimeOffset OccurredAt, string Category, int RiskLevel, string RuleCode,
+    string Source = "unknown", string? RuleVersion = null, int SchemaVersion = 1);
 public sealed record EnterpriseEventBatch(IReadOnlyList<PendingEnterpriseEvent> Events);
 public sealed record EnterpriseEventBatchResult(int Accepted, int Duplicates);
+
+public static class EnterpriseEventMetadata
+{
+    private static readonly HashSet<string> Sources = new(StringComparer.Ordinal)
+    {
+        "browser-extension", "dns-cache", "downloads-local-hash", "manual-analysis",
+        "process-snapshot", "tcp-connection-snapshot", "udp-endpoint-snapshot", "unknown"
+    };
+
+    public static string NormalizeSource(string? source) => source is not null && Sources.Contains(source) ? source : "unknown";
+
+    public static string? NormalizeRuleVersion(string? version) => version is { Length: > 0 and <= 80 } &&
+        version.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-') ? version : null;
+}
 
 /// <summary>Stores the per-device bearer credential in the platform's protected credential store.</summary>
 public interface IDeviceCredentialStore
@@ -102,11 +117,13 @@ public sealed class EnterpriseAgentClient(HttpClient httpClient)
         IReadOnlyList<PendingEnterpriseEvent> events, CancellationToken cancellationToken = default)
     {
         if (events.Count is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(events), "Batch musi zawierać 1–100 zdarzeń.");
+        if (events.Any(e => e.SchemaVersion != 1)) throw new InvalidDataException("Nieobsługiwana wersja schematu zdarzenia Enterprise.");
         using var request = CreateRequest(server, "api/v1/agents/events", credential);
         request.Method = HttpMethod.Post;
         request.Content = JsonContent.Create(new { events = events.Select(e => new {
             eventId = e.EventId.ToString("D"), occurredAt = e.OccurredAt, category = e.Category,
-            riskLevel = e.RiskLevel, ruleCode = e.RuleCode
+            riskLevel = e.RiskLevel, ruleCode = e.RuleCode, source = EnterpriseEventMetadata.NormalizeSource(e.Source),
+            ruleVersion = EnterpriseEventMetadata.NormalizeRuleVersion(e.RuleVersion), schemaVersion = e.SchemaVersion
         }) }, options: JsonOptions);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccess(response, cancellationToken);

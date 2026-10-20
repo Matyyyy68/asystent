@@ -67,13 +67,54 @@ public sealed class EnterpriseAgentTests
         });
         using var http = new HttpClient(handler);
         var client = new EnterpriseAgentClient(http);
-        var input = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url");
+        var input = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url",
+            "process-snapshot", "2026.10.1", 1);
         var result = await client.SendEventsAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
             "012345678901234567890123456789012345678901234567890123456789", [input]);
         Assert.Equal(1, result.Accepted);
         Assert.Contains(input.EventId.ToString("D"), body);
+        Assert.Contains("\"schemaVersion\":1", body);
+        Assert.Contains("\"source\":\"process-snapshot\"", body);
+        Assert.Contains("\"ruleVersion\":\"2026.10.1\"", body);
         Assert.DoesNotContain("explanation", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("https://", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task EventSynchronizationNormalizesUnknownSourceAndUntrustedRuleVersion()
+    {
+        string? body = null;
+        var handler = new DelegateHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Json(HttpStatusCode.OK, "{\"accepted\":1,\"duplicates\":0}");
+        });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        var item = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url",
+            "user@example.test", "bad version", 1);
+
+        await client.SendEventsAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "012345678901234567890123456789012345678901234567890123456789", [item]);
+
+        Assert.Contains("\"source\":\"unknown\"", body);
+        Assert.Contains("\"ruleVersion\":null", body);
+        Assert.DoesNotContain("user@example.test", body);
+        Assert.DoesNotContain("bad version", body);
+    }
+
+    [Fact]
+    public async Task EventSynchronizationRejectsUnsupportedSchemaBeforeSending()
+    {
+        var called = false;
+        var handler = new DelegateHandler(_ => { called = true; return Task.FromResult(Json(HttpStatusCode.OK, "{\"accepted\":1,\"duplicates\":0}")); });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        var item = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url", SchemaVersion: 2);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.SendEventsAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "012345678901234567890123456789012345678901234567890123456789", [item]));
+        Assert.False(called);
     }
 
     [Fact]

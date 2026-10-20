@@ -126,7 +126,8 @@ async Task RecordDetectionAsync(SecurityEvent item, string category, string rule
 {
     await store.AddLocalOnlyAsync(item);
     if (installationProfile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } && item.Risk >= RiskLevel.Moderate &&
-        !await store.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(item.EventId!.Value, item.Timestamp, category, (int)item.Risk, ruleCode)))
+        !await store.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(item.EventId!.Value, item.Timestamp, category, (int)item.Risk, ruleCode,
+            EnterpriseEventMetadata.NormalizeSource(item.Source), EnterpriseEventMetadata.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion)))
         enterpriseError = "queue_full";
 }
 DateTimeOffset? lastDnsRead = null;
