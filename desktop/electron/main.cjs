@@ -52,10 +52,12 @@ app.whenReady().then(() => {
       const choice = await dialog.showOpenDialog(win, { title, properties: ['openFile'], filters: [{ name: title, extensions: ['db'] }] });
       return choice.canceled ? null : call(method, { path: choice.filePaths[0] });
     }
-    if (['historyExport', 'databaseBackup', 'knowledgeBackup'].includes(method)) {
+    if (['historyExport', 'historyExportCsv', 'databaseBackup', 'knowledgeBackup'].includes(method)) {
       const date = new Date().toISOString().replace(/[:.]/g, '-');
-      const names = { historyExport: `Sentinel-history-${date}.json`, databaseBackup: `Sentinel-data-${date}.db`, knowledgeBackup: `Sentinel-knowledge-${date}.db` };
-      const choice = await dialog.showSaveDialog(win, { defaultPath: names[method], filters: [{ name: method === 'historyExport' ? 'JSON' : 'SQLite', extensions: [method === 'historyExport' ? 'json' : 'db'] }] });
+      const names = { historyExport: `Sentinel-history-${date}.json`, historyExportCsv: `Sentinel-history-${date}.csv`, databaseBackup: `Sentinel-data-${date}.db`, knowledgeBackup: `Sentinel-knowledge-${date}.db` };
+      const isHistoryExport = method === 'historyExport' || method === 'historyExportCsv';
+      const extension = method === 'historyExport' ? 'json' : method === 'historyExportCsv' ? 'csv' : 'db';
+      const choice = await dialog.showSaveDialog(win, { defaultPath: names[method], filters: [{ name: isHistoryExport ? extension.toUpperCase() : 'SQLite', extensions: [extension] }] });
       if (choice.canceled || !choice.filePath) return null;
       if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać kopii.');
       return call(method, { path: choice.filePath });

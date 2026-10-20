@@ -444,6 +444,25 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     }
     public async Task ExportAsync(string path, CancellationToken ct = default)
     {
+        var rows = await ReadAllEventsForExportAsync(ct);
+        await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await JsonSerializer.SerializeAsync(file, rows, cancellationToken: ct);
+    }
+    public async Task ExportCsvAsync(string path, CancellationToken ct = default)
+    {
+        var rows = await ReadAllEventsForExportAsync(ct);
+        await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        await using var writer = new StreamWriter(file, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        await writer.WriteLineAsync("id,timestamp_utc,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name");
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            var values = new string?[] { row.Id.ToString(CultureInfo.InvariantCulture), row.Timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.Risk.ToString(), row.Category, row.Application, row.Explanation, row.Recommendation, row.Status.ToString(), row.EventId?.ToString("D"), row.Source, row.RuleVersion, row.Confidence?.ToString(CultureInfo.InvariantCulture), row.SchemaVersion.ToString(CultureInfo.InvariantCulture), row.ProcessId?.ToString(CultureInfo.InvariantCulture), row.ProcessName };
+            await writer.WriteLineAsync(string.Join(',', values.Select(CsvField)));
+        }
+    }
+    private async Task<List<SecurityEvent>> ReadAllEventsForExportAsync(CancellationToken ct)
+    {
         // Export all retained rows, independent of the UI's 500-row limit.
         await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name FROM events ORDER BY id";
         using var r = await cmd.ExecuteReaderAsync(ct); var rows = new List<SecurityEvent>();
@@ -451,8 +470,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
             r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
             r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14)));
-        await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        await JsonSerializer.SerializeAsync(file, rows, cancellationToken: ct);
+        return rows;
+    }
+    private static string CsvField(string? value)
+    {
+        value ??= "";
+        // Prevent spreadsheet formula execution, including values prefixed with whitespace or control characters.
+        var firstMeaningful = value.FirstOrDefault(character => !char.IsWhiteSpace(character));
+        if (firstMeaningful is '=' or '+' or '-' or '@') value = "'" + value;
+        return '"' + value.Replace("\"", "\"\"", StringComparison.Ordinal) + '"';
     }
     public async Task BackupAsync(string destination, CancellationToken ct = default)
     {

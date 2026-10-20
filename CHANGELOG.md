@@ -4,6 +4,11 @@
 
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
+## 0.15.21 — prerelease (2026-10-20)
+
+- Dodano eksport redagowanej historii CSV z poziomu widoku zdarzeń. Format zawiera metadane wszystkich zachowanych zdarzeń, nadaje się do otwarcia w Excelu i neutralizuje formuły arkusza.
+- Testy .NET 179/179, Engine IPC z redakcją eksportu CSV, desktop lint/build PASS. Website test/lint/build PASS. Lokalny instalator `Sentinel.AI.Setup.0.15.21.exe` (279324025 B) zbudowany; self-test PASS; SHA-256 `DEB91B1F70A2B31E224245A8FD2B33649AC3E5F6F5DFFAA831E99966B7D83C21`. Weryfikacja Windows CI i publikacja release/Pages po pushu.
+
 ## 0.15.20 — prerelease (2026-10-20)
 
 - Limit metadanych baseline'u Downloads obejmuje całą sesję monitorowania, nie tylko stan początkowy. Po osiągnięciu limitu watcher zatrzymuje się jawnie, zamiast dalej zwiększać zużycie pamięci.

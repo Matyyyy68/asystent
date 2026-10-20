@@ -298,6 +298,11 @@ while (await Console.In.ReadLineAsync() is { } line)
                 await store.ExportAsync(exportPath);
                 result = new { exported = true };
                 break;
+            case "historyExportCsv":
+                var csvExportPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku eksportu.");
+                await store.ExportCsvAsync(csvExportPath);
+                result = new { exported = true };
+                break;
             case "databaseBackup":
                 var databaseBackupPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku kopii.");
                 await store.BackupAsync(databaseBackupPath);

@@ -187,6 +187,14 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.ok(!exportedHistory.includes('https://paypal.com.evil.test/login'));
   assert.ok(!exportedHistory.includes('Pilnie zaloguj się i podaj hasło'));
   assert.ok(!exportedHistory.includes('dont-send-me'));
+  const historyCsvPath = path.join(backups, 'history.csv');
+  const csvExportResult = await call('historyExportCsv', { path: historyCsvPath }); assert.equal(csvExportResult.ok, true, csvExportResult.error);
+  const exportedCsv = readFileSync(historyCsvPath, 'utf8');
+  assert.ok(exportedCsv.includes('timestamp_utc,risk,category'));
+  assert.ok(exportedCsv.includes(history[0].id));
+  assert.ok(!exportedCsv.includes('https://paypal.com.evil.test/login'));
+  assert.ok(!exportedCsv.includes('Pilnie zaloguj się i podaj hasło'));
+  assert.ok(!exportedCsv.includes('dont-send-me'));
   const databaseBackupPath = path.join(backups, 'sentinel.db');
   const databaseBackup = await call('databaseBackup', { path: databaseBackupPath }); assert.equal(databaseBackup.ok, true, databaseBackup.error);
   assert.equal(readFileSync(databaseBackupPath).subarray(0, 16).toString(), 'SQLite format 3\0');

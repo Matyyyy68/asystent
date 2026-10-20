@@ -271,6 +271,19 @@ public sealed class StoreTests : IDisposable
     [Fact] public async Task RetentionRemovesOnlyOldEvents() { var s = await Store(); await s.AddAsync(Event(DateTimeOffset.UtcNow.AddDays(-60))); await s.AddAsync(Event()); await s.ApplyRetentionAsync(30); Assert.Single(await s.ReadAsync()); }
     [Fact] public async Task InvalidRetentionRejected() { var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(0))); }
     [Fact] public async Task BackupCanReopenAndExportIsValid() { var s = await Store(); await s.AddAsync(Event()); var export = Path.Combine(dir,"events.json"); await s.ExportAsync(export); Assert.Contains("Synthetic",await File.ReadAllTextAsync(export)); var backupDir = Path.Combine(dir,"backup"); Directory.CreateDirectory(backupDir); await s.BackupAsync(Path.Combine(backupDir,"sentinel.db")); var backup = new LocalStore(backupDir); await backup.InitializeAsync(); Assert.Single(await backup.ReadAsync()); }
+    [Fact] public async Task CsvExportQuotesFieldsAndPreventsSpreadsheetFormulas()
+    {
+        var s = await Store();
+        await s.AddLocalOnlyAsync(Event() with { Explanation = "=HYPERLINK(\"https://evil.test\")", Recommendation = "quoted, value\nand second line", Application = " \t=HYPERLINK(\"https://evil.test\")", ProcessName = "-SUM(A1:A2)" });
+        var export = Path.Combine(dir, "events.csv"); await s.ExportCsvAsync(export);
+        var bytes = await File.ReadAllBytesAsync(export);
+        Assert.True(bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }));
+        var csv = await File.ReadAllTextAsync(export);
+        Assert.Contains("\"'=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
+        Assert.Contains("\"'-SUM(A1:A2)\"", csv);
+        Assert.Contains("\"' \t=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
+        Assert.Contains("\"quoted, value\nand second line\"", csv);
+    }
     [Fact] public async Task RestoreReplacesHistoryAndSettingsButPreservesInstalledIdentity()
     {
         var backupDirectory = Path.Combine(dir, "backup-source"); Directory.CreateDirectory(backupDirectory);
