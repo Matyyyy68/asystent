@@ -1,9 +1,9 @@
 # CHANGELOG
 
 
-## 0.15.38 — kandydat lokalny (2026-10-20)
+## 0.15.38 — prerelease (2026-10-20)
 
-- Zdarzenia przeglądarki zapisują kody przesłanek z analizy URL, dzięki czemu historia prawidłowo opisuje wspólną grupę jako korelację domeny, a nie PID procesu. Weryfikacja lokalna: .NET 202/202, desktop 6/6, Engine IPC, UI build, website test/lint/build i installer build/self-test PASS. Lokalny instalator 279359865 B, SHA-256 `C075B4DC57A03FBB982C4880044AB7DBC40981F49304C95D06BF962623CCF75F`. Windows CI, Pages i publikacja assetu pozostają do wykonania.
+- Zdarzenia przeglądarki zapisują kody przesłanek z analizy URL, dzięki czemu historia prawidłowo opisuje wspólną grupę jako korelację domeny, a nie PID procesu. Weryfikacja lokalna i Windows CI `39489166139` PASS; Pages `39489165920` PASS; instalator build/self-test/release `39489181456` PASS. [GitHub Release v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38) zawiera instalator 262559349 B, SHA-256 `bb34834eb654e450728f95093d500715b5f6ef5ab9f7825c32d146b9fb2c4cd8` oraz sidecar `.sha256`. Lokalny instalator ma 279359865 B, SHA-256 `C075B4DC57A03FBB982C4880044AB7DBC40981F49304C95D06BF962623CCF75F`. Rzeczywista nawigacja rozszerzenia w Chrome nadal nie została zweryfikowana.
 
 ## 0.15.37 — prerelease (2026-10-20)
 
