@@ -8,7 +8,7 @@
 6. **Etapy:** (a) API schema i limity — wdrożone/testowane; (b) pairing, DPAPI i IPC consent — wdrożone, DPAPI test przeszedł poza sandboxem; (c) kolejka offline i deduplikacja — wdrożone/testy SQLite; (d) polityka lokalna/heartbeat — wdrożone; (e) wyłączenie zgody usuwa oczekujące metadane i blokuje wysłanie kolejki przywróconej z backupu — wdrożone/testowane; (f) TLS E2E, approval/revoke/rotation — pozostałe; (g) testy restartu i przeciążenia — pozostałe.
 7. **Pliki:** `server/`, `src/Sentinel.Core/Enterprise/`, `src/Sentinel.Engine/Program.cs`, `desktop/src/main.tsx`, `desktop/electron/main.cjs`.
 8. **Prywatność:** lokalny token DPAPI CurrentUser; kolejka metadanych w lokalnej SQLite tylko po zgodzie; brak tekstu, URL, nazw plików, promptów lub wyjaśnień; HTTPS obowiązkowe.
-9. **Testy:** mock client, consent gate IPC, profil/queue gate i minimalny payload SQLite; 142 testy klienta. Do wykonania: live TLS, rotate/revoke, offline/restart, test operacyjny serwera.
+9. **Testy:** mock client, consent gate IPC, profil/queue gate i minimalny payload SQLite; pełne zestawy przechodzą 163 testy klienta i 19 testów serwera. Do wykonania: live TLS, rotate/revoke, offline/restart, test operacyjny serwera.
 10. **Akceptacja:** pairing, restart klienta, pobranie polityki, heartbeat, batch z deduplikacją, offline retry, revoke i dowód braku wysyłki treści; nieosiągnięte do czasu live E2E.
 11. **Ryzyka:** dystrybucja certyfikatów, dostępność serwera, approval wymagający portalu admina, DPAPI zależne od profilu zalogowanego użytkownika.
 12. **Status:** `IN_PROGRESS` — aktywne ścieżki klienta są wdrożone i testowane; operacyjny E2E z prawdziwym TLS oraz revoke nadal wymagają środowiska serwera i pozostają do wykonania.
