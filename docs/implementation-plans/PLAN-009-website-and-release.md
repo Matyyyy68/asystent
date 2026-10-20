@@ -11,5 +11,5 @@
 9. **Testy:** anchors/assets, Vite build, link check, release hash, accessible checks.
 10. **Akceptacja:** live asset tag/hash istnieje; marketing jest zgodny z ograniczeniami; licencja opisana przez właściciela.
 11. **Ryzyka:** host Pages inaccessible/disabled, release missing, dependency licenses.
-12. **Status:** `IN_PROGRESS` — prerelease `v0.15.16`, instalator i digest potwierdzone przez GitHub API; test/lint/build lokalnie PASS, Pages deployment dla v0.15.16 zakończony sukcesem (Actions run `39429650994`). Bezpośredni live-check z tej sesji zablokowała sieć sandboxa. Automatyczne sprawdzanie zewnętrznych linków, licencja i test czystego Windows pozostają.
+12. **Status:** `IN_PROGRESS` — prerelease `v0.15.16`, instalator i digest potwierdzone przez GitHub API; test/lint/build lokalnie PASS, Pages deployment dla v0.15.16 zakończony sukcesem (Actions run `39429650994`). Dodano walidację aplikacji na Windows dla push/PR; pełny `scripts/build-user.ps1` PASS w runie `39430405871`. Bezpośredni live-check z tej sesji zablokowała sieć sandboxa. Automatyczne sprawdzanie zewnętrznych linków, licencja i test czystego Windows pozostają.
 
