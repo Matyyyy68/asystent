@@ -19,6 +19,8 @@ try {
     if ($LASTEXITCODE) { throw 'npm ci failed' }
     node node_modules/electron/install.js
     if ($LASTEXITCODE) { throw 'Electron runtime download failed' }
+    npm.cmd test
+    if ($LASTEXITCODE) { throw 'Desktop tests failed' }
     npm.cmd run build
     if ($LASTEXITCODE) { throw 'Build UI failed' }
     if ($Installer) { npm.cmd run package; if ($LASTEXITCODE) { throw 'Installer build failed' } }

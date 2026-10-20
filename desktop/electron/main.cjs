@@ -1,11 +1,9 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, Notification } = require('electron');
-const { spawn } = require('node:child_process');
-const { createInterface } = require('node:readline');
+const { EngineClient } = require('./engine-client.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
-let win, tray, engine, quitting = false, sequence = 0;
-const pending = new Map();
+let win, tray, quitting = false;
 const allowed = new Set(['status', 'history', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -13,24 +11,9 @@ else {
 app.on('second-instance', () => win?.show());
 app.whenReady().then(() => {
   const executable = app.isPackaged ? path.join(process.resourcesPath, 'engine/Sentinel.Engine.exe') : path.join(__dirname, '../../artifacts/engine/Sentinel.Engine.exe');
-  engine = spawn(executable, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-  const fail = () => { for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error('Silnik jest niedostępny. Uruchom aplikację ponownie.')); } pending.clear(); };
-  engine.on('error', fail); engine.on('exit', fail);
-  engine.stderr.on('data', () => {});
-  createInterface({ input: engine.stdout }).on('line', line => {
-    try { const response = JSON.parse(line); const p = pending.get(response.id); if (!p) return;
-      pending.delete(response.id); clearTimeout(p.timer); response.ok ? p.resolve(response.result) : p.reject(new Error(response.error));
-    } catch { fail(); }
-  });
-  function call(method, data) {
-    return new Promise((resolve, reject) => {
-      if (!engine.pid || engine.exitCode !== null || engine.stdin.destroyed) return reject(new Error('Silnik niedostępny'));
-      const id = String(++sequence);
-      const timer = setTimeout(() => { pending.delete(id); reject(new Error('Przekroczono czas odpowiedzi silnika')); }, 45000);
-      pending.set(id, { resolve, reject, timer });
-      engine.stdin.write(JSON.stringify({ ...data, id, version: 1, method }) + '\n');
-    });
-  }
+  const engine = new EngineClient(executable);
+  engine.start();
+  const call = (method, data) => engine.call(method, data);
   ipcMain.handle('sentinel', async (event, method, data) => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
     if (method === 'autostart') { app.setLoginItemSettings({ openAtLogin: data.enabled === true, args: ['--minimized'], name: 'Sentinel AI' }); return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin; }
@@ -112,7 +95,7 @@ app.whenReady().then(() => {
     } catch { tray?.setToolTip('Sentinel AI — silnik niedostępny'); }
     finally { collecting = false; }
   }, 5000);
-  app.on('before-quit', () => clearInterval(collector));
+  app.on('before-quit', () => { clearInterval(collector); engine.dispose(); });
   if (process.argv.includes('--minimized')) win.hide();
   const icon = nativeImage.createFromPath(path.join(__dirname, "../assets/icon-32.png"));
   tray = new Tray(icon);
@@ -121,5 +104,5 @@ app.whenReady().then(() => {
   tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Otwórz Sentinel AI', click: () => win.show() },
     { label: 'Zakończ', click: async () => { const answer = await dialog.showMessageBox({ type: 'question', message: 'Zakończyć Sentinel AI i zatrzymać silnik?', buttons: ['Anuluj', 'Zakończ'], defaultId: 0, cancelId: 0 }); if (answer.response === 1) { quitting = true; app.quit(); } } }]));
 });
-app.on('before-quit', () => { quitting = true; engine?.kill(); });
+app.on('before-quit', () => { quitting = true; });
 }

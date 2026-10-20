@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.15.26 — prerelease (2026-10-20)
+
+- Aktywny klient Electron ponawia start procesu .NET po błędzie startu, zakończeniu procesu, błędzie IPC lub niepoprawnej odpowiedzi, z wykładniczym opóźnieniem do 30 s. Oczekujące żądania są odrzucane; surowy stderr nie jest zapisywany ani logowany. Trzy testy procesu silnika są wykonywane przez `scripts/build-user.ps1`; desktop lint/build, 184/184 testów .NET i Engine IPC PASS. Lokalny instalator v0.15.26: 279336825 B, SHA-256 `5EE1D167C30F75A38E2E14E4EBEC0D82CBA50E9EEACF9C17DCA7FEF728F6551F`, autotest PASS. GitHub CI/Pages/release oczekują na push taga.
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
 ## 0.15.25 — prerelease (2026-10-20)

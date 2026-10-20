@@ -1,7 +1,9 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-20
-**Etap:** prerelease [v0.15.25](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.25) opublikowane. Windows CI `39455405422`, Pages `39455405535` i installer build/self-test/release `39455410177` PASS. Instalator 262535285 B, SHA-256 `a8efcf946b60e54f5f12206aae1d9c2631f28a84b0a322c473033e954de4a5d0` i sidecar `.sha256` dostępne. Lokalny build, 184/184 testów .NET, Engine IPC i self-test instalatora PASS; lokalny instalator 279335801 B, SHA-256 `084617E5E987BD4A6FBCF1E09E2D2FE8F6D15D9331CED98BB51312223D651183`.
+**Ostatnie opublikowane wydanie:** prerelease [v0.15.25](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.25). Windows CI `39455405422`, Pages `39455405535` i installer build/self-test/release `39455410177` PASS. Instalator 262535285 B, SHA-256 `a8efcf946b60e54f5f12206aae1d9c2631f28a84b0a322c473033e954de4a5d0` i sidecar `.sha256` dostępne.
+
+**Kandydat v0.15.26:** supervisor procesu .NET w aktywnym kliencie Electron automatycznie ponawia start po awarii z backoffem i bezpiecznie zamyka oczekujące IPC. Testy desktop 3/3, lint/build, pełne 184/184 testów .NET, Engine IPC i autotest instalatora PASS. Lokalny instalator 279336825 B, SHA-256 `5EE1D167C30F75A38E2E14E4EBEC0D82CBA50E9EEACF9C17DCA7FEF728F6551F`. Wersja `0.15.26` jest ustawiona w produktach i witrynie; CI, Pages i prerelease zaczną się po pushu commita/tagu.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest w pełni zamknięty. Wydanie v0.15.23 dodało trwały baseline Downloads (SQLite v9), wznowienie porównania po restarcie i atomowy zapis dopasowania; v0.15.24 naprawia ponowienie startu watchera po błędzie SQLite, a v0.15.25 ponawia je automatycznie podczas kolejnego collect. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 

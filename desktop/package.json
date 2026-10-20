@@ -1,6 +1,6 @@
 {
   "name": "sentinel-ai-user",
-  "version": "0.15.25",
+  "version": "0.15.26",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && node ../scripts/copy-media.mjs desktop && vite build",
     "start": "electron .",
     "package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1",
-    "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/preload.cjs"
+    "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/engine-client.cjs && node --check electron/preload.cjs",
+    "test": "node --test test/*.test.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
