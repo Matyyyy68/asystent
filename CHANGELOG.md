@@ -4,6 +4,10 @@
 
 - Test integracyjny bazy wiedzy dowodzi, że trafienia FTS5 trafiają do promptu jawnie włączonej Ollama jako niezaufane źródła; poprawiono opis F11, który błędnie twierdził, że wyszukiwany indeks nie jest używany w analizie.
 
+## 0.15.29 — prerelease (2026-10-20)
+
+- Doprecyzowano w karcie bazy wiedzy, że przy włączonej Ollama do pięciu dopasowanych fragmentów trafia do modelu działającego lokalnie; fragmenty nie są wysyłane do Internetu ani zapisywane w historii.
+
 ## 0.15.28 — prerelease (2026-10-20)
 
 - Diagnostyka desktop pokazuje stan procesu silnika, kod ostatniego zakończenia oraz sam fakt wystąpienia stderr bez ujawniania jego treści. Stan jest dostępny także podczas ponawiania startu. Dodano regresyjne testy snapshotu diagnostycznego i prywatności. Windows CI `39461730985`, Pages `39461730984` i installer build/self-test/release `39461735757` PASS. [Release v0.15.28](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.28): instalator 262536309 B, SHA-256 `5834d0d220d14ad93d39af75f2328cba10985921ca4f6b0acc22e134901bbf63` i sidecar `.sha256`. Lokalny self-test instalatora PASS; SHA-256 `96E20AF8E3B57562383C87C3AAEAB2D79DF5BF47CF15250E2B96C0ABB284ECE3`.
