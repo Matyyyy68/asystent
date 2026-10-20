@@ -27,6 +27,7 @@ var defaultExcludedApplications = settings.ExcludedApplications;
 await store.ApplyRetentionAsync(settings.RetentionDays);
 var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
 var reputation = new DomainReputation(directory);
+var fileHashReputation = new FileHashReputation(directory);
 var processMonitor = new ProcessSnapshotMonitor();
 var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationToken =>
     (IReadOnlyCollection<ConnectionSnapshot>)await ReadConnectionSnapshotAsync(cancellationToken),
@@ -187,7 +188,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     enterprise = await EnterpriseStatusAsync(),
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
-                    reputation = reputation.Status(DateTimeOffset.UtcNow), browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
+                    reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
+                    browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
@@ -385,9 +387,20 @@ while (await Console.In.ReadLineAsync() is { } line)
                     if (stream.Length > 256L * 1024 * 1024) throw new InvalidDataException("Limit pliku: 256 MiB.");
                     var hash = Convert.ToHexString(await SHA256.HashDataAsync(stream));
                     var signature = await ReadAuthenticodeSignatureAsync(info.FullName, CancellationToken.None);
+                    var fileReputation = fileHashReputation.Check(hash);
+                    var reputationText = !fileReputation.FeedImported ? "Brak lokalnej listy hashy."
+                        : fileReputation.Match ? "Hash znajduje się na ręcznie zaimportowanej lokalnej liście; źródło nie zostało niezależnie zweryfikowane."
+                        : "Hash nie znajduje się na ręcznie zaimportowanej lokalnej liście; brak dopasowania nie potwierdza bezpieczeństwa.";
                     result = new { name = info.Name, size = stream.Length, sha256 = hash, signature,
-                        verdict = "Obliczono SHA-256 i sprawdzono stan podpisu Authenticode. Brak audytowanego feedu reputacji; żaden z tych wyników sam nie potwierdza bezpieczeństwa pliku." };
+                        reputation = new { feedImported = fileReputation.FeedImported, match = fileReputation.Match, explanation = reputationText },
+                        verdict = "Obliczono SHA-256 i sprawdzono stan podpisu Authenticode. " + reputationText + " Żaden z tych wyników sam nie potwierdza bezpieczeństwa pliku." };
                 }
+                break;
+            case "fileHashFeedImport":
+                var fileFeedPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException();
+                var fileFeedStatus = await fileHashReputation.ImportFileAsync(fileFeedPath);
+                result = new { fileFeedStatus.HashCount, fileFeedStatus.ImportedAt,
+                    explanation = $"Zaimportowano {fileFeedStatus.HashCount} hashy do lokalnej listy. Sentinel nie weryfikuje niezależnie źródła." };
                 break;
             case "clearHistory": await store.DeleteHistoryAsync(); result = new { deleted = true }; break;
             default: throw new InvalidDataException("Nieznana metoda.");

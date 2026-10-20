@@ -39,7 +39,14 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const unsignedFixture = path.join(root, 'synthetic-unsigned.ps1'); writeFileSync(unsignedFixture, 'Write-Output synthetic');
   const fileCheck = await call('file', { path: unsignedFixture });
   assert.equal(fileCheck.ok, true, fileCheck.error); assert.equal(fileCheck.result.signature.status, 'NotSigned', JSON.stringify(fileCheck.result.signature));
-  assert.equal(fileCheck.result.sha256.length, 64); assert.match(fileCheck.result.verdict, /Brak audytowanego feedu reputacji/);
+  assert.equal(fileCheck.result.sha256.length, 64); assert.match(fileCheck.result.verdict, /Brak lokalnej listy hashy/);
+  const fileHashFeed = path.join(root, 'file-hashes.txt'); writeFileSync(fileHashFeed, `${fileCheck.result.sha256}\n`);
+  const importedFileFeed = await call('fileHashFeedImport', { path: fileHashFeed });
+  assert.equal(importedFileFeed.ok, true, importedFileFeed.error); assert.equal(importedFileFeed.result.hashCount, 1);
+  const matchedFile = await call('file', { path: unsignedFixture });
+  assert.equal(matchedFile.ok, true, matchedFile.error); assert.equal(matchedFile.result.reputation.feedImported, true);
+  assert.equal(matchedFile.result.reputation.match, true);
+  assert.match(matchedFile.result.reputation.explanation, /nie zostało niezależnie zweryfikowane/);
   assert.equal((await call('aiSettings', { useLocalAI: true, endpoint: 'http://example.com:11434', model: 'remote' })).ok, false);
   assert.equal((await call('status')).result.settings.useLocalAI, false);
   ollamaServer = createServer((request, response) => {

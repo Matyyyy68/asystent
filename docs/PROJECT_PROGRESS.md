@@ -1,7 +1,7 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-20
-**Etap:** prerelease 0.15.11 opublikowane z ograniczoną, informacyjną korelacją procesu i połączenia TCP; dalsze plany pozostają w realizacji.
+**Etap:** kandydat 0.15.12 w realizacji; ostatnie opublikowane prerelease to 0.15.11, a funkcje i plany nadal są weryfikowane.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest jeszcze w pełni zamknięty; 4 plany mają wdrożone i przetestowane etapy. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
@@ -9,7 +9,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## Zweryfikowane przepływy
 
-- Klient: bieżący pełny zestaw .NET 159/159 PASS (w tym atomowy batch zdarzeń procesu, metryki obu baz, 32 równoległe zapisy SQLite, odmowa ACL, zgoda/profil/kolejka Enterprise, cap 10 000, odwołanie zgody i DPAPI round-trip sprawdzony w interaktywnej sesji Windows), build Electron/UI oraz IPC → reguły → SQLite; testy obejmują false positive, odrzucenie endpointu zdalnego, import/wyszukanie/usunięcie prywatnego dokumentu, redagowany eksport, kopie i przywracanie obu baz, cykl życia procesu, zalew 10k PID i odzyskanie po błędzie źródła.
+- Klient: bieżący pełny zestaw .NET 163/163 PASS (w tym lokalne dopasowanie SHA-256, atomowy batch zdarzeń procesu, metryki obu baz, 32 równoległe zapisy SQLite, odmowa ACL, zgoda/profil/kolejka Enterprise, cap 10 000 i DPAPI round-trip sprawdzony w interaktywnej sesji Windows), build Electron/UI oraz IPC → reguły → SQLite; testy obejmują false positive, odrzucenie endpointu zdalnego, import/wyszukanie/usunięcie prywatnego dokumentu, redagowany eksport, kopie i przywracanie obu baz, cykl życia procesu, zalew 10k PID i odzyskanie po błędzie źródła.
 - Windows/reputacja: aktualizacja CERT Polska (ponad 125 tys. domen), cache DNS i kontrolowany snapshot TCP/UDP z PID procesu dla loopback.
 - Kandydat 0.15.2 nie został opublikowany: CI ujawniło test wydajności 10k PID ponad próg. W 0.15.3 zapis procesów jest batchowany; lokalnie 149/149 testów, check-product, lint, IPC i testy backupu przechodzą. Test 10k PID trwa teraz 183 ms lokalnie. Pełny build i self-test instalatora PASS; artefakt lokalny 279280503 B, SHA-256 `B19AA84956674BDE9933735B8EB5D9AD06C3EDE18CB432447817D9DA9EBD5A4B`. CI dla v0.15.3 zbudowało i zweryfikowało instalator oraz opublikowało [prerelease v0.15.3](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.3): 262479987 B, SHA-256 `d6f29ebfd0928db63353c1b88216cac9bb97f47819e0431dee89ed4ec0d47e88`. Strona Pages workflow zakończyła się sukcesem; bezpośrednia kontrola live URL i treści `.sha256` z tego środowiska nie powiodła się. Poprzedni opublikowany instalator 0.15.1 miał 262475379 B i SHA-256 `B428155C0BA41306CAED43A5BF5B52BBAB7D0A490E4868A8E639540145ED38AA`.
 - Poprawka limitów bazy wiedzy została wydana jako [prerelease v0.15.4](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.4). GitHub Actions zakończył build, testy, self-test instalatora i publikację sukcesem; asset ma 262480499 B i SHA-256 `5ba6884efb926f3b6cf1814a611433f713a374b35593e8bfbd45df3d10821c7b`. Pages workflow po zmianie na main także PASS. Lokalny pełny Release build nie mógł przywrócić pakietów z powodu niedostępnego NuGet vulnerability endpoint; CI wykonał pełny build na Windows runnerze.
@@ -44,6 +44,8 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 - Dwie wcześniejsze rozgrzane próbki process snapshot + IPC + zapis SQLite trwały 15,3 ms i 28,8 ms; osobny benchmark zasobów opisano wyżej.
 - PLAN-007: test ACL odmawia bieżącemu użytkownikowi wyłącznie tworzenia plików, potwierdza bezpieczne niepowodzenie inicjalizacji SQLite i przywraca oryginalny ACL. Test retry procesu dochodzi teraz do odmowy zapisu małego zdarzenia, zamiast zakładać, że błąd dużego wpisu oznacza brak miejsca na każdy mniejszy wpis. Oba testy i pełny zestaw 159/159 przechodzą.
 - PLAN-001: `scripts/benchmark-engine.cjs --duration=300 --tcp-monitor` utrzymał testowy observer TCP przez 5 minut (60 próbek co 5 s), zapisał kontrolowane nowe połączenie, zachował stan aktywny i nie zgłosił pominiętych zmian. CPU 0,056% łącznej mocy procesorów; working set 45,2–57 MiB; `collect` mediana 5,6 ms, maksimum 675,9 ms. To pomiar pojedynczej sesji lokalnej.
+- PLAN-003: dodano lokalny import tekstowej listy SHA-256, ograniczony do 20 MiB/250 000 wpisów, z walidacją i atomową podmianą. Ręczny skan pliku pokazuje dopasowanie, brak dopasowania lub brak listy; brak dopasowania nie jest werdyktem bezpieczeństwa, a źródło listy nie jest uwierzytelniane. Testy .NET 4/4 oraz Engine IPC dla syntetycznego pliku PASS; UI lint i produkcyjny build PASS.
+- Kandydat 0.15.12: `check-product`, pełny zestaw .NET 163/163, Engine IPC import/dopasowanie, UI lint/build i ponownie przebudowany lokalny installer self-test PASS. EXE 279295353 B, SHA-256 `E35ED5617C1D061694A021ECCED5092F0139134015B718AFB9972A2BB01E6FE9`; wydanie GitHub nieopublikowane.
 
 ## W trakcie / zablokowane
 
@@ -62,5 +64,5 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## Następny konkretny krok
 
-Wykonać fizyczny test braku miejsca na odizolowanym wolumenie i zweryfikować ACL rzeczywistej lokalizacji danych po instalacji. Następnie przejść do brakującej reputacji plików/feedu w PLAN-003. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
+Wykonać fizyczny test braku miejsca na odizolowanym wolumenie; zweryfikować ACL rzeczywistej lokalizacji danych po instalacji. Dalszy krok PLAN-003 wymaga audytowanego źródła/licencji hashy lub bezpiecznego feedu publicznego; nie dołączać niezweryfikowanej listy do produktu. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
 

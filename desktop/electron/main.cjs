@@ -39,6 +39,10 @@ app.whenReady().then(() => {
       const choice = await dialog.showOpenDialog(win, { properties: ['openFile'] });
       return choice.canceled ? null : call('file', { path: choice.filePaths[0] });
     }
+    if (method === 'chooseHashFeed') {
+      const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Lista hashy SHA-256', extensions: ['txt', 'sha256', 'list'] }] });
+      return choice.canceled ? null : call('fileHashFeedImport', { path: choice.filePaths[0] });
+    }
     if (method === 'chooseKnowledgeFile') {
       const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Dokumenty tekstowe', extensions: ['txt', 'md', 'docx'] }] });
       return choice.canceled ? null : call('knowledgeImport', { path: choice.filePaths[0] });
