@@ -111,9 +111,11 @@ public sealed class EnterpriseAgentLiveTlsTests
             // Keep the batch locally through an outage, restart the API on the same TLS identity,
             // then retry. The test client pins only this temporary leaf certificate in memory;
             // Windows certificate stores and system trust are never changed.
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(timeout.Token);
-            process.Dispose();
+            var stoppedProcess = process ?? throw new InvalidOperationException("Live TLS server was not started.");
+            stoppedProcess.Kill(entireProcessTree: true);
+            await stoppedProcess.WaitForExitAsync(timeout.Token);
+            stoppedProcess.Dispose();
+            process = null;
             var outage = await Assert.ThrowsAsync<HttpRequestException>(() => agent.SendEventsAsync(
                 EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token));
             Assert.NotNull(outage);
