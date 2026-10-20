@@ -63,7 +63,7 @@ public sealed class DownloadedFileMonitor : IDisposable
         this.maximumBaselineFiles = maximumBaselineFiles;
     }
 
-    public void SetEnabled(bool enabled)
+    public async Task SetEnabledAsync(LocalStore store, bool enabled, CancellationToken cancellationToken = default)
     {
         if (!enabled)
         {
@@ -72,6 +72,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             pending.Clear();
             baseline.Clear();
             Interlocked.Exchange(ref rescanCompletedVersion, Interlocked.Read(ref rescanRequestedVersion));
+            await store.ResetDownloadedFileMonitorSnapshotAsync(cancellationToken);
             State = "Monitoring pobranych plików wyłączony.";
             return;
         }
@@ -94,6 +95,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             };
             next.Created += OnFileChanged;
             next.Changed += OnFileChanged;
+            next.Deleted += OnFileChanged;
             next.Renamed += OnFileRenamed;
             next.Error += (_, _) =>
             {
@@ -102,17 +104,36 @@ public sealed class DownloadedFileMonitor : IDisposable
             };
             next.EnableRaisingEvents = true;
             watcher = next;
-            if (!CaptureBaseline())
+            var saved = await store.ReadDownloadedFileMonitorSnapshotAsync(cancellationToken);
+            if (!saved.Initialized)
             {
-                next.Dispose();
-                watcher = null;
-                baseline.Clear();
-                State = $"Monitoring pobranych plików niedostępny: nie można bezpiecznie ustalić stanu początkowego folderu (limit {maximumBaselineFiles} plików lub błąd odczytu).";
-                return;
+                if (!CaptureBaseline())
+                {
+                    next.Dispose(); watcher = null; baseline.Clear();
+                    State = $"Monitoring pobranych plików niedostępny: nie można bezpiecznie ustalić stanu początkowego folderu (limit {maximumBaselineFiles} plików lub błąd odczytu).";
+                    return;
+                }
+                await store.InitializeDownloadedFileMonitorSnapshotAsync(baseline.Select(item => ToStoredFingerprint(item.Key, item.Value)).ToArray(), maximumBaselineFiles, cancellationToken);
             }
-            State = $"Monitoring Downloads działa; pliki są sprawdzane lokalnie względem listy hashy. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
+            else
+            {
+                foreach (var item in saved.Files) baseline[item.Key] = new(item.Value.Length, item.Value.LastWriteTicks);
+                if (!CaptureCurrentPaths(out var currentPaths))
+                {
+                    next.Dispose(); watcher = null;
+                    State = $"Monitoring pobranych plików niedostępny: nie można wznowić baseline'u (limit {maximumBaselineFiles} ścieżek lub błąd odczytu).";
+                    return;
+                }
+                await store.PruneDownloadedFileMonitorSnapshotAsync(currentPaths, maximumBaselineFiles, cancellationToken);
+                var currentSet = new HashSet<string>(currentPaths, StringComparer.OrdinalIgnoreCase);
+                foreach (var stalePath in baseline.Keys.Where(path => !currentSet.Contains(path)).ToArray()) baseline.TryRemove(stalePath, out _);
+                Interlocked.Increment(ref rescanRequestedVersion);
+            }
+            State = saved.Initialized
+                ? $"Monitoring Downloads wznowiono z lokalnego baseline'u; zmiany od ostatniej sesji są sprawdzane. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}."
+                : $"Monitoring Downloads działa; pliki są sprawdzane lokalnie względem listy hashy. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or SqliteException or InvalidDataException)
         {
             next?.Dispose();
             State = "Monitoring pobranych plików niedostępny: " + exception.GetType().Name;
@@ -124,7 +145,6 @@ public sealed class DownloadedFileMonitor : IDisposable
         if (watcher is null) return 0;
         if (reputation.Status().HashCount == 0)
         {
-            pending.Clear();
             State = $"Monitoring Downloads działa; zaimportuj lokalną listę hashy, aby sprawdzać pliki. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
             return 0;
         }
@@ -140,11 +160,29 @@ public sealed class DownloadedFileMonitor : IDisposable
             try
             {
                 var info = new FileInfo(item.Key);
-                if (!info.Exists || !IsDirectChild(info.FullName)) continue;
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if (!IsDirectChild(info.FullName)) continue;
+                if (!info.Exists)
+                {
+                    await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
+                    baseline.TryRemove(info.FullName, out _);
+                    continue;
+                }
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
+                    baseline.TryRemove(info.FullName, out _);
+                    continue;
+                }
+                var fileFingerprint = Fingerprint(info);
+                if (baseline.TryGetValue(info.FullName, out var previousFingerprint) && previousFingerprint == fileFingerprint) continue;
+                if (!baseline.ContainsKey(info.FullName) && baseline.Count >= maximumBaselineFiles)
+                {
+                    StopAtBaselineLimit();
+                    break;
+                }
                 if (info.Length > MaximumFileBytes)
                 {
-                    if (!RememberBaseline(info.FullName, Fingerprint(info))) break;
+                    if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
                     continue;
                 }
                 if (info.Length > MaximumBytesPerSample - bytesScanned)
@@ -152,8 +190,6 @@ public sealed class DownloadedFileMonitor : IDisposable
                     pending[item.Key] = DateTimeOffset.UtcNow;
                     break;
                 }
-                var fileFingerprint = Fingerprint(info);
-                if (!RememberBaseline(info.FullName, fileFingerprint)) break;
                 var fingerprint = ToProcessedFingerprint(info.FullName, fileFingerprint);
                 if (processedFingerprints.ContainsKey(fingerprint)) continue;
 
@@ -174,6 +210,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                 var check = reputation.Check(hash);
                 if (!check.FeedImported || !check.Match)
                 {
+                    if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
                     RememberFingerprint(fingerprint);
                     continue;
                 }
@@ -183,7 +220,8 @@ public sealed class DownloadedFileMonitor : IDisposable
                     "Sprawdź pochodzenie pliku i źródło listy. Dopasowanie nie jest automatycznym werdyktem zagrożenia.",
                     EventStatus.New, EventId: Guid.NewGuid(), Source: "downloads-local-hash",
                     RuleVersion: ThreatAnalysisEngine.RulesVersion);
-                await store.AddLocalOnlyAsync(itemEvent, cancellationToken);
+                await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), itemEvent, cancellationToken);
+                baseline[info.FullName] = fileFingerprint;
                 RememberFingerprint(fingerprint);
                 detections++;
             }
@@ -191,6 +229,12 @@ public sealed class DownloadedFileMonitor : IDisposable
             {
                 if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
                 State = "Nie można zapisać wykrycia z Downloads: historia osiągnęła limit lub brakuje miejsca; zdarzenie zostanie ponowione.";
+            }
+            catch (SqliteException)
+            {
+                if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
+                Interlocked.Increment(ref rescanRequestedVersion);
+                State = "Nie można zapisać stanu skanu Downloads; ponowię sprawdzenie.";
             }
             catch (IOException)
             {
@@ -224,6 +268,24 @@ public sealed class DownloadedFileMonitor : IDisposable
         }
     }
 
+    private bool CaptureCurrentPaths(out string[] paths)
+    {
+        var collected = new List<string>();
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+            {
+                var info = new FileInfo(path);
+                if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                if (collected.Count >= maximumBaselineFiles) { paths = []; return false; }
+                collected.Add(info.FullName);
+            }
+            paths = collected.ToArray(); return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        { paths = []; return false; }
+    }
+
     private void ReconcileIfNeeded(CancellationToken cancellationToken)
     {
         var requestedVersion = Interlocked.Read(ref rescanRequestedVersion);
@@ -243,17 +305,13 @@ public sealed class DownloadedFileMonitor : IDisposable
                 if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0 || info.Length > MaximumFileBytes) continue;
                 var fingerprint = Fingerprint(info);
                 if (baseline.TryGetValue(info.FullName, out var previous) && previous == fingerprint) continue;
-                if (processedFingerprints.ContainsKey(ToProcessedFingerprint(info.FullName, fingerprint)))
-                {
-                    if (!RememberBaseline(info.FullName, fingerprint)) return;
-                    continue;
-                }
+                if (processedFingerprints.ContainsKey(ToProcessedFingerprint(info.FullName, fingerprint))) continue;
+                if (pending.ContainsKey(info.FullName)) continue;
                 lock (pendingGate)
                 {
                     if (!pending.ContainsKey(info.FullName) && pending.Count >= maximumPendingFiles) return;
                     pending[info.FullName] = DateTimeOffset.UtcNow;
                 }
-                if (!RememberBaseline(info.FullName, fingerprint)) return;
             }
             Interlocked.Exchange(ref rescanCompletedVersion, requestedVersion);
             State = $"Monitoring Downloads działa; ponowne sprawdzenie katalogu odtworzyło zmiany po przepełnieniu kolejki. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
@@ -266,19 +324,26 @@ public sealed class DownloadedFileMonitor : IDisposable
 
     private static FileFingerprint Fingerprint(FileInfo info) => new(info.Length, info.LastWriteTimeUtc.Ticks);
 
-    private bool RememberBaseline(string path, FileFingerprint fingerprint)
+    private async Task<bool> CommitBaselineAsync(LocalStore store, string path, FileFingerprint fingerprint, CancellationToken cancellationToken)
     {
-        if (baseline.ContainsKey(path) || baseline.Count < maximumBaselineFiles)
+        if (!baseline.ContainsKey(path) && baseline.Count >= maximumBaselineFiles)
         {
-            baseline[path] = fingerprint;
-            return true;
+            StopAtBaselineLimit();
+            return false;
         }
-        watcher?.Dispose();
-        watcher = null;
-        pending.Clear();
-        State = $"Monitoring Downloads zatrzymano: osiągnięto limit {maximumBaselineFiles} ścieżek stanu; zmniejsz lub wyczyść katalog i włącz monitor ponownie.";
-        return false;
+        await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(path, fingerprint), ct: cancellationToken);
+        baseline[path] = fingerprint;
+        return true;
     }
+
+    private void StopAtBaselineLimit()
+    {
+        watcher?.Dispose(); watcher = null; pending.Clear();
+        State = $"Monitoring Downloads zatrzymano: osiągnięto limit {maximumBaselineFiles} ścieżek stanu; zmniejsz lub wyczyść katalog i włącz monitor ponownie.";
+    }
+
+    private static DownloadFileFingerprint ToStoredFingerprint(string path, FileFingerprint fingerprint) =>
+        new(Path.GetFullPath(path), fingerprint.Length, fingerprint.LastWriteTicks);
 
     private static string ToProcessedFingerprint(string path, FileFingerprint fingerprint) =>
         $"{path}\0{fingerprint.Length}\0{fingerprint.LastWriteTicks}";
@@ -291,7 +356,11 @@ public sealed class DownloadedFileMonitor : IDisposable
     }
 
     private void OnFileChanged(object sender, FileSystemEventArgs args) => Queue(args.FullPath);
-    private void OnFileRenamed(object sender, RenamedEventArgs args) => Queue(args.FullPath);
+    private void OnFileRenamed(object sender, RenamedEventArgs args)
+    {
+        Queue(args.OldFullPath);
+        Queue(args.FullPath);
+    }
 
     private void Queue(string path)
     {

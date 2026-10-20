@@ -338,6 +338,22 @@ public sealed class StoreTests : IDisposable
     [Fact] public async Task CorruptDatabaseFailsWithoutReset() { Directory.CreateDirectory(dir); var path=Path.Combine(dir,"sentinel.db"); await File.WriteAllTextAsync(path,"not a sqlite database"); var s=new LocalStore(dir); await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(()=>s.InitializeAsync()); Assert.Equal("not a sqlite database",await File.ReadAllTextAsync(path)); }
     [Fact] public void FileInsteadOfDirectoryFails() { Directory.CreateDirectory(dir); var p=Path.Combine(dir,"file"); File.WriteAllText(p,"x"); Assert.Throws<IOException>(()=>new LocalStore(p)); }
     [Fact] public async Task MigrationIsRepeatableAndFutureSchemaRejected() { var s = await Store(); await s.AddAsync(Event()); await s.InitializeAsync(); var item=Assert.Single(await s.ReadAsync()); Assert.NotEqual(Guid.Empty,item.EventId); await using var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"); await c.OpenAsync(); using var cmd=c.CreateCommand(); cmd.CommandText="PRAGMA user_version=99"; await cmd.ExecuteNonQueryAsync(); await Assert.ThrowsAsync<InvalidDataException>(()=>s.InitializeAsync()); }
+    [Fact] public async Task VersionEightDatabaseMigratesToPersistentDownloadsBaselineWithoutLosingHistory()
+    {
+        var store = await Store(); await store.AddAsync(Event());
+        await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var command = c.CreateCommand();
+            command.CommandText = "DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; PRAGMA user_version=8;";
+            await command.ExecuteNonQueryAsync();
+        }
+        await store.InitializeAsync();
+        Assert.Single(await store.ReadAsync());
+        Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
+        await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(9L, (long)(await version.ExecuteScalarAsync())!);
+    }
     [Fact] public async Task MonitoringSettingsSurviveReopening()
     {
         var s = await Store();

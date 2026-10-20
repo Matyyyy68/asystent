@@ -50,7 +50,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 8) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 9) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -66,6 +66,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             CREATE TABLE IF NOT EXISTS process_snapshot(process_id INTEGER PRIMARY KEY CHECK(process_id BETWEEN 0 AND 2147483647), process_name TEXT NOT NULL CHECK(length(process_name) BETWEEN 1 AND 260));
             CREATE TABLE IF NOT EXISTS process_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)));
             INSERT OR IGNORE INTO process_monitor_metadata(id,initialized) VALUES(1,0);
+            CREATE TABLE IF NOT EXISTS downloaded_file_snapshot(path TEXT PRIMARY KEY COLLATE NOCASE, length INTEGER NOT NULL CHECK(length>=0), last_write_ticks INTEGER NOT NULL CHECK(last_write_ticks>=0));
+            CREATE TABLE IF NOT EXISTS downloaded_file_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)));
+            INSERT OR IGNORE INTO downloaded_file_monitor_metadata(id,initialized) VALUES(1,0);
             INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
             COMMIT;
             """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
@@ -94,6 +97,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=7; COMMIT;", ct);
         if (v < 8)
             await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=8; COMMIT;", ct);
+        if (v < 9)
+            await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=9; COMMIT;", ct);
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -241,6 +246,102 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             await initialized.ExecuteNonQueryAsync(ct);
         }
         await transaction.CommitAsync(ct);
+    }
+    public async Task<DownloadMonitorSnapshot> ReadDownloadedFileMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized FROM downloaded_file_monitor_metadata WHERE id=1";
+        var initialized = Convert.ToInt32(await metadata.ExecuteScalarAsync(ct) ?? 0, CultureInfo.InvariantCulture) == 1;
+        using var query = c.CreateCommand(); query.CommandText = "SELECT path,length,last_write_ticks FROM downloaded_file_snapshot ORDER BY path LIMIT 100000";
+        using var reader = await query.ExecuteReaderAsync(ct); var files = new Dictionary<string, DownloadFileFingerprint>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(ct))
+        {
+            var path = reader.GetString(0); var length = reader.GetInt64(1); var ticks = reader.GetInt64(2);
+            if (path.Length is 0 or > 32767 || length < 0 || ticks < 0) throw new InvalidDataException("Nieprawidłowy baseline monitoringu Downloads.");
+            files[path] = new(path, length, ticks);
+        }
+        return new(initialized, files);
+    }
+    public async Task InitializeDownloadedFileMonitorSnapshotAsync(IReadOnlyCollection<DownloadFileFingerprint> files,
+        int maximumFiles = 100_000, CancellationToken ct = default)
+    {
+        ValidateDownloadedFiles(files, maximumFiles);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var clear = c.CreateCommand()) { clear.Transaction = transaction; clear.CommandText = "DELETE FROM downloaded_file_snapshot"; await clear.ExecuteNonQueryAsync(ct); }
+        foreach (var file in files)
+            await UpsertDownloadedFileAsync(c, transaction, file, ct);
+        using (var initialized = c.CreateCommand())
+        {
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE downloaded_file_monitor_metadata SET initialized=1 WHERE id=1";
+            await initialized.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task PruneDownloadedFileMonitorSnapshotAsync(IReadOnlyCollection<string> currentPaths, int maximumFiles = 100_000, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(currentPaths);
+        if (currentPaths.Count > maximumFiles || currentPaths.Any(path => string.IsNullOrWhiteSpace(path) || path.Length > 32767 || !Path.IsPathFullyQualified(path)))
+            throw new ArgumentOutOfRangeException(nameof(currentPaths), "Nieprawidłowa lub zbyt duża migawka Downloads.");
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var create = c.CreateCommand()) { create.Transaction = transaction; create.CommandText = "CREATE TEMP TABLE current_download_paths(path TEXT PRIMARY KEY COLLATE NOCASE)"; await create.ExecuteNonQueryAsync(ct); }
+        foreach (var path in currentPaths)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction; insert.CommandText = "INSERT OR IGNORE INTO current_download_paths(path) VALUES($path)";
+            insert.Parameters.AddWithValue("$path", Path.GetFullPath(path)); await insert.ExecuteNonQueryAsync(ct);
+        }
+        using (var prune = c.CreateCommand())
+        {
+            prune.Transaction = transaction; prune.CommandText = "DELETE FROM downloaded_file_snapshot WHERE NOT EXISTS (SELECT 1 FROM current_download_paths current WHERE current.path=downloaded_file_snapshot.path)";
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task CommitDownloadedFileMonitorResultAsync(DownloadFileFingerprint file, SecurityEvent? detectedEvent = null, CancellationToken ct = default)
+    {
+        ValidateDownloadedFile(file);
+        var metadata = detectedEvent is null ? default : ValidateEvent(detectedEvent);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        if (detectedEvent is not null)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName)";
+            AddEventParameters(insert, detectedEvent, metadata.EventId, metadata.Source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        await UpsertDownloadedFileAsync(c, transaction, file, ct);
+        await transaction.CommitAsync(ct);
+    }
+    public async Task RemoveDownloadedFileMonitorPathAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 32767 || !Path.IsPathFullyQualified(path)) return;
+        await using var c = await Open(ct);
+        await Execute(c, "DELETE FROM downloaded_file_snapshot WHERE path=$path", ct, ("$path", Path.GetFullPath(path)));
+    }
+    public async Task ResetDownloadedFileMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "DELETE FROM downloaded_file_snapshot; UPDATE downloaded_file_monitor_metadata SET initialized=0 WHERE id=1";
+        await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    private static void ValidateDownloadedFiles(IReadOnlyCollection<DownloadFileFingerprint> files, int maximumFiles)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        if (maximumFiles < 1 || files.Count > maximumFiles) throw new ArgumentOutOfRangeException(nameof(files), "Przekroczono limit baseline'u Downloads.");
+        foreach (var file in files) ValidateDownloadedFile(file);
+        if (files.Select(file => file.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != files.Count)
+            throw new ArgumentException("Migawka Downloads zawiera powtórzone ścieżki.", nameof(files));
+    }
+    private static void ValidateDownloadedFile(DownloadFileFingerprint file)
+    {
+        if (string.IsNullOrWhiteSpace(file.Path) || file.Path.Length > 32767 || !Path.IsPathFullyQualified(file.Path) || file.Length < 0 || file.LastWriteTicks < 0)
+            throw new ArgumentException("Nieprawidłowy wpis baseline'u Downloads.", nameof(file));
+    }
+    private static async Task UpsertDownloadedFileAsync(SqliteConnection c, SqliteTransaction transaction, DownloadFileFingerprint file, CancellationToken ct)
+    {
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT INTO downloaded_file_snapshot(path,length,last_write_ticks) VALUES($path,$length,$ticks) ON CONFLICT(path) DO UPDATE SET length=excluded.length,last_write_ticks=excluded.last_write_ticks";
+        command.Parameters.AddWithValue("$path", Path.GetFullPath(file.Path)); command.Parameters.AddWithValue("$length", file.Length); command.Parameters.AddWithValue("$ticks", file.LastWriteTicks);
+        await command.ExecuteNonQueryAsync(ct);
     }
     /// <summary>Atomically records monitor events and advances the persisted endpoint baseline.</summary>
     public async Task CommitNetworkMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
@@ -505,7 +606,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             var backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8))
+            if (backupVersion is not (6 or 7 or 8 or 9))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -513,7 +614,11 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 : backupVersion == 7
                     ? "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata')"
                     : "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
-            var expectedTables = backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            if (backupVersion == 9)
+            {
+                required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata')";
+            }
+            var expectedTables = backupVersion == 9 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";

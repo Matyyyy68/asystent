@@ -4,6 +4,12 @@
 
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
+## 0.15.23 — prerelease (2026-10-20)
+
+- Monitoring Downloads zapisuje lokalny baseline ścieżek, rozmiarów i czasów modyfikacji. Po restarcie silnika porównuje pliki z ostatnim stanem i wykrywa nowe lub zmienione pliki; wyłączenie i pauza czyszczą baseline. Wykrycie i postęp baseline'u zapisują się atomowo. Migracja SQLite v9 zachowuje dotychczasową historię.
+- UI jawnie informuje, że ścieżki baseline'u są przechowywane lokalnie bez szyfrowania.
+- Testy .NET 183/183, Engine IPC, desktop lint/build i website test/lint/build PASS. Pełny Windows build-user z instalatorem i self-testem PASS. Lokalny instalator 279335801 B, SHA-256 `DCEF8FA77BB4BD5AF9A6AFDC965221ADFE92DCC86F4DF4DBAB27E1F336F800ED`. GitHub CI, publikacja release i Pages pozostają do sprawdzenia po pushu.
+
 ## 0.15.22 — prerelease (2026-10-20)
 
 - Dodano redagowany pakiet diagnostyczny JSON do pomocy technicznej. Zawiera wersje OS/runtime, stany monitorów, ustawienia nieidentyfikujące i metryki baz, bez historii zdarzeń, treści, URL-i, ścieżek i nazw procesów.

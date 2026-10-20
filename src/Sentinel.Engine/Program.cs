@@ -30,7 +30,7 @@ var downloadsDirectory = Environment.GetEnvironmentVariable("SENTINEL_DOWNLOADS_
     DownloadedFileMonitor.GetKnownDownloadsDirectory();
 using var downloadedFileMonitor = new DownloadedFileMonitor(downloadsDirectory);
 var settings = await store.LoadSettingsAsync();
-downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
+await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);
 var defaultExcludedApplications = settings.ExcludedApplications;
 await store.ApplyRetentionAsync(settings.RetentionDays);
 var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
@@ -214,7 +214,6 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
                 var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
                     settings.ExcludedApplications);
-                downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
                 var downloadedFileMatches = await downloadedFileMonitor.CollectAsync(store, fileHashReputation);
                 if (settings.Paused) dnsState = "Obserwacja wstrzymana";
                 else if (OperatingSystem.IsWindows() && (lastDnsAttempt is not { } previousDnsAttempt || DateTimeOffset.UtcNow - previousDnsAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
@@ -381,7 +380,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var pausedSettings = settings with { Paused = request.GetProperty("paused").GetBoolean() };
                 await store.SaveSettingsAsync(pausedSettings);
                 settings = pausedSettings;
-                downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
+                await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);
                 result = settings;
                 break;
             case "settings":
@@ -392,7 +391,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     MonitorDownloadedFiles = request.TryGetProperty("monitorDownloadedFiles", out var monitorDownloads) ? monitorDownloads.GetBoolean() : settings.MonitorDownloadedFiles };
                 await store.SaveSettingsAsync(updatedSettings);
                 settings = updatedSettings;
-                downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
+                await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);
                 await store.ApplyRetentionAsync(settings.RetentionDays);
                 result = settings;
                 break;
