@@ -1,8 +1,8 @@
 # CHANGELOG
-## 0.15.36 — kandydat (2026-10-20)
+## 0.15.36 — prerelease (2026-10-20)
 
 - Rozszerzenie MV3 nie traci już celu, wskaźników i działań ostrzeżenia po uśpieniu service workera: stan tokenu jest przechowywany w `chrome.storage.session`, wygasa po 10 minutach i jest usuwany po zamknięciu karty lub kontynuowaniu nawigacji. Dane pozostają ograniczone do sesji przeglądarki.
-- Dodano regresyjny test restartu workera, odzyskania szczegółów i przycisków oraz odrzucania nieważnych i wygasłych tokenów; wymagane minimum Chrome to 102 (Edge Chromium od tej samej generacji). .NET 198/198, desktop Node tests 6/6, desktop UI build, website test/lint/build, check-product, engine IPC i lokalny installer build/self-test PASS. Lokalny instalator: 279356281 B, SHA-256 `49F014D0CF0A4274E13ECE0D55603A69D112A9DF3F1795B2DC637065162FF957`. Windows CI, test rzeczywistej nawigacji Chrome/Edge i publikacja jeszcze nie wykonane.
+- Dodano regresyjny test restartu workera, odzyskania szczegółów i przycisków oraz odrzucania nieważnych i wygasłych tokenów; wymagane minimum Chrome to 102 (Edge Chromium od tej samej generacji). .NET 198/198, desktop Node tests 6/6, desktop UI build, website test/lint/build, check-product i engine IPC PASS. Windows CI `39484829750`, website Pages `39484829812` i installer build/self-test/release `39484833324` PASS. [GitHub Release v0.15.36](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.36) udostępnia instalator 262555765 B, SHA-256 `7E7DE0CC609140485DCE3DEBDF09E43348B86FF3FF3C07467A3B6EC95949DC88` i sidecar `.sha256`. Lokalny instalator 279356281 B, SHA-256 `49F014D0CF0A4274E13ECE0D55603A69D112A9DF3F1795B2DC637065162FF957`. Rzeczywista nawigacja Chrome/Edge nadal niezweryfikowana.
 
 ## 0.15.35 — prerelease (2026-10-20)
 
