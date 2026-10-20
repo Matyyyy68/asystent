@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Windows-specific tests now use xUnit discovery-time skip attributes. A runner without a usable current-user DPAPI profile reports the two DPAPI-dependent checks as skipped instead of failed at execution time; ACL coverage still runs on Windows. Validation in this non-interactive session: .NET 201 passed / 2 skipped, desktop tests 6/6, Engine IPC and self-contained Engine/UrlHost publish PASS, desktop production build PASS. The aggregate build script stopped at the UI build because sandboxed esbuild could not read the parent directory; the same UI build passed with approved filesystem access.
 - Rozszerzono izolowany self-test instalatora o aktualizację istniejącego katalogu, zachowanie plików spoza payloadu i rollback po anulowaniu po zamianie katalogów. Test sprawdza też, że anulowanie loguje etap transakcji, a nie ekstrakcji.
 - Instalator wstępnie wybiera teraz zarejestrowaną lokalizację Sentinel AI, jeśli znajduje się ona w profilu użytkownika; test odrzuca lokalizację systemową.
 - Dodano ręczną rotację poświadczenia Enterprise z potwierdzeniem użytkownika, ochroną DPAPI i blokadą komunikacji po cofnięciu zgody.

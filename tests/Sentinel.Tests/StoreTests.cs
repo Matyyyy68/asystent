@@ -3,6 +3,7 @@ using Sentinel.Core.Enterprise;
 using Microsoft.Data.Sqlite;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Runtime.Versioning;
 using Xunit;
 namespace Sentinel.Tests;
 public sealed class StoreTests : IDisposable
@@ -163,11 +164,10 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(32, ids.Distinct().Count());
         Assert.Equal(32, events.Select(item => item.EventId).Distinct().Count());
     }
-    [Fact]
+    [WindowsFact]
+    [SupportedOSPlatform("windows")]
     public async Task HistoryStoreFailsClosedWhenCurrentUserCannotCreateFilesInDirectory()
     {
-        if (!OperatingSystem.IsWindows())
-            throw Xunit.Sdk.SkipException.ForSkip("The filesystem ACL integration test requires Windows.");
         Directory.CreateDirectory(dir);
         var directory = new DirectoryInfo(dir);
         var originalAcl = FileSystemAclExtensions.GetAccessControl(directory);

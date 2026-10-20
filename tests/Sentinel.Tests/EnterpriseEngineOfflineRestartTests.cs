@@ -11,11 +11,9 @@ namespace Sentinel.Tests;
 
 public sealed class EnterpriseEngineOfflineRestartTests
 {
-    [Fact]
+    [WindowsDpapiFact]
     public async Task EnterpriseQueueSurvivesEngineRestartWhileOfflineAndConsentStopsRetry()
     {
-        if (!OperatingSystem.IsWindows())
-            throw Xunit.Sdk.SkipException.ForSkip("The active Engine DPAPI integration test requires Windows.");
         var repository = FindRepositoryRoot();
         var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Release";
         var engineDll = Path.Combine(repository, "src", "Sentinel.Engine", "bin", configuration, "net10.0", "Sentinel.Engine.dll");
@@ -79,10 +77,6 @@ public sealed class EnterpriseEngineOfflineRestartTests
                 Assert.False(finalEnterprise.GetProperty("sharingMetadata").GetBoolean());
                 Assert.Equal(0, finalEnterprise.GetProperty("queuedEvents").GetInt32());
             }
-        }
-        catch (System.Security.Cryptography.CryptographicException ex) when (ex.Message.Contains("error 2", StringComparison.OrdinalIgnoreCase))
-        {
-            throw Xunit.Sdk.SkipException.ForSkip("Windows DPAPI requires an interactive user profile; this runner cannot exercise the Engine credential store.");
         }
         finally
         {
