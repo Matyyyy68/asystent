@@ -106,10 +106,10 @@ public sealed class EnterpriseAgentLiveTlsTests
             Assert.Equal(0, replayedBatch.Accepted);
             Assert.Equal(1, replayedBatch.Duplicates);
 
-            var rotatedToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-            await agent.RotateCredentialAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, rotatedToken, timeout.Token);
-            // Rotation is staged: the current token remains valid until the candidate proves possession.
-            await agent.SendHeartbeatAsync(EnterpriseAgentClient.ValidateServer(server), rotatedToken, cancellationToken: timeout.Token);
+            var credentialStore = new InMemoryCredentialStore(enrollment.DeviceToken);
+            await new EnterpriseCredentialRotator(agent, credentialStore).RotateAsync(EnterpriseAgentClient.ValidateServer(server), timeout.Token);
+            var rotatedToken = credentialStore.Value!;
+            // The rotator promotes its staged candidate on first use; the previous credential must then fail.
             var retiredCredential = await Assert.ThrowsAsync<HttpRequestException>(() => agent.SendHeartbeatAsync(
                 EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, cancellationToken: timeout.Token));
             Assert.Equal(HttpStatusCode.Unauthorized, retiredCredential.StatusCode);
@@ -173,6 +173,14 @@ public sealed class EnterpriseAgentLiveTlsTests
         Assert.True(response.StatusCode == expected,
             $"{method} {path}: expected {(int)expected}, received {(int)response.StatusCode}. {content}");
         return string.IsNullOrWhiteSpace(content) ? null : JsonNode.Parse(content);
+    }
+
+    private sealed class InMemoryCredentialStore(string? value) : IDeviceCredentialStore
+    {
+        public string? Value { get; private set; } = value;
+        public Task<string?> ReadAsync(CancellationToken cancellationToken = default) => Task.FromResult(Value);
+        public Task WriteAsync(string token, CancellationToken cancellationToken = default) { Value = token; return Task.CompletedTask; }
+        public Task DeleteAsync(CancellationToken cancellationToken = default) { Value = null; return Task.CompletedTask; }
     }
 
     private static string FindRepositoryRoot()

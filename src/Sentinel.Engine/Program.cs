@@ -49,6 +49,7 @@ var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
 var deduplicator = new NotificationDeduplicator();
 using var enterpriseHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
 var enterpriseAgent = new EnterpriseAgentClient(enterpriseHttpClient);
+var enterpriseCredentialRotator = new EnterpriseCredentialRotator(enterpriseAgent, deviceCredentials);
 DateTimeOffset? lastEnterpriseSyncAttempt = null;
 DateTimeOffset? lastEnterpriseSync = null;
 string? enterpriseError = null;
@@ -385,6 +386,16 @@ while (await Console.In.ReadLineAsync() is { } line)
                 result = new { sharingMetadata = shareMetadata, queuedEvents = await store.CountPendingEnterpriseEventsAsync() };
                 break;
             case "enterpriseSync": result = await SyncEnterpriseAsync(force: true); break;
+            case "enterpriseRotateCredential":
+                if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Poświadczenia Enterprise wymagają Windows DPAPI.");
+                if (installationProfile.Variant != ProductVariant.EnterpriseClient || installationProfile.EnterpriseServerUri is null)
+                    throw new InvalidOperationException("Najpierw sparuj urządzenie z serwerem Enterprise.");
+                if (!installationProfile.ShareSecurityMetadata)
+                    throw new InvalidOperationException("Wznów komunikację Enterprise za zgodą, aby odnowić poświadczenie.");
+                await enterpriseCredentialRotator.RotateAsync(EnterpriseAgentClient.ValidateServer(installationProfile.EnterpriseServerUri));
+                lastEnterpriseSyncAttempt = null;
+                result = new { rotated = true };
+                break;
             case "pause":
                 var pausedSettings = settings with { Paused = request.GetProperty("paused").GetBoolean() };
                 await store.SaveSettingsAsync(pausedSettings);
