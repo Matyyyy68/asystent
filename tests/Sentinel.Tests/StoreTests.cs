@@ -330,7 +330,8 @@ public sealed class StoreTests : IDisposable
         var s = await Store();
         var settings = new AppSettings(Paused: false, MinimumIntervalSeconds: 25,
             ExcludedApplications: "example;private", ExcludedWindowTitles: "sekret",
-            ExcludeBrowsers: true, ExcludeMessaging: true, CollectStaticText: false, MonitorForegroundChanges: true);
+            ExcludeBrowsers: true, ExcludeMessaging: true, CollectStaticText: false, MonitorForegroundChanges: true,
+            MonitorDownloadedFiles: true);
         await s.SaveSettingsAsync(settings);
         Assert.Equal(settings, await (await Store()).LoadSettingsAsync());
     }
@@ -345,6 +346,7 @@ public sealed class StoreTests : IDisposable
         var settings = await s.LoadSettingsAsync();
         Assert.True(settings.Paused); Assert.False(settings.MonitorForegroundChanges);
         Assert.False(settings.MonitorNetworkConnections);
+        Assert.False(settings.MonitorDownloadedFiles);
         Assert.Equal(10, settings.MinimumIntervalSeconds); Assert.Contains("bitwarden",settings.ExcludedApplications);
     }
     [Theory] [InlineData(0)] [InlineData(301)]

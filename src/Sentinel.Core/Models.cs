@@ -22,7 +22,8 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     int LocalAITimeoutSeconds = 30,
     bool StartWithWindows = false,
     int DnsPollIntervalSeconds = 15,
-    bool MonitorNetworkConnections = false);
+    bool MonitorNetworkConnections = false,
+    bool MonitorDownloadedFiles = false);
 public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys);
 public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes);
 public interface IEventRepository

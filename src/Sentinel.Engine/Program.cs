@@ -26,7 +26,11 @@ var malwareBazaar = new MalwareBazaarClient(malwareBazaarHttpClient);
 var knowledge = new LocalKnowledgeBase(directory);
 await knowledge.InitializeAsync();
 if (!File.Exists(pointer)) await File.WriteAllTextAsync(pointer, directory);
+var downloadsDirectory = Environment.GetEnvironmentVariable("SENTINEL_DOWNLOADS_PATH") ??
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+using var downloadedFileMonitor = new DownloadedFileMonitor(downloadsDirectory);
 var settings = await store.LoadSettingsAsync();
+downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
 var defaultExcludedApplications = settings.ExcludedApplications;
 await store.ApplyRetentionAsync(settings.RetentionDays);
 var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
@@ -199,6 +203,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
+                    downloadedFiles = downloadedFileMonitor.State,
                     browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
@@ -209,6 +214,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
                 var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
                     settings.ExcludedApplications);
+                downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
+                var downloadedFileMatches = await downloadedFileMonitor.CollectAsync(store, fileHashReputation);
                 if (settings.Paused) dnsState = "Obserwacja wstrzymana";
                 else if (OperatingSystem.IsWindows() && (lastDnsAttempt is not { } previousDnsAttempt || DateTimeOffset.UtcNow - previousDnsAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
                 {
@@ -254,7 +261,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
                     ? await SyncEnterpriseAsync(force: false) : null;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState,
-                    processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State, enterpriseSync };
+                    processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
+                    downloadedFileMatches, downloadedFiles = downloadedFileMonitor.State, enterpriseSync };
                 break;
             case "history": result = await store.ReadAsync(); break;
             case "eventStatus":
@@ -350,15 +358,18 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var pausedSettings = settings with { Paused = request.GetProperty("paused").GetBoolean() };
                 await store.SaveSettingsAsync(pausedSettings);
                 settings = pausedSettings;
+                downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
                 result = settings;
                 break;
             case "settings":
                 var updatedSettings = settings with { RetentionDays = request.GetProperty("retentionDays").GetInt32(),
                     Notifications = request.GetProperty("notifications").GetBoolean(),
                     DnsPollIntervalSeconds = request.TryGetProperty("dnsPollIntervalSeconds", out var interval) ? interval.GetInt32() : settings.DnsPollIntervalSeconds,
-                    MonitorNetworkConnections = request.TryGetProperty("monitorNetworkConnections", out var monitorNetwork) ? monitorNetwork.GetBoolean() : settings.MonitorNetworkConnections };
+                    MonitorNetworkConnections = request.TryGetProperty("monitorNetworkConnections", out var monitorNetwork) ? monitorNetwork.GetBoolean() : settings.MonitorNetworkConnections,
+                    MonitorDownloadedFiles = request.TryGetProperty("monitorDownloadedFiles", out var monitorDownloads) ? monitorDownloads.GetBoolean() : settings.MonitorDownloadedFiles };
                 await store.SaveSettingsAsync(updatedSettings);
                 settings = updatedSettings;
+                downloadedFileMonitor.SetEnabled(settings.MonitorDownloadedFiles && !settings.Paused);
                 await store.ApplyRetentionAsync(settings.RetentionDays);
                 result = settings;
                 break;

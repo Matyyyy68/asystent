@@ -4,6 +4,11 @@
 
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
+## 0.15.17 — prerelease (2026-10-20)
+
+- Dodano domyślnie wyłączony watcher Downloads. Po opt-in sprawdza wyłącznie nowe pliki w głównym katalogu Downloads i wyłącznie względem lokalnej listy SHA-256. Nie wysyła pliku ani hasha do sieci; zapisuje lokalne zdarzenie tylko przy dopasowaniu. Pauza zatrzymuje watcher.
+- Watcher ogranicza kolejkę i liczbę plików na próbkę, pomija symlinki/reparse points i pliki ponad 256 MiB, czeka na ustanie zmian pliku oraz respektuje wyłączenie opcji. Pełny GUI/product validation i release CI są w trakcie.
+
 ## 0.15.16 — prerelease (2026-10-20)
 
 - Baseline procesów jest przechowywany w SQLite v8 i aktualizowany atomowo ze zdarzeniami. Restart silnika pozwala wykryć różnice od ostatniej próbki; pauza przesuwa baseline bez generowania alertów, a wykluczone aplikacje nie są zapisywane w baseline.

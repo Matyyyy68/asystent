@@ -9,8 +9,9 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = mkdtempSync(path.join(tmpdir(), 'sentinel-engine-test-'));
+const downloadsDirectory = path.join(root, 'Downloads'); mkdirSync(downloadsDirectory);
 const child = spawn(path.resolve('artifacts/engine/Sentinel.Engine.exe'), [], { windowsHide: true,
-  env: { ...process.env, SENTINEL_DATA_ROOT: root }, stdio: ['pipe','pipe','inherit'] });
+  env: { ...process.env, SENTINEL_DATA_ROOT: root, SENTINEL_DOWNLOADS_PATH: downloadsDirectory }, stdio: ['pipe','pipe','inherit'] });
 const lines = createInterface({ input: child.stdout });
 const pending = new Map(); let id = 0;
 let ollamaServer, ollamaPayload, udpSocket, tcpMonitorServer, tcpMonitorClient;
@@ -27,6 +28,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.enterprise.variant, 'User');
   assert.equal(initialStatus.result.enterprise.paired, false);
   assert.equal(initialStatus.result.settings.monitorNetworkConnections, false, 'continuous TCP monitoring must default to off');
+  assert.equal(initialStatus.result.settings.monitorDownloadedFiles, false, 'Downloads monitoring must default to off');
   assert.equal((await call('malwareBazaarLookup', { sha256: 'a'.repeat(64), consent: false })).ok, false,
     'MalwareBazaar hash lookup must require explicit consent');
   assert.equal((await call('malwareBazaarConfigure', { apiKey: 'synthetic-test-key', consent: false })).ok, false,
@@ -75,6 +77,35 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   udpSocket = createSocket('udp4'); await new Promise(resolve => udpSocket.bind(0, '127.0.0.1', resolve));
   await call('pause', { paused: false });
   const warmup = await call('collect'); assert.equal(warmup.ok, true, warmup.error);
+  await call('settings', { retentionDays: 30, notifications: true, monitorDownloadedFiles: true });
+  const downloadedFixture = path.join(downloadsDirectory, 'synthetic-download.ps1');
+  writeFileSync(downloadedFixture, 'Write-Output synthetic');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  const downloadSample = await call('collect'); assert.equal(downloadSample.ok, true, downloadSample.error);
+  let downloadedHistory = (await call('history')).result;
+  assert.ok(downloadedHistory.some(event => event.source === 'downloads-local-hash' && event.application === 'synthetic-download.ps1'),
+    'opt-in Downloads monitor must record local hash-list matches without sending data to a service');
+  const oversizedDownload = path.join(downloadsDirectory, 'synthetic-oversized-download.bin'); writeFileSync(oversizedDownload, 'x');
+  truncateSync(oversizedDownload, 256 * 1024 * 1024 + 1);
+  mkdirSync(path.join(downloadsDirectory, 'nested'));
+  writeFileSync(path.join(downloadsDirectory, 'nested', 'synthetic-nested.ps1'), 'Write-Output synthetic');
+  await new Promise(resolve => setTimeout(resolve, 900)); await call('collect');
+  downloadedHistory = (await call('history')).result;
+  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 1,
+    'Downloads monitor must skip oversized files and subdirectories');
+  await call('pause', { paused: true });
+  writeFileSync(path.join(downloadsDirectory, 'synthetic-paused.ps1'), 'Write-Output synthetic');
+  await new Promise(resolve => setTimeout(resolve, 900)); await call('collect');
+  downloadedHistory = (await call('history')).result;
+  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 1,
+    'paused monitoring must not inspect or record downloaded files');
+  await call('pause', { paused: false });
+  await call('settings', { retentionDays: 30, notifications: true, monitorDownloadedFiles: false });
+  writeFileSync(path.join(downloadsDirectory, 'synthetic-disabled.ps1'), 'Write-Output synthetic');
+  await call('collect'); await new Promise(resolve => setTimeout(resolve, 900)); await call('collect');
+  downloadedHistory = (await call('history')).result;
+  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 1,
+    'disabled Downloads monitoring must stop processing new files');
   const snapshotStarted = performance.now();
   const connectionSnapshot = await call('connections'); assert.equal(connectionSnapshot.ok, true, connectionSnapshot.error);
   assert.ok(performance.now() - snapshotStarted < 5000, 'IP Helper connection snapshot exceeded 5 seconds');
