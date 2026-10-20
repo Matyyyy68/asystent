@@ -100,6 +100,27 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.False(processMonitor.WasRecentlyObservedStart(1234, clock.GetUtcNow().AddSeconds(61)));
     }
 
+    [Fact]
+    public async Task RecordsNewUdpLocalEndpointWithoutClaimingThatDatagramWasSent()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample =
+        [new("UDP", "192.0.2.10", 53_000, null, null, "Endpoint", 4321, "dns-client")];
+        var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        sample = sample.Append(new("UDP", "192.0.2.10", 53_001, null, null, "Endpoint", 4321, "dns-client")).ToArray();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zaobserwowano endpoint UDP", item.Category);
+        Assert.Equal("udp-endpoint-snapshot", item.Source);
+        Assert.Contains("nie potwierdza wysłania datagramu", item.Explanation);
+        Assert.Equal(RiskLevel.Information, item.Risk);
+    }
+
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
 
     private sealed class ManualTimeProvider(DateTimeOffset now) : TimeProvider

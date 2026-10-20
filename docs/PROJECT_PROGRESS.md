@@ -1,7 +1,7 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-20
-**Etap:** prerelease 0.15.13 opublikowane; kandydat 0.15.14 z ręcznym sprawdzaniem MalwareBazaar przechodzi lokalny build i self-test instalatora.
+**Etap:** prerelease 0.15.13 opublikowane; lokalny kandydat 0.15.14 zawiera ręczne sprawdzanie MalwareBazaar oraz historię pojawienia się lokalnych endpointów UDP w opt-in obserwacji.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest jeszcze w pełni zamknięty; 4 plany mają wdrożone i przetestowane etapy. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
@@ -51,7 +51,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 - Wydanie 0.15.13 naprawia testowo odtworzoną awarię ekstrakcji: `FileStream.Flush()` poprzedza weryfikację długości pliku. Self-test sprawdza `data-path.txt` i nagłówki SQLite `sentinel.db` oraz `knowledge.db`. Lokalny build/self-test PASS: 279296377 B, SHA-256 `3c9f9d84f515a2496bde98332ffd9171b27c1aa706e9642283c404bdece5b218`. Windows CI/release PASS: [v0.15.13](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.13), instalator 262496373 B, SHA-256 `25194a0f98fde84719bc6fcf565c8bce6269cf5932ab6163379f00420fe072fa`.
 - Najnowszy main dodatkowo przenosi izolowany self-test do unikalnych ścieżek pod `%LOCALAPPDATA%\Programs` i `%LOCALAPPDATA%`, bliższych ACL produkcyjnych. Osobny lokalny build z payloadem 0.15.13 i self-test PASS; oba katalogi usunięto. Ten test harness nie zmienia payloadu aplikacji i nie był częścią taga 0.15.13.
 - Powtórne testy aktualnego main przed lookupem: klient .NET 163/163, Enterprise API 19/19, Engine IPC PASS; desktop lint/build, website test/lint/build i `check-product` PASS. `npm audit --json` nie dotarł do npm registry; stan advisora i zakres zależności opisane niżej.
-- Kandydat 0.15.14 (unreleased): ręczny lookup MalwareBazaar wysyła tylko SHA-256 za zgodą użytkownika; Auth-Key chroni DPAPI. Oficjalny `scripts/build-user.ps1 -Installer` PASS: Release .NET 166/166, Engine i Native Host opublikowane do artefaktów, Engine IPC, desktop lint/build, self-test instalatora; serwer 19/19, `check-product`, website test/lint także PASS. Lokalny instalator 279303033 B, SHA-256 `A8F20E29E12617C07EC6FB685F236F6BEDDFD045AAB00E540EB7C8AD86B53F7C`; nie jest opublikowanym wydaniem. Test API z autoryzowanym kluczem pozostaje niewykonany. `npm audit` nadal nie łączy się z endpointem advisories; `npm ci` raportuje osiem umiarkowanych problemów w zależnościach.
+- Kandydat 0.15.14 (unreleased): ręczny lookup MalwareBazaar wysyła tylko SHA-256 za zgodą użytkownika; Auth-Key chroni DPAPI. Opt-in kolektor zapisuje też lokalne przyrosty endpointów UDP, bez twierdzenia, że endpoint potwierdza transfer. Pełny `scripts/build-user.ps1 -Installer` PASS: Release .NET 167/167, Engine i Native Host opublikowane do artefaktów, Engine IPC, UI build i autotest instalatora. Lokalny instalator 279304057 B, SHA-256 `A7D3E1534AFAAC4C1D1F876F227C91B34B8C2E528BA5AB1ED4C91ED92DEE4B85`; nie jest opublikowanym wydaniem. Test API z autoryzowanym kluczem pozostaje niewykonany. `npm audit` nadal nie łączy się z endpointem advisories; `npm ci` raportuje osiem umiarkowanych problemów w zależnościach.
 
 ## W trakcie / zablokowane
 

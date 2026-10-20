@@ -3,8 +3,9 @@
 ## Unreleased
 
 - Dodano opcjonalne, ręczne sprawdzanie SHA-256 w MalwareBazaar. Klucz jest chroniony DPAPI; zapytanie wymaga zgody i wysyła wyłącznie hash do stałego endpointu HTTPS. Nieznany hash nie jest oznaczany jako bezpieczny.
+- Opt-in obserwacja TCP zapisuje teraz także pojawienie się lokalnego endpointu UDP. Zdarzenie jasno informuje, że migawka endpointu nie dowodzi wysłania datagramu ani nie ujawnia zdalnego celu.
 - Odświeżono `docs/KNOWN-LIMITATIONS.md`: opisy aktywnego lokalnego AI, bazy wiedzy, skanowania plików i wydania instalatora odpowiadają aktualnemu kodowi oraz zakresowi testów.
-- Testy mock API sprawdzają stały host, pola hash-only, dopasowanie, no-results i odrzucenie niezgodnego hashy. Release .NET 166/166, Enterprise 19/19, Engine IPC, desktop lint/build i pełny `scripts/build-user.ps1 -Installer` z self-testem PASS. Lokalny kandydat `0.15.14` ma 279303033 B i SHA-256 `A8F20E29E12617C07EC6FB685F236F6BEDDFD045AAB00E540EB7C8AD86B53F7C`; nie jest opublikowany. Live API wymaga autoryzowanego klucza.
+- Testy mock API sprawdzają stały host, pola hash-only, dopasowanie, no-results i odrzucenie niezgodnego hashy. Test historii UDP przechodzi. Release .NET 167/167, Engine IPC oraz pełny `scripts/build-user.ps1 -Installer` z self-testem PASS. Lokalny kandydat `0.15.14` ma nowy build z obserwacją endpointów UDP; nie jest opublikowany. Live MalwareBazaar wymaga autoryzowanego klucza.
 
 ## 0.15.13 — prerelease (2026-10-20)
 
