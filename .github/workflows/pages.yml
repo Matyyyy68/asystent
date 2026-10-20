@@ -7,6 +7,7 @@ on:
       - 'website/**'
       - 'media/**'
       - 'scripts/copy-media.mjs'
+      - 'scripts/check-public-release.mjs'
   workflow_dispatch:
   release:
     types: [published]
@@ -49,3 +50,7 @@ jobs:
           path: website/dist
       - uses: actions/deploy-pages@v4
         id: deployment
+      - run: npm run check:live
+        working-directory: website
+        env:
+          SENTINEL_LIVE_PAGE_URL: ${{ steps.deployment.outputs.page_url }}

@@ -3,11 +3,15 @@
 **Aktualizacja:** 2026-10-20
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Windows CI `39489166139`, website Pages `39489165920` i installer build/self-test/release `39489181456` PASS. Instalator 262559349 B, SHA-256 `bb34834eb654e450728f95093d500715b5f6ef5ab9f7825c32d146b9fb2c4cd8` oraz sidecar `.sha256` są dostępne. .NET 202/202, desktop 6/6, website test/lint/build, Engine IPC, Release build i self-test instalatora PASS.
 
-**Ostatni push:** commit `a529501` dodaje odzyskiwanie live TLS po restarcie API i został wypchnięty na `origin/main`; Windows CI `39504104253` jest w toku. Commit `185c62f` z cytatami FTS5 ma Windows CI PASS. Lokalna pełna walidacja dla cytatów: .NET 207/207 (profil DPAPI dostępny), Engine IPC, desktop 6/6, `npm ci` 0 podatności, UI production build i autotest instalatora PASS. Instalator testowy ma 281217913 B, SHA-256 `D39D13232933E64E4596E3D702B96C5B29B2B4176EFD613DC42C1194D878F9FF`; nie jest wydaniem.
+**Ostatni push:** commit `0ae208a` uzupełnia audyt bieżącego środowiska i jest na `origin/main`; Windows CI `39504322228` działa. Workflow dla poprzedniego `a529501` został anulowany, gdy nowy push zastąpił jego wykonanie; jego test serwera przeszedł lokalnie 21/21. Commit `185c62f` z cytatami FTS5 ma Windows CI PASS. Lokalna pełna walidacja dla cytatów: .NET 207/207 (profil DPAPI dostępny), Engine IPC, desktop 6/6, `npm ci` 0 podatności, UI production build i autotest instalatora PASS. Instalator testowy ma 281217913 B, SHA-256 `D39D13232933E64E4596E3D702B96C5B29B2B4176EFD613DC42C1194D878F9FF`; nie jest wydaniem.
 
 **Weryfikacja Enterprise:** live TLS E2E teraz zatrzymuje lokalny API, potwierdza niepowodzenie synchronizacji, uruchamia go ponownie z tą samą bazą/certyfikatem i wysyła zachowany batch; retransmisja jest rozpoznana jako duplikat. Certyfikat liścia jest przypięty wyłącznie w kliencie testowym, bez zaufania w systemie Windows. Pełny zestaw serwera 21/21 PASS. Retry kolejki przez działający proces Engine nadal wymaga osobnej, bezpiecznej metody przekazania testowego pinning do testowanego procesu.
 
 **Weryfikacja Ollama:** `ollama` nie jest dostępny w `PATH`, a `http://127.0.0.1:11434/api/tags` jest niedostępny (`HttpRequestException`); weryfikacja rzeczywistego modelu wymaga uruchomionej instalacji lokalnej.
+
+**Weryfikacja publicznej witryny v0.15.38:** GitHub Pages zwrócił HTTP 200 z aktualną wersją i linkami. Publiczny installer oraz sidecar zwróciły HTTP 200; zawartość sidecara zgadza się z opublikowanym SHA-256 `BB34834EB654E450728F95093D500715B5F6EF5AB9F7825C32D146B9FB2C4CD8`. Pełnego instalatora nie pobierano.
+
+**Automatyzacja live-check:** dodano krok po wdrożeniu Pages, który sprawdza publiczny adres strony, linki instalatora i sidecara aktualnej wersji, status HTTP obu assetów oraz format sidecara. `npm run lint`, test witryny i ręczne `npm run check:live` v0.15.38 PASS; Pages CI dla nowego kroku czeka na push.
 
 ## Prace po wydaniu v0.15.38 — 2026-10-20
 

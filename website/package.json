@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "node ../scripts/copy-media.mjs website && vite --host 127.0.0.1",
     "build": "node ../scripts/copy-media.mjs website && vite build",
+    "check:live": "node ../scripts/check-public-release.mjs",
     "test": "node test.mjs && node ../scripts/test-illustrations.mjs",
-    "lint": "node --check vite.config.js && node --check test.mjs"
+    "lint": "node --check vite.config.js && node --check test.mjs && node --check ../scripts/check-public-release.mjs"
   },
   "devDependencies": {
     "vite": "^7.3.7"
