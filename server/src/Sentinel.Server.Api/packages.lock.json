@@ -61,21 +61,28 @@
         "resolved": "10.0.13",
         "contentHash": "0Zh/U/1+hy1MCxx1BTikJi4L5o1Ys6VhB8PKlTNOB4/n2d6ua2+TuoD6T7xN9RV0uiOGod575pQrUSTXg+aYGQ=="
       },
+      "sentinel.contracts": {
+        "type": "Project"
+      },
       "sentinel.core": {
         "type": "Project",
         "dependencies": {
-          "Microsoft.Data.Sqlite": "[10.0.13, )"
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "Sentinel.Contracts": "[0.15.32, )"
         }
       },
       "sentinel.server.core": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Sentinel.Contracts": "[0.15.32, )"
+        }
       },
       "sentinel.server.infrastructure": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "Sentinel.Core": "[0.7.0, )",
-          "Sentinel.Server.Core": "[0.7.0, )"
+          "Sentinel.Core": "[0.15.32, )",
+          "Sentinel.Server.Core": "[0.15.32, )"
         }
       }
     },

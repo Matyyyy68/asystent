@@ -132,22 +132,26 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "sentinel.contracts": {
+        "type": "Project"
+      },
       "sentinel.core": {
         "type": "Project",
         "dependencies": {
-          "Microsoft.Data.Sqlite": "[10.0.13, )"
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "Sentinel.Contracts": "[0.15.32, )"
         }
       },
       "sentinel.engine": {
         "type": "Project",
         "dependencies": {
-          "Sentinel.Core": "[0.15.0, )"
+          "Sentinel.Core": "[0.15.32, )"
         }
       },
       "sentinel.urlhost": {
         "type": "Project",
         "dependencies": {
-          "Sentinel.Core": "[0.15.0, )"
+          "Sentinel.Core": "[0.15.32, )"
         }
       }
     },

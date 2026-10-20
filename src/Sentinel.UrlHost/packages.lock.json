@@ -53,10 +53,14 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "sentinel.contracts": {
+        "type": "Project"
+      },
       "sentinel.core": {
         "type": "Project",
         "dependencies": {
-          "Microsoft.Data.Sqlite": "[10.0.13, )"
+          "Microsoft.Data.Sqlite": "[10.0.13, )",
+          "Sentinel.Contracts": "[0.15.32, )"
         }
       }
     },

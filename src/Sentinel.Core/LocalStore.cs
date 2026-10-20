@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using System.Globalization;
 using System.Text.Json;
+using Sentinel.Contracts;
 using Sentinel.Core.Configuration;
 using Sentinel.Core.Enterprise;
 namespace Sentinel.Core;
@@ -444,7 +445,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             };
             var ruleCode = "local." + category;
             await EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, item.Timestamp, category, (int)item.Risk, ruleCode,
-                EnterpriseEventMetadata.NormalizeSource(source), EnterpriseEventMetadata.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
+                EnterpriseEventV1Rules.NormalizeSource(source), EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
         }
         return id;
     }
@@ -532,8 +533,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         command.CommandText = "INSERT OR IGNORE INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version) VALUES($id,$time,$category,$risk,$rule,$source,$ruleVersion,$schemaVersion)";
         command.Parameters.AddWithValue("$id", item.EventId.ToString("D")); command.Parameters.AddWithValue("$time", item.OccurredAt.ToUniversalTime().ToString("O"));
         command.Parameters.AddWithValue("$category", item.Category); command.Parameters.AddWithValue("$risk", item.RiskLevel); command.Parameters.AddWithValue("$rule", item.RuleCode);
-        command.Parameters.AddWithValue("$source", EnterpriseEventMetadata.NormalizeSource(item.Source));
-        command.Parameters.AddWithValue("$ruleVersion", (object?)EnterpriseEventMetadata.NormalizeRuleVersion(item.RuleVersion) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$source", EnterpriseEventV1Rules.NormalizeSource(item.Source));
+        command.Parameters.AddWithValue("$ruleVersion", (object?)EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion) ?? DBNull.Value);
         command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
         var inserted = await command.ExecuteNonQueryAsync(ct) == 1; await transaction.CommitAsync(ct); return inserted;
     }

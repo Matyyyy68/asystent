@@ -1,5 +1,6 @@
 using Sentinel.Server.Core;
 using Sentinel.Server.Infrastructure;
+using Sentinel.Contracts;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -26,15 +27,15 @@ public sealed class SecurityEventTests : IDisposable
     public async Task EventIngestionIsIdempotentAndStatusChangesAreAudited()
     {
         var now = DateTimeOffset.UtcNow;
-        var item = new SecurityEventInput(Guid.NewGuid().ToString(), now, "url", 3, "url.suspicious_domain",
+        var item = new EnterpriseEventV1(Guid.NewGuid(), now, "url", 3, "url.suspicious_domain",
             "process-snapshot", "2026.10.1", 1);
         var first = await _store.IngestEventsAsync(_deviceId, [item], now);
         var replay = await _store.IngestEventsAsync(_deviceId, [item], now.AddSeconds(1));
 
-        Assert.Equal(new EventBatchResult(1, 0), first);
-        Assert.Equal(new EventBatchResult(0, 1), replay);
+        Assert.Equal(new EnterpriseEventBatchResultV1(1, 0), first);
+        Assert.Equal(new EnterpriseEventBatchResultV1(0, 1), replay);
         var saved = Assert.Single(await _store.ListEventsAsync(100));
-        Assert.Equal(item.EventId.ToLowerInvariant(), saved.EventId);
+        Assert.Equal(item.EventId.ToString("D"), saved.EventId);
         Assert.Equal("open", saved.Status);
         Assert.Equal("process-snapshot", saved.Source);
         Assert.Equal("2026.10.1", saved.RuleVersion);
@@ -49,26 +50,27 @@ public sealed class SecurityEventTests : IDisposable
     public async Task IngestionPurgesEventsOlderThanTheConfiguredNinetyDayRetention()
     {
         var firstReceived = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var old = new SecurityEventInput(Guid.NewGuid().ToString(), firstReceived, "login", 1, "login.known_location");
+        var old = new EnterpriseEventV1(Guid.NewGuid(), firstReceived, "login", 1, "login.known_location");
         Assert.Equal(1, (await _store.IngestEventsAsync(_deviceId, [old], firstReceived)).Accepted);
 
         var later = firstReceived.AddDays(91);
-        var fresh = new SecurityEventInput(Guid.NewGuid().ToString(), later, "login", 2, "login.new_location");
+        var fresh = new EnterpriseEventV1(Guid.NewGuid(), later, "login", 2, "login.new_location");
         await _store.IngestEventsAsync(_deviceId, [fresh], later);
-        Assert.Equal(fresh.EventId.ToLowerInvariant(), Assert.Single(await _store.ListEventsAsync(100)).EventId);
+        Assert.Equal(fresh.EventId.ToString("D"), Assert.Single(await _store.ListEventsAsync(100)).EventId);
     }
 
     [Fact]
     public void EventRulesRejectRawCategoriesRiskAndInvalidRuleIdentifiers()
     {
         var now = DateTimeOffset.UtcNow;
-        Assert.Null(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "url", 2, "url.malware"), now));
-        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "screen", 2, "url.malware"), now));
-        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "url", 5, "url.malware"), now));
-        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "url", 1, "unsafe value"), now));
-        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "url", 1, "url.ok", "private-app.exe"), now));
-        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "url", 1, "url.ok", RuleVersion: "bad version"), now));
-        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid().ToString(), now, "url", 1, "url.ok", SchemaVersion: 2), now));
+        Assert.Null(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "url", 2, "url.malware"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.Empty, now, "url", 2, "url.malware"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "screen", 2, "url.malware"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "url", 5, "url.malware"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "url", 1, "unsafe value"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "url", 1, "url.ok", "private-app.exe"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "url", 1, "url.ok", RuleVersion: "bad version"), now));
+        Assert.NotNull(SecurityEventRules.Validate(new(Guid.NewGuid(), now, "url", 1, "url.ok", SchemaVersion: 2), now));
     }
 
     [Fact]

@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using Sentinel.Server.Api;
 using Sentinel.Server.Core;
 using Sentinel.Server.Infrastructure;
+using Sentinel.Contracts;
 using Sentinel.Core.Knowledge;
 using Sentinel.Core.Analysis;
 
@@ -492,7 +493,7 @@ authenticatedAgents.MapPost("/heartbeat", async (HeartbeatBody? body, HttpContex
     await repository.HeartbeatAsync(device.Id, DateTimeOffset.UtcNow, error, ct);
     return Results.NoContent();
 });
-authenticatedAgents.MapPost("/events", async (SubmitEventsBody? body, HttpContext context, IServerStore repository, CancellationToken ct) =>
+authenticatedAgents.MapPost("/events", async (EnterpriseEventBatchV1? body, HttpContext context, IServerStore repository, CancellationToken ct) =>
 {
     if (body?.Events is not { Count: >= 1 and <= 100 } events)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["events"] = ["Batch musi zawierać 1–100 zdarzeń."] });
@@ -598,7 +599,6 @@ sealed record SetDeviceGroupBody(string GroupId);
 sealed record SetDeviceApprovalBody(bool Approved);
 sealed record RotateDeviceCredentialBody(string? NewDeviceToken);
 sealed record PolicyWriteBody(PolicyDocument? Policy, long ExpectedVersion, bool ConfirmedSensitiveChange = false);
-sealed record SubmitEventsBody(IReadOnlyList<SecurityEventInput>? Events);
 sealed record SetEventStatusBody(string Status);
 sealed record ServerAIConfigurationBody(string? Endpoint, string? Model, bool Enabled, int TimeoutSeconds, long ExpectedVersion);
 sealed record ServerAITestBody(string? Model);

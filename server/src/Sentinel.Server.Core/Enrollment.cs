@@ -1,3 +1,5 @@
+using Sentinel.Contracts;
+
 namespace Sentinel.Server.Core;
 
 public sealed record InvitationRequest(string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, bool RequiresApproval = false);
@@ -58,7 +60,7 @@ public interface IServerStore
     Task<bool> SetDeviceApprovalAsync(string id, bool approved, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> StageDeviceCredentialRotationAsync(string id, string currentTokenHash, string candidateTokenHash, CancellationToken cancellationToken = default);
     Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default);
-    Task<EventBatchResult> IngestEventsAsync(string deviceId, IReadOnlyList<SecurityEventInput> events, DateTimeOffset receivedAt, CancellationToken cancellationToken = default);
+    Task<EnterpriseEventBatchResultV1> IngestEventsAsync(string deviceId, IReadOnlyList<EnterpriseEventV1> events, DateTimeOffset receivedAt, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecurityEvent>> ListEventsAsync(int limit, string? deviceId = null, CancellationToken cancellationToken = default);
     Task<bool> SetEventStatusAsync(string eventId, string deviceId, string status, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<int> PurgeExpiredEventsAsync(DateTimeOffset now, CancellationToken cancellationToken = default);

@@ -1,4 +1,9 @@
 # CHANGELOG
+## 0.15.33 — prerelease (2026-10-20)
+
+- Client and Enterprise API now compile against one shared, typed `EnterpriseEventV1` contract. The same source defines the batch/result DTOs, event source allowlist, rule-version sanitization, schema validation and accepted date/risk/category/rule-code bounds.
+- Verification: client .NET 190/190, server tests 20/20, Release server build and HTTP API smoke PASS. Local full installer build and self-test PASS; 279351161 B, SHA-256 `EB2D6D5FF846534BB464FEC38130A3C7F5FEA89E24D0E18027C5EFF6926C23E3`. GitHub release verification pending.
+
 ## 0.15.32 — prerelease (2026-10-20)
 
 - Enterprise event v1 now carries a schema version, allowlisted source code and sanitized rule version from the client’s durable queue through the API into server storage and the admin event view. Local and server SQLite upgrades preserve existing pending/history records; old queued events receive safe defaults.

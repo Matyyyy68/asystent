@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Sentinel.Contracts;
 using Sentinel.Server.Core;
 using System.Text.Json;
 
@@ -703,7 +704,7 @@ public sealed class SqliteServerStore : IServerStore
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
-    public async Task<EventBatchResult> IngestEventsAsync(string deviceId, IReadOnlyList<SecurityEventInput> events,
+    public async Task<EnterpriseEventBatchResultV1> IngestEventsAsync(string deviceId, IReadOnlyList<EnterpriseEventV1> events,
         DateTimeOffset receivedAt, CancellationToken cancellationToken = default)
     {
         if (events.Count is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(events), "Batch musi zawierać 1–100 zdarzeń.");
@@ -733,7 +734,7 @@ public sealed class SqliteServerStore : IServerStore
                     WHERE EXISTS(SELECT 1 FROM devices WHERE id=$device AND revoked=0)
                     ON CONFLICT(device_id,event_id) DO NOTHING
                     """;
-                command.Parameters.AddWithValue("$event", Guid.Parse(item.EventId).ToString("D"));
+                command.Parameters.AddWithValue("$event", item.EventId.ToString("D"));
                 command.Parameters.AddWithValue("$device", deviceId); command.Parameters.AddWithValue("$occurred", item.OccurredAt.ToUniversalTime().ToString("O"));
                 command.Parameters.AddWithValue("$received", receivedAt.ToUniversalTime().ToString("O")); command.Parameters.AddWithValue("$category", item.Category);
                 command.Parameters.AddWithValue("$risk", item.RiskLevel); command.Parameters.AddWithValue("$rule", item.RuleCode);
