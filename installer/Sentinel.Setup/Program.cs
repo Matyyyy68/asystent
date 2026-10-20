@@ -59,8 +59,10 @@ internal static class Program
 
     private static int SelfTest()
     {
-        var root = Path.Combine(Path.GetTempPath(), "SentinelAI-Setup-SelfTest-" + Guid.NewGuid().ToString("N"));
-        var data = Path.Combine(root, "data");
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var testId = Guid.NewGuid().ToString("N");
+        var root = Path.Combine(localAppData, "Programs", ".SentinelAI-Setup-SelfTest-" + testId);
+        var data = Path.Combine(localAppData, "SentinelAI-Setup-SelfTest-" + testId);
         try
         {
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");

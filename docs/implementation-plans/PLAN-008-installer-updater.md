@@ -11,5 +11,5 @@
 9. **Testy:** `npm run package` tworzy nowy instalator, weryfikuje payload hash, ekstrakcję, ACL Chromium, uruchomienie renderer → IPC → silnik .NET → SQLite oraz nagłówki `sentinel.db`/`knowledge.db` — lokalnie PASS dla 0.15.13. Pełen cykl na snapshot VM, awaria host registration, disk full, cancellation i hash mismatch pozostają niewykonane.
 10. **Akceptacja:** install/update/rollback/uninstall przechodzą na czystym Windows; zachowane dane; signature valid; brak admina jeśli nie wymaga.
 11. **Ryzyka:** brak signing certificate blokuje zaufany update; SmartScreen; polityki firmowe.
-12. **Status:** `IN_PROGRESS` — poprawka ekstrakcji, test baz po smoke instalacji oraz Windows CI/self-test/release v0.15.13 PASS; pełen cykl GUI/update/rollback/uninstall w clean-room pending.
+12. **Status:** `IN_PROGRESS` — poprawka ekstrakcji, test baz po smoke instalacji oraz Windows CI/self-test/release v0.15.13 PASS. Najnowszy main dodatkowo uruchamia izolowany self-test pod `%LOCALAPPDATA%\Programs` i `%LOCALAPPDATA%`; jego lokalny build/self-test PASS, ale ta zmiana harnessu nie była częścią taga v0.15.13. Pełen cykl GUI/update/rollback/uninstall w clean-room pending.
 
