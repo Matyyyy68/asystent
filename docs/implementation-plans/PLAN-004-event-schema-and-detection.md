@@ -2,7 +2,7 @@
 
 1. **Cel:** wersjonowane, testowalne zdarzenie wspólne dla ręcznych reguł, DNS, browsera, plików i przyszłego Enterprise.
 2. **Stan obecny:** `SecurityEvent` lokalny ma timestamp/risk/category/application/explanation/recommendation/status; kontrakt Enterprise ma `eventId/occurredAt/category/risk/ruleCode`. To różne schematy, bez wspólnego źródła, confidence, evidence i wersji reguły.
-3. **Braki:** deduplikacja między odrębnymi modułami, niepewność jako struktura oraz wspólny adapter Enterprise bez heurystycznego mapowania kategorii. Jawne `eventId` deduplikuje ponowiony zapis lokalny od v0.15.31; zdarzenia bez identyfikatora nadal dostają nowy GUID.
+3. **Braki:** deduplikacja między odrębnymi modułami, niepewność jako struktura oraz wspólny adapter Enterprise bez heurystycznego mapowania kategorii. Jawne `eventId` deduplikuje ponowiony zapis lokalny od v0.15.31; zdarzenia bez identyfikatora nadal dostają nowy GUID. Projekcja Enterprise przenosi ograniczone metadane, lecz nie jest współdzielonym, wersjonowanym kontraktem; batch, w którym to samo ID powtarza się w ramach jednej transakcji, nadal jest odrzucany atomowo.
 4. **Decyzje:** additive SQLite migration; tekst prywatny/pełny URL pozostaje wyłączony; confidence oddzielone od ryzyka; wartości nieznane nie są wymuszane.
 5. **Zależności:** `LocalStore`, kontrakt server API v1 (kompatybilność), retencja/eksport, klient Electron.
 6. **Etapy:** (a) kontrakt v1 i dokument; (b) migracja i test legacy db; (c) adapter starych zdarzeń; (d) `ruleVersion/source/evidence codes`; (e) dedupe/status false positive; (f) adapter Enterprise.
