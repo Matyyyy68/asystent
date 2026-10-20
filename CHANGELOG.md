@@ -7,7 +7,7 @@
 ## 0.15.22 — prerelease (2026-10-20)
 
 - Dodano redagowany pakiet diagnostyczny JSON do pomocy technicznej. Zawiera wersje OS/runtime, stany monitorów, ustawienia nieidentyfikujące i metryki baz, bez historii zdarzeń, treści, URL-i, ścieżek i nazw procesów.
-- Testy .NET 179/179, Engine IPC z asercjami prywatności pakietu diagnostycznego i CSV, desktop lint/build PASS. Website test/lint/build PASS. Lokalny instalator `Sentinel.AI.Setup.0.15.22.exe` zbudowany; self-test PASS; SHA-256 `39B680321A7EFA9E6085E74B0A41A426D32CC3AF4355149D46184C7BE520C0CF`. Weryfikacja Windows CI i publikacja release/Pages po pushu.
+- Testy .NET 179/179, Engine IPC z asercjami prywatności pakietu diagnostycznego i CSV, desktop lint/build PASS. Website test/lint/build PASS. Windows validation `39446717025`, Pages `39446717099` i installer release/self-test `39446715416` PASS. [Release v0.15.22](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.22): instalator 262526581 B, SHA-256 `70fdfef27512e6f1279d470e58a62b0ed039ad0554fb75489da8ecc9b4931bdd` oraz sidecar `.sha256`. Lokalny instalator (279327097 B, SHA-256 `39B680321A7EFA9E6085E74B0A41A426D32CC3AF4355149D46184C7BE520C0CF`) również przeszedł self-test.
 
 ## 0.15.21 — prerelease (2026-10-20)
 
