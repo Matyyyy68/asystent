@@ -3,7 +3,7 @@
 ## 2026-10-19 — kandydat 0.15.11
 
 - Zdarzenie nowego połączenia TCP zawiera teraz informację, gdy ten sam PID został zapisany jako nowy proces w ciągu poprzednich 60 sekund. To lokalna korelacja czasowa, jawnie oznaczona jako informacyjna; nie zmienia oceny ryzyka. Pamięć korelacji jest ograniczona do 60 sekund i resetuje się wraz z silnikiem.
-- Testy .NET: 158/158; Engine IPC i produkcyjne buildy wymagają potwierdzenia dla tej wersji.
+- Testy .NET: 158/158; Engine IPC, UI lint/build i produkcyjne buildy PASS. Windows CI build/test/self-test oraz Pages PASS; prerelease [v0.15.11](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.11) zawiera instalator 262489717 B, SHA-256 `3e20f1c1c175392e92a5c07ff4ee520895e37132a71c048219765feac4dd2786`.
 
 ## 2026-10-19 — kandydat 0.15.10
 

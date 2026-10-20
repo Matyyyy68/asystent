@@ -1,7 +1,7 @@
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-19  
-**Etap:** prerelease 0.15.10 opublikowane; kandydat 0.15.11 dodaje informacyjną korelację czasu startu procesu i połączenia TCP.
+**Etap:** prerelease 0.15.11 opublikowane z ograniczoną, informacyjną korelacją procesu i połączenia TCP; dalsze plany pozostają w realizacji.
 
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest jeszcze w pełni zamknięty; 4 plany mają wdrożone i przetestowane etapy. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
@@ -48,7 +48,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 - **Wydanie 0.15.8:** 155/155 testów .NET, Engine IPC z kontrolowanym nie-loopback TCP testem, `check-product`, UI lint i produkcyjne buildy PASS. Windows CI build/test/self-test i Pages PASS. Prerelease [v0.15.8](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.8): instalator 262487667 B, GitHub SHA-256 `9ea670966be6a7cb3cd818cc01d32a3276b1a0c78d94d1c6d68b3238d61c2d9a`. Observer TCP jest domyślnie wyłączony, próbuje co 10 s wykrywać nowe zewnętrzne połączenia `Established`/`SynSent` i zapisuje lokalnie tylko metadane.
 - **Wydanie 0.15.9:** limit pliku głównej historii SQLite 512 MiB; symulowany `SQLITE_FULL` potwierdza rollback batcha, zachowanie zapisanej historii i odmowę dalszego wzrostu. Testy .NET 156/156; Engine IPC, publish silnika, UI lint/build PASS. Windows CI build/test/self-test oraz Pages PASS. Prerelease [v0.15.9](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.9): instalator 262488179 B, GitHub SHA-256 `12531dae03efe9323f5e92572145edd5c2088e132285c298b63cebbb6c866a3f`.
 - **Wydanie 0.15.10:** poprawiono retry monitorów po odmowie zapisu `SQLITE_FULL`. Test wymusza pełną bazę, potwierdza stan błędu, zwolnienie miejsca i późniejszy zapis pierwotnego zdarzenia procesu. Testy .NET 157/157; UI build/lint, Engine IPC, Windows CI build/test/self-test oraz Pages PASS. Prerelease [v0.15.10](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.10): instalator 262488693 B, SHA-256 `62b517bf665eb2e06f2f44c83524de34d541ea3031d24059f20cd9b3e7e61227`.
-- **Kandydat 0.15.11:** zdarzenie TCP opisuje zapisany start tego samego PID w poprzednich 60 s jako informacyjny kontekst; bez zmiany ryzyka, bez trwałej korelacji przez restart. Test korelacji i pełny zestaw .NET 158/158 PASS. Buildy i CI jeszcze do weryfikacji.
+- **Wydanie 0.15.11:** zdarzenie TCP opisuje zapisany start tego samego PID w poprzednich 60 s jako informacyjny kontekst; bez zmiany ryzyka, bez trwałej korelacji przez restart. Test korelacji i pełny zestaw .NET 158/158 PASS; UI lint/build, Engine IPC, Windows CI build/test/self-test oraz Pages PASS. Prerelease [v0.15.11](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.11): instalator 262489717 B, GitHub SHA-256 `3e20f1c1c175392e92a5c07ff4ee520895e37132a71c048219765feac4dd2786`.
 - Zaktualizowano README, witrynę, audyt luk i PLAN-001; krótkie połączenia nadal mogą umknąć, a UDP pozostaje ręcznym snapshotem.
 
 - W trakcie: szczegółowe wdrożenia planów 001–010; PLAN-001 ma snapshot TCP/UDP, próbkowane zdarzenia procesu i test awarii/odzyskania źródła; PLAN-004/005 mają wdrożone i przetestowane etapy, a PLAN-007 ma eksport, kopie/restore obu baz, diagnostykę, limit importu wiedzy i testy współbieżności. Limity bazy historii/dysku, brak miejsca i ACL nadal wymagają pracy.
