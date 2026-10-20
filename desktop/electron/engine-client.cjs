@@ -99,7 +99,14 @@ class EngineClient {
     if (!child?.pid || child.exitCode !== null || child.stdin.destroyed) return Promise.reject(new Error('Silnik niedostępny'));
     return new Promise((resolve, reject) => {
       const id = String(++this.sequence);
-      const timer = this.setTimer(() => { this.pending.delete(id); reject(new Error('Przekroczono czas odpowiedzi silnika')); }, REQUEST_TIMEOUT_MS);
+      const timer = this.setTimer(() => {
+        if (!this.pending.delete(id)) return;
+        reject(new Error('Przekroczono czas odpowiedzi silnika; trwa ponowne uruchamianie.'));
+        if (this.engine === child) {
+          this.failed(child, 'response-timeout');
+          child.kill();
+        }
+      }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
       try { child.stdin.write(JSON.stringify({ ...data, id, version: 1, method }) + '\n'); }
       catch (error) {

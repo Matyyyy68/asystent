@@ -3,6 +3,8 @@
 **Aktualizacja:** 2026-10-20
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.26](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.26). Windows CI `39458266067`, Pages `39458266050` i installer build/self-test/release `39458271344` PASS. Instalator 262536309 B, SHA-256 `b8ac30ed1ea1aaf2d2c67ef8ca869a8a1bdd7d62d703c8f23d7efe5b802a0388` i sidecar `.sha256` dostępne. Lokalny instalator 279336825 B, SHA-256 `5EE1D167C30F75A38E2E14E4EBEC0D82CBA50E9EEACF9C17DCA7FEF728F6551F`; testy desktop 3/3 i .NET 184/184, Engine IPC i autotest instalatora PASS.
 
+**Kandydat v0.15.27:** watchdog restartuje zawieszony silnik po 45 s bez odpowiedzi. Testy desktop 4/4, .NET 184/184, Engine IPC i autotest instalatora PASS; lokalny instalator 279336825 B, SHA-256 `B57B04E6CEB4235384D5AA5C1356A45FD0D7950911074EBE937FB18BD3F8B934`. GitHub CI i publikacja pozostają do wykonania.
+
 Audyt obejmuje 20 obszarów: 7 zweryfikowanych w opisanym zakresie, 10 częściowych, 2 brakujące i 1 blokowany decyzją właściciela. Żaden z 10 planów nie jest w pełni zamknięty. Wydanie v0.15.23 dodało trwały baseline Downloads (SQLite v9), wznowienie porównania po restarcie i atomowy zapis dopasowania; v0.15.24 naprawia ponowienie startu watchera po błędzie SQLite, v0.15.25 ponawia je automatycznie podczas kolejnego collect, a v0.15.26 automatycznie odtwarza proces silnika Electron po awarii. Statusów funkcji nie sumuję do procentu ukończenia produktu.
 
 Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryteriów, a udział UI zawyżałby gotowość produktu bezpieczeństwa. Postęp liczę przez zweryfikowane przepływy i jawne ograniczenia.

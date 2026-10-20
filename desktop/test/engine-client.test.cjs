@@ -95,3 +95,25 @@ test('records only that stderr existed and never exposes its contents in state',
   assert.equal(JSON.stringify(client.status).includes('private path'), false);
   client.dispose();
 });
+
+test('kills and restarts a hung engine after a request timeout', async () => {
+  const timers = new Map();
+  let nextTimer = 0;
+  const child = makeEngine();
+  child.stdin = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  const client = new EngineClient('engine.exe', {
+    spawnProcess: () => child,
+    setTimer: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
+    clearTimer: id => timers.delete(id)
+  });
+  client.start();
+  const pending = client.call('collect');
+  const [timeoutId, timeout] = [...timers.entries()].find(([, value]) => value.delay === 45000);
+  timers.delete(timeoutId);
+  timeout.callback();
+  await assert.rejects(pending, /Przekroczono czas odpowiedzi/);
+  assert.equal(child.exitCode, 0);
+  assert.equal(client.status, 'restarting');
+  assert.ok([...timers.values()].some(value => value.delay === 1000));
+  client.dispose();
+});
