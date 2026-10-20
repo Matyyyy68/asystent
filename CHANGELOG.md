@@ -2,8 +2,12 @@
 
 ## Unreleased
 
-- Limit metadanych baseline'u Downloads obejmuje teraz całą sesję monitorowania, nie tylko stan początkowy. Po osiągnięciu limitu watcher zatrzymuje się jawnie, zamiast dalej zwiększać zużycie pamięci.
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
+
+## 0.15.20 — prerelease (2026-10-20)
+
+- Limit metadanych baseline'u Downloads obejmuje całą sesję monitorowania, nie tylko stan początkowy. Po osiągnięciu limitu watcher zatrzymuje się jawnie, zamiast dalej zwiększać zużycie pamięci.
+- Testy .NET 178/178, Engine IPC, kontrolowany TCP, desktop/website test-lint-build PASS. Windows CI `39441943631`, Pages `39441943558` i installer release/self-test `39441965987` PASS. [Release v0.15.20](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.20) zawiera instalator 262521973 B, SHA-256 `0c2236a48806817fb2fd8fcdf1e7f3b2c62128042860ec11ce387edb77a87f1d` oraz sidecar `.sha256`.
 
 ## 0.15.19 — prerelease (2026-10-20)
 
