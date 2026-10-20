@@ -4,6 +4,11 @@
 
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
+## 0.15.19 — prerelease (2026-10-20)
+
+- Opt-in monitoring Downloads odtwarza teraz utracone powiadomienia przez porównanie plików w katalogu po przepełnieniu kolejki lub bufora FileSystemWatcher. Stan początkowy do 100 000 plików wyklucza pliki istniejące przed włączeniem; przetwarzanie nadal respektuje limit rozmiaru i budżet każdej próbki. Dodano test przepełnienia z małą kolejką oraz test, że plik sprzed włączenia nie jest skanowany.
+- Testy lokalne: .NET 177/177, Engine IPC i kontrolowany test TCP PASS; desktop/website test, lint i build PASS. Lokalny instalator self-test PASS, 279321977 B, SHA-256 `148cc1271e7a43b0f42d081768dabf893418cb4e19fa64db034e8e0f6fc00b43`. Windows CI i opublikowany release oczekują na push/tag.
+
 ## 0.15.18 — prerelease (2026-10-20)
 
 - Downloads watcher rozwiązuje ścieżkę przez Windows Known Folder, aby obsłużyć folder przekierowany przez użytkownika lub organizację; jeśli API niedostępne, używa `%USERPROFILE%\Downloads`.
