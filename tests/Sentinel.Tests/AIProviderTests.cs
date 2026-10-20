@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Sentinel.Core.Knowledge;
@@ -88,6 +89,43 @@ public sealed class AIProviderTests
             Assert.Equal(RiskLevel.Moderate, result.Risk);
             Assert.Contains(result.Indicators, item => item.Id == "text.urgency");
             Assert.Contains(result.Uncertainties, item => item.Contains("użyto wyłącznie reguł", StringComparison.OrdinalIgnoreCase));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task LocalKnowledgeHitsAreRetrievedAndIncludedInTheOllamaAnalysisContext()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sentinel-ai-knowledge-context-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            var document = Path.Combine(root, "credential-policy.txt");
+            await File.WriteAllTextAsync(document,
+                "Credential transfer requests must be paused and verified through the official support channel.", Encoding.UTF8);
+            var knowledge = new LocalKnowledgeBase(Path.Combine(root, "index"));
+            await knowledge.InitializeAsync();
+            await knowledge.ImportAsync(document);
+            Assert.NotEmpty(await knowledge.SearchAsync("Review this credential transfer request."));
+
+            string? requestBody = null;
+            using var client = new HttpClient(new DelegateHandler(async request =>
+            {
+                requestBody = await request.Content!.ReadAsStringAsync();
+                return Json(ValidResponse);
+            }));
+            var service = new AnalysisOrchestrator(new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames())),
+                new OllamaLocalProvider(client), knowledge);
+            var result = await service.AnalyzeAsync(new AnalysisContext("Synthetic", "Review this credential transfer request.", DateTimeOffset.UtcNow), true,
+                "http://127.0.0.1:11434", "synthetic-model");
+
+            Assert.Equal(RiskLevel.High, result.Risk);
+            Assert.NotNull(requestBody);
+            using var sent = JsonDocument.Parse(requestBody);
+            var userContent = sent.RootElement.GetProperty("messages")[1].GetProperty("content").GetString();
+            Assert.Contains("verified through the official support channel", userContent, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Lokalne źródła wiedzy", userContent, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(result.Uncertainties, value => value.Contains("credential-policy.txt", StringComparison.OrdinalIgnoreCase));
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }

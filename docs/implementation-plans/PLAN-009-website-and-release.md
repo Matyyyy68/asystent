@@ -1,7 +1,7 @@
 # PLAN-009 — witryna, dokumentacja i wydanie
 
 1. **Cel:** publikowane opisy, download i docs dokładnie odpowiadają testowanym możliwościom.
-2. **Stan obecny:** `website/` statyczne; tekst jasno mówi o wersji rozwojowej, DNS cache, braku blokowania i AI. Tag `v0.15.27` opublikowany; Pages workflow `39459915119` PASS, installer/release workflow `39459920461` PASS i release asset/digest są dostępne. HTML/linki wskazują v0.15.27, a test zgodności URL-i z wersją pakietu chroni przed rozjazdem. Website test/lint/build PASS. Live HTTP check nieosiągalny w tej sesji z powodu ograniczenia środowiska.
+2. **Stan obecny:** `website/` statyczne; tekst jasno mówi o wersji rozwojowej, DNS cache, braku blokowania i AI. Tag `v0.15.28` opublikowany; Pages workflow `39461730984` PASS, installer/release workflow `39461735757` PASS i release asset/digest są dostępne. HTML/linki wskazują v0.15.28, a test zgodności URL-i z wersją pakietu chroni przed rozjazdem. Website test/lint/build PASS. Live HTTP check nieosiągalny w tej sesji z powodu ograniczenia środowiska.
 3. **Braki:** automatyczne sprawdzanie dostępności zewnętrznych linków w CI, dokument licencji, Enterprise install docs/clean Windows docs.
 4. **Decyzje:** każda obietnica ma test/evidence; status live zależy od CI i ustawień Pages; nie wymyślać licencji.
 5. **Zależności:** GitHub Pages, tag/release asset, decyzja właściciela.
@@ -11,5 +11,5 @@
 9. **Testy:** anchors/assets, Vite build, link check, release hash, accessible checks.
 10. **Akceptacja:** live asset tag/hash istnieje; marketing jest zgodny z ograniczeniami; licencja opisana przez właściciela.
 11. **Ryzyka:** host Pages inaccessible/disabled, release missing, dependency licenses.
-12. **Status:** `IN_PROGRESS` — v0.15.27, Windows validation `39459914877`, installer build/self-test/release `39459920461` i Pages deployment `39459915119` PASS. Asset i digest są opublikowane. Website test/lint/build PASS. Bezpośredni live-check z tej sesji nie został wykonany. Automatyczne sprawdzanie zewnętrznych linków, licencja i test czystego Windows pozostają.
+12. **Status:** `IN_PROGRESS` — v0.15.28, Windows validation `39461730985`, installer build/self-test/release `39461735757` i Pages deployment `39461730984` PASS. Asset i digest są opublikowane. Website test/lint/build PASS. Bezpośredni live-check z tej sesji nie został wykonany. Automatyczne sprawdzanie zewnętrznych linków, licencja i test czystego Windows pozostają.
 
