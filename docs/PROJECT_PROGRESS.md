@@ -1,9 +1,9 @@
 # Postęp projektu Sentinel AI
 
-**Aktualizacja:** 2026-10-20
+**Aktualizacja:** 2026-10-21
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Windows CI `39489166139`, website Pages `39489165920` i installer build/self-test/release `39489181456` PASS. Instalator 262559349 B, SHA-256 `bb34834eb654e450728f95093d500715b5f6ef5ab9f7825c32d146b9fb2c4cd8` oraz sidecar `.sha256` są dostępne. .NET 202/202, desktop 6/6, website test/lint/build, Engine IPC, Release build i self-test instalatora PASS.
 
-**Ostatni push:** commit `f9fc937` wdraża post-deploy live-check i jest na `origin/main`. Pages deploy oraz live-check `39504764915` PASS; Windows CI `39504764841` czeka w kolejce. Commit `185c62f` z cytatami FTS5 ma Windows CI PASS. Lokalna pełna walidacja dla cytatów: .NET 207/207 (profil DPAPI dostępny), Engine IPC, desktop 6/6, `npm ci` 0 podatności, UI production build i autotest instalatora PASS. Instalator testowy ma 281217913 B, SHA-256 `D39D13232933E64E4596E3D702B96C5B29B2B4176EFD613DC42C1194D878F9FF`; nie jest wydaniem.
+**Ostatni funkcjonalny push:** commit `79668a4` rozszerza post-deploy live-check na wszystkie zewnętrzne linki HTTPS i jest na `origin/main`. Pages run `39505227865` PASS z pełnym live-checkiem wszystkich linków; Windows CI `39505227855` PASS. Commit `185c62f` z cytatami FTS5 ma Windows CI PASS. Lokalna pełna walidacja dla cytatów: .NET 207/207 (profil DPAPI dostępny), Engine IPC, desktop 6/6, `npm ci` 0 podatności, UI production build i autotest instalatora PASS. Instalator testowy ma 281217913 B, SHA-256 `D39D13232933E64E4596E3D702B96C5B29B2B4176EFD613DC42C1194D878F9FF`; nie jest wydaniem.
 
 **Weryfikacja Enterprise:** live TLS E2E teraz zatrzymuje lokalny API, potwierdza niepowodzenie synchronizacji, uruchamia go ponownie z tą samą bazą/certyfikatem i wysyła zachowany batch; retransmisja jest rozpoznana jako duplikat. Certyfikat liścia jest przypięty wyłącznie w kliencie testowym, bez zaufania w systemie Windows. Pełny zestaw serwera 21/21 PASS. Retry kolejki przez działający proces Engine nadal wymaga osobnej, bezpiecznej metody przekazania testowego pinning do testowanego procesu.
 
@@ -11,9 +11,9 @@
 
 **Weryfikacja publicznej witryny v0.15.38:** GitHub Pages zwrócił HTTP 200 z aktualną wersją i linkami. Publiczny installer oraz sidecar zwróciły HTTP 200; zawartość sidecara zgadza się z opublikowanym SHA-256 `BB34834EB654E450728F95093D500715B5F6EF5AB9F7825C32D146B9FB2C4CD8`. Pełnego instalatora nie pobierano.
 
-**Automatyzacja live-check:** post-deploy krok sprawdza adres strony, wszystkie zewnętrzne linki HTTPS, wersjonowany instalator i sidecar. Lokalnie `npm run lint`, test witryny oraz pełne `npm run check:live` PASS: strona, installer, sidecar i wszystkie cztery linki zwróciły HTTP 200, a SHA sidecara zgadza się z opublikowaną sumą. Pages CI `39504764915` przeszedł starszy wariant; pełny check czeka na najnowszy push.
+**Automatyzacja live-check:** post-deploy krok sprawdza adres strony, wszystkie zewnętrzne linki HTTPS, wersjonowany instalator i sidecar. Lokalnie `npm run lint`, test witryny oraz pełne `npm run check:live` PASS: strona, installer, sidecar i wszystkie cztery linki zwróciły HTTP 200, a SHA sidecara zgadza się z opublikowaną sumą. Pages CI `39505227865` PASS z pełnym sprawdzeniem wszystkich linków.
 
-## Prace po wydaniu v0.15.38 — 2026-10-20
+## Prace po wydaniu v0.15.38 — 2026-10-20–21
 
 - Lokalna baza wiedzy obsługuje teraz tekstowe PDF przez PdfPig 0.1.16 (Apache-2.0): limit pliku 10 MB, 500 stron i 2 mln znaków; OCR nie jest wykonywany, a skany bez warstwy tekstowej są odrzucane. UI i selektor plików akceptują PDF. Testy obejmują tekstowy import/wyszukiwanie, limit stron i brak utraty indeksu przy błędnym PDF. Pełny zestaw .NET 205/205, Engine IPC, desktop 6/6, UI build i autotest instalatora PASS. Licencja Apache wraz z dodatkowymi notami PdfPig jest skopiowana do katalogu instalowanego Engine i sprawdzana przez build. Brak podatności NuGet dla Core. Self-testowany instalator lokalny: 281215353 B, SHA-256 `475689A35343376A1ADE955A2B2775889D6C9E16E7BB3AF4D5168C897BFB2FCC`; pozostaje artefaktem testowym.
 - Windows CI `39502601095` dla commita z tekstowym PDF i licencją PdfPig zakończył się PASS po pełnym buildzie/testach aplikacji i Enterprise API.
