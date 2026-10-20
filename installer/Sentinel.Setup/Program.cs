@@ -67,6 +67,21 @@ internal static class Program
         {
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
             Install(root, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None, testMode: true);
+            var preservedFile = Path.Combine(root, "self-test-user-file.txt");
+            File.WriteAllText(preservedFile, "preserve across update and rollback");
+            var engineExecutable = Path.Combine(root, "resources", "engine", "Sentinel.Engine.exe");
+            File.WriteAllText(engineExecutable, "outdated-payload-marker");
+            Install(root, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None,
+                testMode: true, registeredInstallOverride: root);
+            using (var engine = new FileStream(engineExecutable, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Span<byte> signature = stackalloc byte[2];
+                if (engine.Read(signature) != signature.Length || signature[0] != (byte)'M' || signature[1] != (byte)'Z')
+                    throw new InvalidDataException("Aktualizacja nie zastąpiła uszkodzonego pliku silnika.");
+            }
+            if (File.ReadAllText(preservedFile) != "preserve across update and rollback")
+                throw new InvalidDataException("Aktualizacja nie zachowała pliku spoza pakietu.");
+
             Directory.CreateDirectory(data);
             var app = Path.Combine(root, "Sentinel AI.exe");
             using var process = new Process
@@ -104,7 +119,26 @@ internal static class Program
                 throw new InvalidDataException("Aplikacja zapisała nieprawidłową ścieżkę lokalnych danych.");
             VerifySmokeDatabase(databaseDirectory, "sentinel.db");
             VerifySmokeDatabase(databaseDirectory, "knowledge.db");
-            Log("SELF_TEST_SUCCESS payload=true chromiumAcl=true appSmoke=true");
+
+            const string rollbackMarker = "old-installation-rollback-marker";
+            File.WriteAllText(engineExecutable, rollbackMarker);
+            using (var cancellation = new CancellationTokenSource())
+            {
+                var cancelled = false;
+                try
+                {
+                    Install(root, desktopShortcut: false, autoStart: false,
+                        (_, percent) => { if (percent == 90) cancellation.Cancel(); }, cancellation.Token,
+                        testMode: true, registeredInstallOverride: root);
+                }
+                catch (OperationCanceledException) { cancelled = true; }
+                if (!cancelled) throw new InvalidOperationException("Instalacja nie przerwała transakcji po anulowaniu.");
+            }
+            if (File.ReadAllText(engineExecutable) != rollbackMarker
+                || File.ReadAllText(preservedFile) != "preserve across update and rollback")
+                throw new InvalidDataException("Rollback nie odtworzył poprzedniego katalogu instalacji.");
+
+            Log("SELF_TEST_SUCCESS payload=true chromiumAcl=true update=true rollback=true appSmoke=true");
             return 0;
         }
         catch (Exception ex)
@@ -155,14 +189,15 @@ internal static class Program
 
     internal static string Clean(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
 
-    internal static void Install(string target, bool desktopShortcut, bool autoStart, Action<string, int> progress, CancellationToken cancellationToken, bool testMode = false)
+    internal static void Install(string target, bool desktopShortcut, bool autoStart, Action<string, int> progress,
+        CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null)
     {
         if (!VerifyPayload(showErrors: true)) throw new InvalidDataException("Weryfikacja instalatora nie powiodła się.");
         target = Path.GetFullPath(target);
         var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
         if (!target.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Wybierz folder w swoim profilu użytkownika. Instalacja nie wymaga uprawnień administratora.");
-        var registeredInstall = testMode ? null : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+        var registeredInstall = testMode ? registeredInstallOverride : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
         if (!string.IsNullOrWhiteSpace(registeredInstall) && !Path.GetFullPath(registeredInstall).Equals(target, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Sentinel AI jest już zainstalowany w folderze {registeredInstall}. Uruchom instalator z tej lokalizacji, aby go zaktualizować.");
         if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any() &&
@@ -279,7 +314,7 @@ internal static class Program
         }
         catch (OperationCanceledException)
         {
-            Log("INSTALL_CANCELLED stage=extraction");
+            Log("INSTALL_CANCELLED stage=transaction");
             throw;
         }
         catch (Exception ex)

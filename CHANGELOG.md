@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## Unreleased
+
+- Rozszerzono izolowany self-test instalatora o aktualizację istniejącego katalogu, zachowanie plików spoza payloadu i rollback po anulowaniu po zamianie katalogów. Test sprawdza też, że anulowanie loguje etap transakcji, a nie ekstrakcji.
 
 ## 0.15.38 — prerelease (2026-10-20)
 
