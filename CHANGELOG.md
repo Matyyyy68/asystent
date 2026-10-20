@@ -1,3 +1,7 @@
+## 0.15.37 — kandydat lokalny (2026-10-20)
+
+- Wspólna domena rejestrowalna koreluje zdarzenia DNS, ostrzeżenia nawigacji Chrome/Edge i ręczną analizę URL w przesuwanym oknie 60 sekund. Każda detekcja pozostaje osobnym zdarzeniem; wspólny correlationId oznacza jedynie zbieżność domeny i czasu, nie związek przyczynowy. Tabela SQLite v13 przechowuje wyłącznie SHA-256 domeny i krótkotrwały identyfikator grupy; surowa domena nie trafia do mapy korelacji ani Enterprise payload. Restore usuwa mapę ulotną.
+- Weryfikacja lokalna: .NET 202/202, desktop Node tests 6/6, Engine IPC PASS. TypeScript/lint PASS; produkcyjny Vite build PASS po uruchomieniu poza ograniczeniem sandboxa. Website test/lint/build PASS. Lokalny installer build i self-test PASS: 279359353 B, SHA-256 `5CA5B78A1650ECC8CF1EF10BB3E012D2B549558BE33F329D5F3E35D134B8493B`. Windows CI, Pages i publikacja assetu dla kandydata pozostają do wykonania.
 # CHANGELOG
 ## 0.15.36 — prerelease (2026-10-20)
 

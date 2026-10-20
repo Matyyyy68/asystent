@@ -34,7 +34,9 @@ var settings = await store.LoadSettingsAsync();
 await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);
 var defaultExcludedApplications = settings.ExcludedApplications;
 await store.ApplyRetentionAsync(settings.RetentionDays);
-var rules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
+var domainNames = new DomainNames();
+var urlAnalyzer = new UrlAnalyzer(domainNames);
+var rules = new ThreatAnalysisEngine(urlAnalyzer);
 var reputation = new DomainReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
 var processMonitor = new ProcessSnapshotMonitor();
@@ -246,11 +248,15 @@ while (await Console.In.ReadLineAsync() is { } line)
                                 ? entries.RootElement.EnumerateArray().Select(e => e.GetString()).ToArray() : [entries.RootElement.GetString()];
                             foreach (var name in reputation.FindMatches(names.OfType<string>(), DateTimeOffset.UtcNow))
                             {
-                                if (!deduplicator.TryMark(name, DateTimeOffset.UtcNow)) continue;
-                                await RecordDetectionAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.High,
+                                var dnsObservedAt = DateTimeOffset.UtcNow;
+                                if (!deduplicator.TryMark(name, dnsObservedAt)) continue;
+                                var correlationDomain = domainNames.RegistrableDomain(name) ?? DomainNames.Ascii(name);
+                                var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, dnsObservedAt);
+                                await RecordDetectionAsync(new SecurityEvent(0, dnsObservedAt, RiskLevel.High,
                                     "Domena na liście CERT Polska", "Cache DNS Windows", "Zaobserwowano domenę z aktualnej listy: " + name,
                                     "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New,
                                     EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                                    CorrelationId: correlationId,
                                     EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"]), "url", "reputation.cert");
                                 detections.Add(name!);
                             }
@@ -402,7 +408,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var text = request.GetProperty("text").GetString() ?? "";
                 var url = request.GetProperty("url").GetString();
                 if (text.Length > 16000 || url?.Length > 4096) throw new InvalidDataException("Zbyt długa treść.");
-                var context = new AnalysisContext("Ręczna analiza", text, DateTimeOffset.UtcNow,
+                var observedAt = DateTimeOffset.UtcNow;
+                var urlAnalysis = string.IsNullOrWhiteSpace(url) ? null : urlAnalyzer.Analyze(url);
+                var context = new AnalysisContext("Ręczna analiza", text, observedAt,
                     string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url));
                 var assessment = await orchestrator.AnalyzeAsync(context, settings.UseLocalAI, settings.LocalAIEndpoint,
                     settings.LocalAIModel, settings.LocalAITimeoutSeconds);
@@ -411,13 +419,22 @@ while (await Console.In.ReadLineAsync() is { } line)
                         Indicators = assessment.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray(),
                         Explanation = "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska. " + assessment.Explanation };
                 if (assessment.Indicators.Count > 0)
-                    await RecordDetectionAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, assessment.Risk,
+                {
+                    var correlationDomain = urlAnalysis?.RegistrableDomain ?? urlAnalysis?.Host;
+                    Guid? correlationId = urlAnalysis is { IsValid: true } && correlationDomain is not null &&
+                        Uri.CheckHostName(correlationDomain) == UriHostNameType.Dns &&
+                        assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) || indicator.Id == "reputation.cert")
+                        ? await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt)
+                        : null;
+                    await RecordDetectionAsync(new SecurityEvent(0, observedAt, assessment.Risk,
                         assessment.Category.ToString(), "Ręczna analiza", assessment.Explanation,
                         string.Join(" ", assessment.Recommendations), EventStatus.New,
                         EventId: Guid.NewGuid(), Source: "manual-analysis", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                        CorrelationId: correlationId,
                         EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray()),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
                         "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
+                }
                 await store.ApplyRetentionAsync(settings.RetentionDays);
                 result = assessment;
                 break;

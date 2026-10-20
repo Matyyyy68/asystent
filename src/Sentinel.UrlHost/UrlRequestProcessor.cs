@@ -25,7 +25,8 @@ public sealed record BrowserResponse([property: JsonPropertyName("id")] string I
     [property: JsonPropertyName("indicators")] IReadOnlyList<BrowserIndicator> Indicators,
     [property: JsonPropertyName("uncertainty")] string Uncertainty,
     [property: JsonIgnore] string? HistoryKey = null,
-    [property: JsonIgnore] string? Explanation = null);
+    [property: JsonIgnore] string? Explanation = null,
+    [property: JsonIgnore] string? CorrelationDomain = null);
 
 public sealed class UrlRequestProcessor
 {
@@ -59,6 +60,7 @@ public sealed class UrlRequestProcessor
         return new(request.Id, true, ThreatAnalysisEngine.RulesVersion, result.Risk.ToString(), result.Category.ToString(),
             result.Risk >= RiskLevel.Moderate && result.Indicators.Count != 0,
             result.Indicators.Select(i => new BrowserIndicator(i.Id, i.Description)).ToArray(),
-            result.Uncertainties.FirstOrDefault() ?? "Wynik nie potwierdza bezpieczeństwa adresu.", historyKey, result.Explanation);
+            result.Uncertainties.FirstOrDefault() ?? "Wynik nie potwierdza bezpieczeństwa adresu.", historyKey, result.Explanation,
+            analysis.RegistrableDomain ?? analysis.Host);
     }
 }

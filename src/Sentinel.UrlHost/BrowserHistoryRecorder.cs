@@ -23,13 +23,18 @@ public sealed class BrowserHistoryRecorder
         if (!deduplicator.TryMark(key, DateTimeOffset.UtcNow)) return false;
 
         var store = new LocalStore(directory);
+        await store.InitializeAsync(cancellationToken);
+        var observedAt = DateTimeOffset.UtcNow;
+        Guid? correlationId = result.CorrelationDomain is { } domain
+            ? await store.GetDomainCorrelationIdAsync(domain, observedAt, ct: cancellationToken)
+            : null;
         var risk = Enum.Parse<RiskLevel>(result.Risk, ignoreCase: false);
         var explanation = string.Join(" ", result.Indicators.Select(i => i.Description).Distinct());
         if (explanation.Length == 0) return false;
-        var item = new SecurityEvent(0, DateTimeOffset.UtcNow, risk, $"Przeglądarka · {result.Category}", "Rozszerzenie Sentinel AI",
+        var item = new SecurityEvent(0, observedAt, risk, $"Przeglądarka · {result.Category}", "Rozszerzenie Sentinel AI",
             explanation[..Math.Min(explanation.Length, 2000)],
             "Nie podawaj danych i zweryfikuj adres przez niezależny, znany kanał.", EventStatus.New,
-            Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion);
+            Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion, CorrelationId: correlationId);
         await store.AddLocalOnlyAsync(item, cancellationToken);
         try
         {

@@ -33,6 +33,69 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(eventId, saved.EventId);
         Assert.Equal("test.retry", saved.Source);
     }
+    [Fact] public async Task DomainCorrelationsShareRegistrableDomainAndExpireAfterSlidingWindow()
+    {
+        var store = await Store();
+        var firstSeen = DateTimeOffset.UtcNow;
+        var first = await store.GetDomainCorrelationIdAsync("login.example.com", firstSeen);
+        var continued = await store.GetDomainCorrelationIdAsync("example.com", firstSeen.AddSeconds(59));
+        var continuedAgain = await store.GetDomainCorrelationIdAsync("www.example.com", firstSeen.AddSeconds(118));
+        var expired = await store.GetDomainCorrelationIdAsync("example.com", firstSeen.AddSeconds(179));
+        var otherDomain = await store.GetDomainCorrelationIdAsync("example.net", firstSeen.AddSeconds(179));
+
+        Assert.Equal(first, continued);
+        Assert.Equal(first, continuedAgain);
+        Assert.NotEqual(first, expired);
+        Assert.NotEqual(expired, otherDomain);
+    }
+    [Fact] public async Task DomainCorrelationRejectsIpAddressAndMalformedHost()
+    {
+        var store = await Store();
+        await Assert.ThrowsAsync<ArgumentException>(() => store.GetDomainCorrelationIdAsync("192.0.2.1", DateTimeOffset.UtcNow));
+        await Assert.ThrowsAsync<ArgumentException>(() => store.GetDomainCorrelationIdAsync("bad..example.test", DateTimeOffset.UtcNow));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow, TimeSpan.FromHours(1)));
+    }
+    [Fact] public async Task DomainCorrelationStoresOnlyHashedDomainAndRestoreClearsTransientIds()
+    {
+        var source = await Store();
+        var observedAt = DateTimeOffset.UtcNow;
+        var originalId = await source.GetDomainCorrelationIdAsync("login.example.test", observedAt);
+        await source.AddLocalOnlyAsync(Event() with { CorrelationId = originalId, Source = "browser-extension" });
+        await using (var connection = new SqliteConnection($"Data Source={source.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "SELECT domain_key FROM domain_correlation";
+            var storedKey = (string)(await command.ExecuteScalarAsync())!;
+            Assert.Equal(64, storedKey.Length);
+            Assert.DoesNotContain("example.test", storedKey, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var backup = Path.Combine(dir, "domain-correlation.db");
+        await source.BackupAsync(backup);
+        var restored = await Store();
+        Assert.Equal(1, await restored.RestoreAsync(backup));
+        var afterRestore = await restored.GetDomainCorrelationIdAsync("www.example.test", observedAt.AddSeconds(1));
+        Assert.NotEqual(originalId, afterRestore);
+        Assert.Equal(originalId, Assert.Single(await restored.ReadAsync()).CorrelationId);
+    }
+    [Fact] public async Task VersionTwelveDatabaseMigratesDomainCorrelationWithoutLosingHistory()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { Category = "BeforeDomainCorrelationMigration" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "DROP INDEX ix_domain_correlation_last_seen; DROP TABLE domain_correlation; PRAGMA user_version=12;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        Assert.Equal("BeforeDomainCorrelationMigration", Assert.Single(await store.ReadAsync()).Category);
+        Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
+        await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
+    }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
         var store = await Store();
@@ -440,7 +503,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -459,7 +522,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(13L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {

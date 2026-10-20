@@ -1,7 +1,7 @@
 # PLAN-009 — witryna, dokumentacja i wydanie
 
 1. **Cel:** publikowane opisy, download i docs dokładnie odpowiadają testowanym możliwościom.
-2. **Stan obecny:** `website/` statyczne; tekst jasno mówi o wersji rozwojowej, DNS cache, braku blokowania i AI. Tag `v0.15.36` opublikowany; installer/release workflow `39484833324` PASS i asset/digest są dostępne. HTML/linki/package wskazują v0.15.36; website test/lint/build i Pages `39484829812` PASS.
+2. **Stan obecny:** `website/` statyczne; tekst jasno mówi o wersji rozwojowej, DNS cache, braku blokowania i AI. Tag `v0.15.36` opublikowany; installer/release workflow `39484833324` PASS i asset/digest są dostępne. HTML/linki/package wskazują v0.15.36 (wydanie opublikowane; lokalny kandydat 0.15.37 wymaga walidacji witryny); website test/lint/build i Pages `39484829812` PASS.
 3. **Braki:** automatyczne sprawdzanie dostępności zewnętrznych linków w CI, dokument licencji, Enterprise install docs/clean Windows docs.
 4. **Decyzje:** każda obietnica ma test/evidence; status live zależy od CI i ustawień Pages; nie wymyślać licencji.
 5. **Zależności:** GitHub Pages, tag/release asset, decyzja właściciela.

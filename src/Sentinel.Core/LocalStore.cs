@@ -1,13 +1,18 @@
 using Microsoft.Data.Sqlite;
 using System.Globalization;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Sentinel.Contracts;
+using Sentinel.Core.Analysis;
 using Sentinel.Core.Configuration;
 using Sentinel.Core.Enterprise;
 namespace Sentinel.Core;
 public sealed class LocalStore : IEventRepository, ISettingsRepository
 {
     public const long DefaultMaximumDatabaseBytes = 512L * 1024 * 1024;
+    private static readonly DomainNames CorrelationDomainNames = new();
     private readonly string connectionString;
     private readonly long maximumDatabaseBytes;
     public string DatabasePath { get; }
@@ -63,7 +68,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 12) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 13) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -82,6 +87,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             CREATE TABLE IF NOT EXISTS downloaded_file_snapshot(path TEXT PRIMARY KEY COLLATE NOCASE, length INTEGER NOT NULL CHECK(length>=0), last_write_ticks INTEGER NOT NULL CHECK(last_write_ticks>=0));
             CREATE TABLE IF NOT EXISTS downloaded_file_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)));
             INSERT OR IGNORE INTO downloaded_file_monitor_metadata(id,initialized) VALUES(1,0);
+            CREATE TABLE IF NOT EXISTS domain_correlation(domain_key TEXT PRIMARY KEY CHECK(length(domain_key)=64), correlation_id TEXT NOT NULL CHECK(length(correlation_id)=36), last_seen_ticks INTEGER NOT NULL CHECK(last_seen_ticks>=0));
+            CREATE INDEX IF NOT EXISTS ix_domain_correlation_last_seen ON domain_correlation(last_seen_ticks);
             INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
             COMMIT;
             """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
@@ -144,6 +151,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
+        if (v < 13)
+        {
+            await Execute(c, "BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS domain_correlation(domain_key TEXT PRIMARY KEY CHECK(length(domain_key)=64), correlation_id TEXT NOT NULL CHECK(length(correlation_id)=36), last_seen_ticks INTEGER NOT NULL CHECK(last_seen_ticks>=0)); CREATE INDEX IF NOT EXISTS ix_domain_correlation_last_seen ON domain_correlation(last_seen_ticks); PRAGMA user_version=13; COMMIT;", ct);
+        }
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -205,6 +216,65 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: true, cancellationToken);
     /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
     public Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: false, cancellationToken);
+
+    /// <summary>Returns a short-lived local correlation id for the registrable domain, storing only its SHA-256 key.</summary>
+    public async Task<Guid> GetDomainCorrelationIdAsync(string host, DateTimeOffset observedAt,
+        TimeSpan? correlationWindow = null, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        if (host.Length > 253 || host.Any(char.IsControl)) throw new ArgumentException("Nieprawidłowa nazwa domeny.", nameof(host));
+        var window = correlationWindow ?? TimeSpan.FromSeconds(60);
+        if (window < TimeSpan.FromSeconds(1) || window > TimeSpan.FromMinutes(15))
+            throw new ArgumentOutOfRangeException(nameof(correlationWindow), "Okno korelacji musi mieścić się w zakresie 1 s–15 min.");
+        string asciiHost;
+        try { asciiHost = DomainNames.Ascii(host); }
+        catch (ArgumentException ex) { throw new ArgumentException("Nieprawidłowa nazwa domeny.", nameof(host), ex); }
+        if (asciiHost.Length is 0 or > 253 || IPAddress.TryParse(asciiHost.Trim('[', ']'), out _) ||
+            Uri.CheckHostName(asciiHost) != UriHostNameType.Dns || asciiHost.Split('.').Any(label => label.Length is 0 or > 63))
+            throw new ArgumentException("Korelacja wymaga poprawnej nazwy DNS, a nie adresu IP.", nameof(host));
+        var registrableDomain = CorrelationDomainNames.RegistrableDomain(asciiHost) ?? asciiHost;
+        var domainKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(registrableDomain)));
+        var observedTicks = observedAt.ToUniversalTime().Ticks;
+        var windowTicks = window.Ticks;
+        var pruneBefore = Math.Max(0, observedTicks - Math.Min(long.MaxValue, windowTicks * 2));
+
+        await using var connection = await Open(ct);
+        using var transaction = connection.BeginTransaction();
+        Guid correlationId = Guid.NewGuid();
+        using (var find = connection.CreateCommand())
+        {
+            find.Transaction = transaction;
+            find.CommandText = "SELECT correlation_id,last_seen_ticks FROM domain_correlation WHERE domain_key=$key";
+            find.Parameters.AddWithValue("$key", domainKey);
+            using var reader = await find.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var previousId = reader.GetString(0);
+                var previousTicks = reader.GetInt64(1);
+                if (Guid.TryParse(previousId, out var parsed) && observedTicks >= previousTicks && observedTicks - previousTicks <= windowTicks)
+                    correlationId = parsed;
+            }
+        }
+        using (var upsert = connection.CreateCommand())
+        {
+            upsert.Transaction = transaction;
+            upsert.CommandText = "INSERT INTO domain_correlation(domain_key,correlation_id,last_seen_ticks) VALUES($key,$id,$seen) ON CONFLICT(domain_key) DO UPDATE SET correlation_id=excluded.correlation_id,last_seen_ticks=excluded.last_seen_ticks";
+            upsert.Parameters.AddWithValue("$key", domainKey);
+            upsert.Parameters.AddWithValue("$id", correlationId.ToString("D"));
+            upsert.Parameters.AddWithValue("$seen", observedTicks);
+            await upsert.ExecuteNonQueryAsync(ct);
+        }
+        using (var prune = connection.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = "DELETE FROM domain_correlation WHERE last_seen_ticks<$cutoff AND domain_key<>$key; DELETE FROM domain_correlation WHERE domain_key IN (SELECT domain_key FROM domain_correlation ORDER BY last_seen_ticks DESC LIMIT -1 OFFSET 2048)";
+            prune.Parameters.AddWithValue("$cutoff", pruneBefore);
+            prune.Parameters.AddWithValue("$key", domainKey);
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+        return correlationId;
+    }
     public async Task<int> AddLocalOnlyBatchAsync(IReadOnlyCollection<SecurityEvent> items, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(items);
@@ -610,12 +680,13 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await Execute(c, "UPDATE events SET status=$s WHERE id=$id", cancellationToken, ("$s", (int)status), ("$id", id));
     }
     public async Task DeleteHistoryAsync(CancellationToken cancellationToken = default)
-    { await using var c = await Open(cancellationToken); await Execute(c, "DELETE FROM events; DELETE FROM enterprise_event_queue; VACUUM;", cancellationToken); }
+    { await using var c = await Open(cancellationToken); await Execute(c, "DELETE FROM events; DELETE FROM enterprise_event_queue; DELETE FROM domain_correlation; VACUUM;", cancellationToken); }
     public async Task ApplyRetentionAsync(int days, CancellationToken ct = default)
     {
         Validate(new AppSettings(days)); await using var c = await Open(ct);
         var cutoff = DateTimeOffset.UtcNow.AddDays(-days).ToString("O");
-        await Execute(c, "DELETE FROM events WHERE timestamp < $cutoff; DELETE FROM enterprise_event_queue WHERE occurred_at < $cutoff", ct, ("$cutoff", cutoff));
+        var correlationCutoff = Math.Max(0, DateTimeOffset.UtcNow.ToUniversalTime().Ticks - TimeSpan.FromMinutes(15).Ticks);
+        await Execute(c, "DELETE FROM events WHERE timestamp < $cutoff; DELETE FROM enterprise_event_queue WHERE occurred_at < $cutoff; DELETE FROM domain_correlation WHERE last_seen_ticks<$correlationCutoff", ct, ("$cutoff", cutoff), ("$correlationCutoff", correlationCutoff));
     }
     public async Task ExportAsync(string path, CancellationToken ct = default)
     {
@@ -663,7 +734,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v12 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v13 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -681,7 +752,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -689,11 +760,13 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 : backupVersion == 7
                     ? "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata')"
                     : "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
-            if (backupVersion is 9 or 10 or 11 or 12)
+            if (backupVersion is 9 or 10 or 11 or 12 or 13)
             {
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata')";
             }
-            var expectedTables = backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            if (backupVersion == 13)
+                required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation')";
+            var expectedTables = backupVersion == 13 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
@@ -733,7 +806,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 DELETE FROM settings;
                 INSERT INTO settings(id,json) SELECT id,json FROM restore_source.settings;
                 DELETE FROM enterprise_event_queue;
-                """ + queueRestore;
+                """ + queueRestore + "DELETE FROM domain_correlation;";
             await command.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
             return count;

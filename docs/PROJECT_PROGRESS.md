@@ -7,6 +7,10 @@ Audyt obejmuje 20 obszarów: 6 zweryfikowanych w opisanym zakresie, 12 częścio
 
 Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryteriów, a udział UI zawyżałby gotowość produktu bezpieczeństwa. Postęp liczę przez zweryfikowane przepływy i jawne ograniczenia.
 
+## Kandydat lokalny — 0.15.37
+
+- Dodaje czasową korelację domeny registrable-domain pomiędzy wykryciami DNS, historią przeglądarki i ręcznym URL (okno 60 s, przesuwane). W SQLite v13 przechowywany jest tylko SHA-256 domeny; surowy host nie jest zapisywany w mapie. Zdarzenia pozostają osobne, a backup restore czyści ulotne grupy. Testy .NET 202/202, desktop 6/6, Engine IPC, desktop production build, website test/lint/build oraz lokalny installer build/self-test PASS. Lokalny instalator 279359353 B, SHA-256 `5CA5B78A1650ECC8CF1EF10BB3E012D2B549558BE33F329D5F3E35D134B8493B`; Windows CI, Pages i publikacja assetu dla kandydata pozostają do wykonania.
+
 ## Ostatni etap — 2026-10-20
 
 - W v0.15.32 zdarzenia Enterprise zachowują wersję schematu, dozwolone źródło i bezpieczną wersję reguły od trwałej kolejki klienta do API, bazy serwera i widoku administratora. Migracje lokalna v9→v10 i serwerowa v7→v8 zachowują stare rekordy z wartościami domyślnymi; backup/restore obsługuje v10.
@@ -74,7 +78,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## W trakcie / zablokowane
 
-- Wdrożenia planów 001–010 pozostają w toku. PLAN-001 ma snapshot TCP/UDP, trwałe baseline'y TCP i procesów, obsługę odmowy zapisu i pięciominutowy soak; krótkie połączenia/procesy i event stream pozostają niewdrożone; korelacja process-to-network jest ograniczona do zgodnego PID/nazwy i okna 60 s. PLAN-003 ma opt-in monitoring Downloads, odtwarzanie zmian po overflow i restarcie, SQLite v9, limit baseline'u oraz automatyczne ponowienie startu podczas kolejnego collect; pozostają realny MalwareBazaar z autoryzowanym kluczem oraz test rzeczywiście przekierowanego folderu. PLAN-004/005 mają przetestowane etapy lokalnego schematu, FTS5 i opt-in Ollama, ale brak realnego modelu do weryfikacji; test potwierdza już leksykalne przekazywanie trafień KB do Ollama. PLAN-007 ma limity historii i wiedzy, kopie/restore, diagnostykę, współbieżność, symulowany `SQLITE_FULL`, retry i ACL fail-closed. PLAN-009 publikuje v0.15.35; website test/lint/build i Pages `39482606648` PASS.
+- Wdrożenia planów 001–010 pozostają w toku. PLAN-001 ma snapshot TCP/UDP, trwałe baseline'y TCP i procesów, obsługę odmowy zapisu i pięciominutowy soak; krótkie połączenia/procesy i event stream pozostają niewdrożone; korelacja process-to-network jest ograniczona do zgodnego PID/nazwy i okna 60 s; kandydat v0.15.37 dodaje korelację domeny DNS/przeglądarki/ręcznego URL z hashowaną, krótkotrwałą mapą. PLAN-003 ma opt-in monitoring Downloads, odtwarzanie zmian po overflow i restarcie, SQLite v9, limit baseline'u oraz automatyczne ponowienie startu podczas kolejnego collect; pozostają realny MalwareBazaar z autoryzowanym kluczem oraz test rzeczywiście przekierowanego folderu. PLAN-004/005 mają przetestowane etapy lokalnego schematu, FTS5 i opt-in Ollama, ale brak realnego modelu do weryfikacji; test potwierdza już leksykalne przekazywanie trafień KB do Ollama. PLAN-007 ma limity historii i wiedzy, kopie/restore, diagnostykę, współbieżność, symulowany `SQLITE_FULL`, retry i ACL fail-closed. PLAN-009 publikuje v0.15.36; website test/lint/build i Pages `39484829812` PASS.
 - Pozostają test fizycznego braku miejsca na odizolowanym wolumenie i ACL rzeczywistej lokalizacji danych po instalacji.
 - Wymaga czystej maszyny Windows: pełny GUI instalatora, upgrade/rollback/uninstall, autostart po restarcie i ręczna instalacja rozszerzeń Chrome/Edge.
 - Dodatkowa kontrola źródła DNS: `Microsoft-Windows-DNS-Client/Operational` jest wyłączony na bieżącej maszynie, więc zdarzenia DNS (w tym Query Completed 3008) nie mogą być tu zweryfikowane bez zmiany systemowej; nie włączano kanału.

@@ -176,6 +176,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const history = (await call('history')).result; assert.equal(history.length, 1);
   assert.ok(!JSON.stringify(history).includes('https://paypal.com.evil.test/login'));
   assert.equal(history[0].schemaVersion, 1); assert.equal(history[0].source, 'manual-analysis');
+  assert.ok(history[0].correlationId, 'manual URL warning should receive a short-lived domain correlation id');
   assert.equal((await call('eventStatus', { eventId: history[0].id, status: 'FalsePositive' })).ok, true);
   assert.equal((await call('history')).result[0].status, 'FalsePositive');
   assert.equal((await call('eventStatus', { eventId: history[0].id, status: 'Bogus' })).ok, false);

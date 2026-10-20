@@ -64,6 +64,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         var serialized = JsonSerializer.Serialize(result);
         Assert.DoesNotContain("evil.test", serialized);
         Assert.DoesNotContain("private@example.test", serialized);
+        Assert.DoesNotContain("CorrelationDomain", serialized);
     }
 
     [Fact]
@@ -83,7 +84,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         var pointer = Path.Combine(directory, "data-path.txt");
         await File.WriteAllTextAsync(pointer, directory);
         var result = new BrowserResponse("1", true, "2026.10.1", "Moderate", "SuspiciousNavigation", true,
-            [new BrowserIndicator("url.brand", "Domena przypomina znaną markę.")], "Niepewny adres.", new string('a', 64), "Sygnał lokalny.");
+            [new BrowserIndicator("url.brand", "Domena przypomina znaną markę.")], "Niepewny adres.", new string('a', 64), "Sygnał lokalny.", "login.example.test");
         var recorder = new BrowserHistoryRecorder(pointer);
 
         Assert.True(await recorder.RecordAsync(result));
@@ -94,6 +95,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.Equal("2026.10.1", eventRow.RuleVersion);
         Assert.Equal(1, eventRow.SchemaVersion);
         Assert.NotEqual(Guid.Empty, eventRow.EventId);
+        Assert.NotNull(eventRow.CorrelationId);
         Assert.DoesNotContain("paypal", eventRow.Explanation, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
     }
