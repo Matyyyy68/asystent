@@ -43,6 +43,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 - Aktywny klient Enterprise otrzymał pairing HTTPS z jednorazowym zaproszeniem i zgodą, DPAPI CurrentUser, status, heartbeat, stosowanie wspieranej polityki lokalnej oraz throttled sync kolejki metadanych. `LocalStore` nie tworzy kolejki Enterprise dla profilu User lub bez zgody; przy braku zgody Engine wstrzymuje całą komunikację z serwerem, nigdy nie wysyła przywróconej kolejki, a jej wyłączenie usuwa oczekujące metadane bez kasowania historii.
 - Dwie wcześniejsze rozgrzane próbki process snapshot + IPC + zapis SQLite trwały 15,3 ms i 28,8 ms; osobny benchmark zasobów opisano wyżej.
 - PLAN-007: test ACL odmawia bieżącemu użytkownikowi wyłącznie tworzenia plików, potwierdza bezpieczne niepowodzenie inicjalizacji SQLite i przywraca oryginalny ACL. Test retry procesu dochodzi teraz do odmowy zapisu małego zdarzenia, zamiast zakładać, że błąd dużego wpisu oznacza brak miejsca na każdy mniejszy wpis. Oba testy i pełny zestaw 159/159 przechodzą.
+- PLAN-001: `scripts/benchmark-engine.cjs --duration=300 --tcp-monitor` utrzymał testowy observer TCP przez 5 minut (60 próbek co 5 s), zapisał kontrolowane nowe połączenie, zachował stan aktywny i nie zgłosił pominiętych zmian. CPU 0,056% łącznej mocy procesorów; working set 45,2–57 MiB; `collect` mediana 5,6 ms, maksimum 675,9 ms. To pomiar pojedynczej sesji lokalnej.
 
 ## W trakcie / zablokowane
 
@@ -52,7 +53,7 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 - **Wydanie 0.15.11:** zdarzenie TCP opisuje zapisany start tego samego PID w poprzednich 60 s jako informacyjny kontekst; bez zmiany ryzyka, bez trwałej korelacji przez restart. Test korelacji i pełny zestaw .NET 158/158 PASS; UI lint/build, Engine IPC, Windows CI build/test/self-test oraz Pages PASS. Prerelease [v0.15.11](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.11): instalator 262489717 B, GitHub SHA-256 `3e20f1c1c175392e92a5c07ff4ee520895e37132a71c048219765feac4dd2786`.
 - Zaktualizowano README, witrynę, audyt luk i PLAN-001; krótkie połączenia nadal mogą umknąć, a UDP pozostaje ręcznym snapshotem.
 
-- W trakcie: szczegółowe wdrożenia planów 001–010; PLAN-001 ma snapshot TCP/UDP, próbkowane zdarzenia procesu i test awarii/odzyskania źródła; PLAN-004/005 mają wdrożone i przetestowane etapy. PLAN-007 ma limity historii i wiedzy, kopie/restore, diagnostykę, współbieżność, symulowany `SQLITE_FULL`, retry i ACL fail-closed. Pozostają test fizycznego braku miejsca na odizolowanym wolumenie, ACL rzeczywistej lokalizacji danych po instalacji i długotrwałe obciążenie.
+- W trakcie: szczegółowe wdrożenia planów 001–010; PLAN-001 ma snapshot TCP/UDP, próbkowane zdarzenia procesu, test awarii źródła i pięciominutowy soak; PLAN-004/005 mają wdrożone i przetestowane etapy. PLAN-007 ma limity historii i wiedzy, kopie/restore, diagnostykę, współbieżność, symulowany `SQLITE_FULL`, retry i ACL fail-closed. Pozostają test fizycznego braku miejsca na odizolowanym wolumenie i ACL rzeczywistej lokalizacji danych po instalacji.
 - Wymaga czystej maszyny Windows: pełny GUI instalatora, upgrade/rollback/uninstall, autostart po restarcie i ręczna instalacja rozszerzeń Chrome/Edge.
 - Dodatkowa kontrola źródła DNS: `Microsoft-Windows-DNS-Client/Operational` jest wyłączony na bieżącej maszynie, więc zdarzenia DNS (w tym Query Completed 3008) nie mogą być tu zweryfikowane bez zmiany systemowej; nie włączano kanału.
 - GitHub Actions dla prerelease `v0.15.1`, `v0.15.3`–`v0.15.7` oraz wdrożenia Pages zakończyły się sukcesem; EXE i pliki SHA-256 są opublikowane. API GitHub potwierdza nazwę, rozmiar i digest SHA-256 instalatora v0.15.7. Bezpośredni live URL i zawartość sidecara nie zostały niezależnie pobrane z tego środowiska. Workflow v0.15.2 nie przeszedł wydajnościowego testu 10k PID. Tag `v0.15.0` istniał bez odpowiadającego Release.
@@ -61,5 +62,5 @@ Nie wyliczam procentu ukończenia: brak stabilnego, ważonego katalogu kryterió
 
 ## Następny konkretny krok
 
-Wykonać soak test observera TCP oraz fizyczny test braku miejsca na odizolowanym wolumenie; zweryfikować ACL rzeczywistej lokalizacji danych po instalacji. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
+Wykonać fizyczny test braku miejsca na odizolowanym wolumenie i zweryfikować ACL rzeczywistej lokalizacji danych po instalacji. Następnie przejść do brakującej reputacji plików/feedu w PLAN-003. Pełna korelacja event-driven i obsługa połączeń krótkich pozostają poza zakresem pollingu co 10 s.
 
