@@ -37,31 +37,40 @@ public sealed class EnterpriseAgentLiveTlsTests
         var server = $"https://127.0.0.1:{port}";
         const string adminUsername = "tls-e2e-admin";
         const string adminPassword = "Tls-e2e-admin-password-42!";
-        using var process = new Process
+        Task<string> stderrTask = Task.FromResult(string.Empty);
+        Task<string> stdoutTask = Task.FromResult(string.Empty);
+        Process? process = null;
+
+        Process StartServer()
         {
-            StartInfo = new ProcessStartInfo("dotnet")
+            var instance = new Process
             {
-                FileName = "dotnet",
-                Arguments = $"\"{serverDll}\"",
-                WorkingDirectory = repository,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            }
-        };
-        process.StartInfo.Environment["ASPNETCORE_URLS"] = server;
-        process.StartInfo.Environment["ASPNETCORE_Kestrel__Certificates__Default__Path"] = pfxPath;
-        process.StartInfo.Environment["ASPNETCORE_Kestrel__Certificates__Default__Password"] = pfxPassword;
-        process.StartInfo.Environment["Sentinel__DataDirectory"] = databasePath;
-        process.StartInfo.Environment["Sentinel__BootstrapAdminUsername"] = adminUsername;
-        process.StartInfo.Environment["Sentinel__BootstrapAdminPassword"] = adminPassword;
+                StartInfo = new ProcessStartInfo("dotnet")
+                {
+                    FileName = "dotnet",
+                    Arguments = $"\"{serverDll}\"",
+                    WorkingDirectory = repository,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                }
+            };
+            instance.StartInfo.Environment["ASPNETCORE_URLS"] = server;
+            instance.StartInfo.Environment["ASPNETCORE_Kestrel__Certificates__Default__Path"] = pfxPath;
+            instance.StartInfo.Environment["ASPNETCORE_Kestrel__Certificates__Default__Password"] = pfxPassword;
+            instance.StartInfo.Environment["Sentinel__DataDirectory"] = databasePath;
+            instance.StartInfo.Environment["Sentinel__BootstrapAdminUsername"] = adminUsername;
+            instance.StartInfo.Environment["Sentinel__BootstrapAdminPassword"] = adminPassword;
+            Assert.True(instance.Start());
+            stdoutTask = instance.StandardOutput.ReadToEndAsync();
+            stderrTask = instance.StandardError.ReadToEndAsync();
+            return instance;
+        }
 
         try
         {
-            Assert.True(process.Start());
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
+            process = StartServer();
             using var handler = new HttpClientHandler
             {
                 ServerCertificateCustomValidationCallback = (_, presented, _, errors) =>
@@ -73,7 +82,7 @@ public sealed class EnterpriseAgentLiveTlsTests
             };
             using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
-            await WaitForReadyAsync(http, server, process, stderrTask, timeout.Token);
+            await WaitForReadyAsync(http, server, process, stdoutTask, stderrTask, timeout.Token);
 
             var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
                 new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
@@ -99,6 +108,17 @@ public sealed class EnterpriseAgentLiveTlsTests
 
             var item = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "url.suspicious_domain",
                 "manual-analysis", "2026.10.1");
+            // Keep the batch locally through an outage, restart the API on the same TLS identity,
+            // then retry. The test client pins only this temporary leaf certificate in memory;
+            // Windows certificate stores and system trust are never changed.
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(timeout.Token);
+            process.Dispose();
+            var outage = await Assert.ThrowsAsync<HttpRequestException>(() => agent.SendEventsAsync(
+                EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token));
+            Assert.NotNull(outage);
+            process = StartServer();
+            await WaitForReadyAsync(http, server, process, stdoutTask, stderrTask, timeout.Token);
             var firstBatch = await agent.SendEventsAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token);
             var replayedBatch = await agent.SendEventsAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token);
             Assert.Equal(1, firstBatch.Accepted);
@@ -122,11 +142,12 @@ public sealed class EnterpriseAgentLiveTlsTests
         }
         finally
         {
-            if (!process.HasExited)
+            if (process is not null && !process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
                 await process.WaitForExitAsync();
             }
+            process?.Dispose();
             try { Directory.Delete(temp, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
@@ -145,11 +166,11 @@ public sealed class EnterpriseAgentLiveTlsTests
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
     }
 
-    private static async Task WaitForReadyAsync(HttpClient http, string server, Process process, Task<string> stderr, CancellationToken cancellationToken)
+    private static async Task WaitForReadyAsync(HttpClient http, string server, Process process, Task<string> stdout, Task<string> stderr, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (process.HasExited) throw new InvalidOperationException("Live TLS server exited before readiness: " + await stderr);
+            if (process.HasExited) throw new InvalidOperationException("Live TLS server exited before readiness. stdout: " + await stdout + " stderr: " + await stderr);
             try
             {
                 using var response = await http.GetAsync(server + "/readyz", cancellationToken);
