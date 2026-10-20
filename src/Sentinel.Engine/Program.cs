@@ -303,6 +303,24 @@ while (await Console.In.ReadLineAsync() is { } line)
                 await store.ExportCsvAsync(csvExportPath);
                 result = new { exported = true };
                 break;
+            case "diagnosticsExport":
+                var diagnosticsPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku diagnostyki.");
+                var diagnostics = new
+                {
+                    exportedAtUtc = DateTimeOffset.UtcNow,
+                    applicationVersion = typeof(Program).Assembly.GetName().Version?.ToString(3),
+                    operatingSystem = new { version = Environment.OSVersion.Version.ToString(), architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString() },
+                    runtime = new { framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString() },
+                    monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
+                    settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,
+                        monitorForegroundChanges = settings.MonitorForegroundChanges, monitorNetworkConnections = settings.MonitorNetworkConnections,
+                        monitorDownloadedFiles = settings.MonitorDownloadedFiles, dnsPollIntervalSeconds = settings.DnsPollIntervalSeconds },
+                    storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() }
+                };
+                await using (var diagnosticsFile = new FileStream(diagnosticsPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    await JsonSerializer.SerializeAsync(diagnosticsFile, diagnostics, json);
+                result = new { exported = true };
+                break;
             case "databaseBackup":
                 var databaseBackupPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku kopii.");
                 await store.BackupAsync(databaseBackupPath);

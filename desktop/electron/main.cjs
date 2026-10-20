@@ -62,6 +62,13 @@ app.whenReady().then(() => {
       if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać kopii.');
       return call(method, { path: choice.filePath });
     }
+    if (method === 'diagnosticsExport') {
+      const date = new Date().toISOString().replace(/[:.]/g, '-');
+      const choice = await dialog.showSaveDialog(win, { defaultPath: `Sentinel-diagnostics-${date}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
+      if (choice.canceled || !choice.filePath) return null;
+      if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać diagnostyki.');
+      return call(method, { path: choice.filePath });
+    }
     if (!allowed.has(method) || JSON.stringify(data).length > 23000) throw new Error('Nieprawidłowe żądanie');
     return call(method, data);
   });

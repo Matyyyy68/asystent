@@ -4,6 +4,11 @@
 
 - `npm audit` potwierdza 8 umiarkowanych alertów wyłącznie w łańcuchu build-time `electron-builder`/`sprintf-js`; `--omit=dev` raportuje zero. Testowana propozycja npm downgrade do 26.5.0 dodaje 8 high i 1 critical przez `tar`; przywrócono builder 26.15.3.
 
+## 0.15.22 — prerelease (2026-10-20)
+
+- Dodano redagowany pakiet diagnostyczny JSON do pomocy technicznej. Zawiera wersje OS/runtime, stany monitorów, ustawienia nieidentyfikujące i metryki baz, bez historii zdarzeń, treści, URL-i, ścieżek i nazw procesów.
+- Testy .NET 179/179, Engine IPC z asercjami prywatności pakietu diagnostycznego i CSV, desktop lint/build PASS. Website test/lint/build PASS. Lokalny instalator `Sentinel.AI.Setup.0.15.22.exe` zbudowany; self-test PASS; SHA-256 `39B680321A7EFA9E6085E74B0A41A426D32CC3AF4355149D46184C7BE520C0CF`. Weryfikacja Windows CI i publikacja release/Pages po pushu.
+
 ## 0.15.21 — prerelease (2026-10-20)
 
 - Dodano eksport redagowanej historii CSV z poziomu widoku zdarzeń. Format zawiera metadane wszystkich zachowanych zdarzeń, nadaje się do otwarcia w Excelu i neutralizuje formuły arkusza.
