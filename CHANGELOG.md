@@ -9,7 +9,7 @@
 - Pięciominutowy soak TCP: 60 próbek co 5 s, kontrolowane połączenie zapisane, observer pozostał aktywny, 13 wpisów TCP bez pominiętych zmian; CPU 0,056%, working set 45,2–57 MiB, mediana collect 5,6 ms / max 675,9 ms. Jest to pojedynczy pomiar lokalny.
 - Testy .NET: 163/163 PASS; Engine IPC potwierdza import i dopasowanie syntetycznego pliku. UI lint i produkcyjny build PASS. Fizyczny test pełnego wolumenu i ACL ścieżki po instalacji pozostają do wykonania.
 - GitHub Actions Windows build/test/self-test oraz publikacja prerelease PASS. Opublikowany instalator: 262494837 B, SHA-256 `a795f35ed94634e9f847763dbb34117c89aa08d0fc1d8e8be66e081501b01464`. Lokalny artefakt (279295353 B) był odrębnym buildem.
-- Naprawiono linki pobrania i sumy na statycznej witrynie, które nadal wskazywały v0.15.3. Lokalny website test/lint/build z bazą `/asystent/` PASS; Pages workflow uruchomi się po pushu.
+- Naprawiono linki pobrania i sumy na statycznej witrynie, które nadal wskazywały v0.15.3. Website test/lint/build oraz Pages workflow PASS; publiczny URL zwrócił HTTP 200, wskazuje installer v0.15.12 i nie zawiera starego linku v0.15.3.
 
 ## 2026-10-19 — kandydat 0.15.11
 
