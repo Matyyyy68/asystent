@@ -24,6 +24,7 @@ public sealed class DownloadedFileMonitor : IDisposable
     private long rescanRequestedVersion;
     private long rescanCompletedVersion;
     private FileSystemWatcher? watcher;
+    private bool enabledRequested;
 
     private readonly record struct FileFingerprint(long Length, long LastWriteTicks);
 
@@ -65,6 +66,7 @@ public sealed class DownloadedFileMonitor : IDisposable
 
     public async Task SetEnabledAsync(LocalStore store, bool enabled, CancellationToken cancellationToken = default)
     {
+        enabledRequested = enabled;
         if (!enabled)
         {
             watcher?.Dispose();
@@ -145,6 +147,8 @@ public sealed class DownloadedFileMonitor : IDisposable
 
     public async Task<int> CollectAsync(LocalStore store, FileHashReputation reputation, CancellationToken cancellationToken = default)
     {
+        if (enabledRequested && watcher is null)
+            await SetEnabledAsync(store, true, cancellationToken);
         if (watcher is null) return 0;
         if (reputation.Status().HashCount == 0)
         {

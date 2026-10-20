@@ -130,8 +130,8 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         Assert.Contains("niedostępny", monitor.State, StringComparison.OrdinalIgnoreCase);
 
         await store.InitializeAsync();
-        await monitor.SetEnabledAsync(store, true);
-        Assert.Contains("monitoring Downloads działa", monitor.State, StringComparison.OrdinalIgnoreCase);
+        await monitor.CollectAsync(store, new FileHashReputation(Path.Combine(data, "reputation")));
+        Assert.Contains("zaimportuj lokalną listę hashy", monitor.State, StringComparison.OrdinalIgnoreCase);
         Assert.True((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
     }
 
