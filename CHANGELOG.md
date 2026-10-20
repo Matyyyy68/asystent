@@ -8,7 +8,7 @@
 
 - Downloads watcher rozwiązuje ścieżkę przez Windows Known Folder, aby obsłużyć folder przekierowany przez użytkownika lub organizację; jeśli API niedostępne, używa `%USERPROFILE%\Downloads`.
 - Po zapełnieniu bounded queue watcher zgłasza łączną liczbę pominiętych zdarzeń w diagnostyce. Próbka pozostaje ograniczona do 512 MiB hashowanych danych.
-- Testy .NET/Engine IPC przechodzą lokalnie. Windows validation i installer self-test CI czekają na zakończenie.
+- Testy .NET 176/176, Engine IPC, website/desktop lint i build oraz Windows validation `39436563958` PASS; Pages `39436564072` i release/self-test `39437009572` PASS. [Release v0.15.18](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.18) zawiera instalator 262519413 B, SHA-256 `c929dda0ec88ce881682462b83a575deb4dd28de48eb7b8c460358027aacbb20` i sidecar `.sha256`.
 
 ## 0.15.17 — prerelease (2026-10-20)
 

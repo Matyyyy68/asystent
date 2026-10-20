@@ -1,7 +1,7 @@
 # PLAN-009 — witryna, dokumentacja i wydanie
 
 1. **Cel:** publikowane opisy, download i docs dokładnie odpowiadają testowanym możliwościom.
-2. **Stan obecny:** `website/` statyczne; tekst jasno mówi o wersji rozwojowej, DNS cache, braku blokowania i AI. GitHub Actions opublikował prerelease `v0.15.17` (262518901 B, SHA-256 `e34b86c62f24d426dd1a2c8888e4fcf8353110beae609587aee331004c6cd189`). HTML/linki wskazują v0.15.17, a test zgodności URL-i z wersją pakietu chroni przed rozjazdem. Website test/lint/build PASS; Pages deployment dla commita `9530ca9` zakończył się sukcesem w runie `39433555780`. Live HTTP check nieosiągalny w tej sesji z powodu blokady połączeń sieciowych sandboxa.
+2. **Stan obecny:** `website/` statyczne; tekst jasno mówi o wersji rozwojowej, DNS cache, braku blokowania i AI. GitHub Actions opublikował prerelease `v0.15.18` (262519413 B, SHA-256 `c929dda0ec88ce881682462b83a575deb4dd28de48eb7b8c460358027aacbb20`). HTML/linki wskazują v0.15.18, a test zgodności URL-i z wersją pakietu chroni przed rozjazdem. Website test/lint/build PASS; Pages deployment commita `eae250d` zakończył się sukcesem w runie `39436564072`. Live HTTP check nieosiągalny w tej sesji z powodu blokady połączeń sieciowych sandboxa.
 3. **Braki:** automatyczne sprawdzanie dostępności zewnętrznych linków w CI, dokument licencji, Enterprise install docs/clean Windows docs.
 4. **Decyzje:** każda obietnica ma test/evidence; status live zależy od CI i ustawień Pages; nie wymyślać licencji.
 5. **Zależności:** GitHub Pages, tag/release asset, decyzja właściciela.
@@ -11,5 +11,5 @@
 9. **Testy:** anchors/assets, Vite build, link check, release hash, accessible checks.
 10. **Akceptacja:** live asset tag/hash istnieje; marketing jest zgodny z ograniczeniami; licencja opisana przez właściciela.
 11. **Ryzyka:** host Pages inaccessible/disabled, release missing, dependency licenses.
-12. **Status:** `IN_PROGRESS` — prerelease `v0.15.17`, instalator, digest i sidecar potwierdzone; website test/lint/build PASS, Pages deployment zakończony sukcesem (Actions run `39433555780`). Windows validation `39433555518` oraz installer build/self-test/release `39434090207` PASS. Bezpośredni live-check z tej sesji zablokowała sieć sandboxa. Automatyczne sprawdzanie zewnętrznych linków, licencja i test czystego Windows pozostają.
+12. **Status:** `IN_PROGRESS` — prerelease `v0.15.18`, instalator, digest i sidecar potwierdzone; website test/lint/build PASS, Pages deployment zakończony sukcesem (Actions run `39436564072`). Windows validation `39436563958` oraz installer build/self-test/release `39437009572` PASS. Bezpośredni live-check z tej sesji zablokowała sieć sandboxa. Automatyczne sprawdzanie zewnętrznych linków, licencja i test czystego Windows pozostają.
 
