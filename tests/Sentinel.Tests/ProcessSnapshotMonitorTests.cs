@@ -115,9 +115,10 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
         var batchFailed = false;
         var full = false;
+        var fullExplanation = new string('e', 1800);
+        var fullRecommendation = new string('r', 1800);
         SecurityEvent Filler() => new(0, DateTimeOffset.UtcNow, RiskLevel.Information, "Proces zaobserwowany", "new-process",
-            "Windows pokazał nowy PID 99 o nazwie new-process od poprzedniej próbki. Krótkie procesy mogą zostać pominięte.",
-            "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
+            fullExplanation, fullRecommendation, EventStatus.New,
             Source: "process-snapshot", RuleVersion: Sentinel.Core.Analysis.ThreatAnalysisEngine.RulesVersion,
             ProcessId: 99, ProcessName: "new-process");
 

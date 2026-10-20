@@ -4,9 +4,13 @@
 
 - Test integracyjny bazy wiedzy dowodzi, że trafienia FTS5 trafiają do promptu jawnie włączonej Ollama jako niezaufane źródła; poprawiono opis F11, który błędnie twierdził, że wyszukiwany indeks nie jest używany w analizie.
 
-## 0.15.29 — prerelease (2026-10-20)
+## 0.15.30 — prerelease (2026-10-20)
 
-- Doprecyzowano w karcie bazy wiedzy, że przy włączonej Ollama do pięciu dopasowanych fragmentów trafia do modelu działającego lokalnie; fragmenty nie są wysyłane do Internetu ani zapisywane w historii.
+- Doprecyzowano w karcie bazy wiedzy, że przy włączonej Ollama do pięciu dopasowanych fragmentów trafia do modelu działającego lokalnie; fragmenty nie są wysyłane do Internetu ani zapisywane w historii zdarzeń. Test `SQLITE_FULL` wypełnia bazę dużymi, prawidłowymi rekordami i nie zależy od pozostałego miejsca po wycofaniu transakcji.
+
+## 0.15.29 — kandydat nieopublikowany (2026-10-20)
+
+- Tag nie przeszedł Windows installer workflow: test ponowienia po `SQLITE_FULL` nie wypełniał bazy deterministycznie na runnerze. Nie powstał Release ani instalator do pobrania. Poprawkę testu i korektę prywatności zawiera v0.15.30.
 
 ## 0.15.28 — prerelease (2026-10-20)
 
