@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## Unreleased
+
+- Odświeżono `docs/KNOWN-LIMITATIONS.md`: opisy aktywnego lokalnego AI, bazy wiedzy, skanowania plików i wydania instalatora odpowiadają aktualnemu kodowi oraz zakresowi testów.
+- Ponowna weryfikacja 2026-10-20: klient .NET 163/163, Enterprise 19/19, Engine IPC, testy statyczne i buildy produkcyjne desktop/website PASS.
+
 ## 0.15.13 — prerelease (2026-10-20)
 
 - Naprawiono ekstrakcję instalatora: przed sprawdzeniem rozmiaru pliku opróżniany jest bufor zapisu, a błąd podaje rozmiar skopiowany i oczekiwany.
