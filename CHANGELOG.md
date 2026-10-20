@@ -1,9 +1,9 @@
 # CHANGELOG
-## 0.15.35 — kandydat (2026-10-20)
+## 0.15.35 — prerelease (2026-10-20)
 
 - Lokalny model zdarzenia zapisuje uporządkowane, walidowane kody dowodowe bez treści ani URL-i. Monitoring procesu, TCP/UDP, DNS, pobranych plików i ręczna analiza dodają kody właściwe dla źródła; historia pokazuje je użytkownikowi, a eksport JSON/CSV i kopie je zachowują.
 - Migracja SQLite v11→v12 dodaje pole `evidence_codes`; starsze zdarzenia dostają pustą listę. Restore obsługuje kopie v6–v12, a Enterprise payload nie zawiera kodów ani lokalnych przesłanek. Poziom pewności nadal pozostaje pusty, dopóki nie zostanie skalibrowany.
-- Weryfikacja lokalna: .NET 198/198, desktop 4/4, TypeScript/lint/build UI PASS; installer build i self-test PASS, 279355769 B, SHA-256 `9C58FA8081C3604D8A323D22ABB77147997FB6E265B4BBCD27E60B25B04BBC7B`. Windows CI i release workflow oczekują.
+- Weryfikacja: .NET 198/198, desktop 4/4, TypeScript/lint/build UI PASS; lokalny installer build i self-test PASS, 279355769 B. Windows CI `39482606635`, website Pages `39482606648` oraz installer build/self-test/release `39482719349` PASS. [GitHub Release v0.15.35](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.35) udostępnia instalator 262555253 B, SHA-256 `6C00804C9C4E1B95DF068D679F34218E47572D0E83B87D93F08F238F92B977E5` i sidecar `.sha256`.
 
 ## 0.15.34 — prerelease (2026-10-20)
 
