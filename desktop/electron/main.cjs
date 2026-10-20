@@ -6,7 +6,7 @@ const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 let win, tray, engine, quitting = false, sequence = 0;
 const pending = new Map();
-const allowed = new Set(['status', 'history', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent']);
+const allowed = new Set(['status', 'history', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {

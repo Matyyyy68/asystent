@@ -122,6 +122,16 @@ public sealed class EnterpriseAgentTests
             Assert.Equal(token, await credentials.ReadAsync());
             await credentials.DeleteAsync();
             Assert.Null(await credentials.ReadAsync());
+
+            var malwareBazaarCredentials = new WindowsDpapiCredentialStore(directory, "malwarebazaar-auth-key.bin", 1, 256,
+                "Sentinel AI MalwareBazaar API key", "SentinelAI/MalwareBazaarAuthKey/v1");
+            const string apiKey = "test-malwarebazaar-auth-key";
+            await malwareBazaarCredentials.WriteAsync(apiKey);
+            var apiKeyFile = Path.Combine(directory, "malwarebazaar-auth-key.bin");
+            Assert.DoesNotContain(apiKey, Encoding.UTF8.GetString(await File.ReadAllBytesAsync(apiKeyFile)), StringComparison.Ordinal);
+            Assert.Equal(apiKey, await malwareBazaarCredentials.ReadAsync());
+            await malwareBazaarCredentials.DeleteAsync();
+            Assert.Null(await malwareBazaarCredentials.ReadAsync());
         }
         finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
     }

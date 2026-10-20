@@ -4,13 +4,14 @@ using System.Text;
 
 namespace Sentinel.Core.Enterprise;
 
-/// <summary>Stores the Enterprise bearer token protected for the current Windows user by DPAPI.</summary>
-public sealed class WindowsDpapiCredentialStore(string directory) : IDeviceCredentialStore
+/// <summary>Stores a credential protected for the current Windows user by DPAPI.</summary>
+public sealed class WindowsDpapiCredentialStore(string directory, string fileName = "enterprise-credential.bin",
+    int minimumLength = 40, int maximumLength = 100, string description = "Sentinel AI Enterprise device credential",
+    string entropyLabel = "SentinelAI/EnterpriseCredential/v1") : IDeviceCredentialStore
 {
     private const int UiForbidden = 0x1;
-    private const string Description = "Sentinel AI Enterprise device credential";
-    private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("SentinelAI/EnterpriseCredential/v1");
-    private readonly string path = Path.Combine(Path.GetFullPath(directory), "enterprise-credential.bin");
+    private readonly byte[] entropy = Encoding.UTF8.GetBytes(entropyLabel);
+    private readonly string path = Path.Combine(Path.GetFullPath(directory), Path.GetFileName(fileName));
 
     public async Task<string?> ReadAsync(CancellationToken cancellationToken = default)
     {
@@ -62,9 +63,9 @@ public sealed class WindowsDpapiCredentialStore(string directory) : IDeviceCrede
         return Task.CompletedTask;
     }
 
-    private static void ValidateToken(string token)
+    private void ValidateToken(string token)
     {
-        if (token is null || token.Length is < 40 or > 100 || token.Any(char.IsControl))
+        if (token is null || token.Length < minimumLength || token.Length > maximumLength || token.Any(char.IsControl))
             throw new ArgumentException("Nieprawidłowe poświadczenie urządzenia.", nameof(token));
     }
 
@@ -73,22 +74,22 @@ public sealed class WindowsDpapiCredentialStore(string directory) : IDeviceCrede
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Poświadczenia Enterprise wymagają Windows DPAPI.");
     }
 
-    private static byte[] Protect(byte[] input) => Transform(input, protect: true);
-    private static byte[] Unprotect(byte[] input) => Transform(input, protect: false);
+    private byte[] Protect(byte[] input) => Transform(input, protect: true);
+    private byte[] Unprotect(byte[] input) => Transform(input, protect: false);
 
-    private static byte[] Transform(byte[] input, bool protect)
+    private byte[] Transform(byte[] input, bool protect)
     {
         var inputPointer = Marshal.AllocHGlobal(input.Length);
-        var entropyPointer = Marshal.AllocHGlobal(Entropy.Length);
+        var entropyPointer = Marshal.AllocHGlobal(entropy.Length);
         try
         {
             Marshal.Copy(input, 0, inputPointer, input.Length);
-            Marshal.Copy(Entropy, 0, entropyPointer, Entropy.Length);
+            Marshal.Copy(entropy, 0, entropyPointer, entropy.Length);
             var inputBlob = new DataBlob(input.Length, inputPointer);
-            var entropyBlob = new DataBlob(Entropy.Length, entropyPointer);
+            var entropyBlob = new DataBlob(entropy.Length, entropyPointer);
             DataBlob output;
             var success = protect
-                ? CryptProtectData(ref inputBlob, Description, ref entropyBlob, IntPtr.Zero, IntPtr.Zero, UiForbidden, out output)
+                ? CryptProtectData(ref inputBlob, description, ref entropyBlob, IntPtr.Zero, IntPtr.Zero, UiForbidden, out output)
                 : CryptUnprotectData(ref inputBlob, IntPtr.Zero, ref entropyBlob, IntPtr.Zero, IntPtr.Zero, UiForbidden, out output);
             if (!success) throw new CryptographicException($"Windows DPAPI failed with error {Marshal.GetLastWin32Error()}.");
             try
@@ -106,7 +107,7 @@ public sealed class WindowsDpapiCredentialStore(string directory) : IDeviceCrede
         finally
         {
             Marshal.Copy(new byte[input.Length], 0, inputPointer, input.Length);
-            Marshal.Copy(new byte[Entropy.Length], 0, entropyPointer, Entropy.Length);
+            Marshal.Copy(new byte[entropy.Length], 0, entropyPointer, entropy.Length);
             Marshal.FreeHGlobal(inputPointer); Marshal.FreeHGlobal(entropyPointer);
         }
     }

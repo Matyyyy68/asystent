@@ -19,6 +19,10 @@ var store = new LocalStore(directory);
 await store.InitializeAsync();
 var installationProfile = await store.GetInstallationProfileAsync();
 var deviceCredentials = new WindowsDpapiCredentialStore(directory);
+var malwareBazaarCredentials = new WindowsDpapiCredentialStore(directory, "malwarebazaar-auth-key.bin", 1, 256,
+    "Sentinel AI MalwareBazaar API key", "SentinelAI/MalwareBazaarAuthKey/v1");
+using var malwareBazaarHttpClient = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
+var malwareBazaar = new MalwareBazaarClient(malwareBazaarHttpClient);
 var knowledge = new LocalKnowledgeBase(directory);
 await knowledge.InitializeAsync();
 if (!File.Exists(pointer)) await File.WriteAllTextAsync(pointer, directory);
@@ -42,6 +46,11 @@ DateTimeOffset? lastEnterpriseSyncAttempt = null;
 DateTimeOffset? lastEnterpriseSync = null;
 string? enterpriseError = null;
 var enterpriseSyncIntervalSeconds = 60;
+async Task<bool> IsMalwareBazaarConfiguredAsync()
+{
+    try { return await malwareBazaarCredentials.ReadAsync() is not null; }
+    catch { return false; }
+}
 async Task<object> EnterpriseStatusAsync()
 {
     string? token = null;
@@ -186,6 +195,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, lastDnsRead, processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
+                    malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
@@ -401,6 +411,25 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var fileFeedStatus = await fileHashReputation.ImportFileAsync(fileFeedPath);
                 result = new { fileFeedStatus.HashCount, fileFeedStatus.ImportedAt,
                     explanation = $"Zaimportowano {fileFeedStatus.HashCount} hashy do lokalnej listy. Sentinel nie weryfikuje niezależnie źródła." };
+                break;
+            case "malwareBazaarConfigure":
+                if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Klucz MalwareBazaar wymaga Windows DPAPI.");
+                var malwareBazaarKey = request.GetProperty("apiKey").GetString() ?? "";
+                if (string.IsNullOrWhiteSpace(malwareBazaarKey)) await malwareBazaarCredentials.DeleteAsync();
+                else
+                {
+                    if (!request.GetProperty("consent").GetBoolean()) throw new InvalidDataException("Zapis klucza wymaga jawnej zgody na ręczne zapytania hashy.");
+                    MalwareBazaarClient.ValidateApiKey(malwareBazaarKey);
+                    await malwareBazaarCredentials.WriteAsync(malwareBazaarKey);
+                }
+                result = new { configured = !string.IsNullOrWhiteSpace(malwareBazaarKey) };
+                break;
+            case "malwareBazaarLookup":
+                if (!request.GetProperty("consent").GetBoolean()) throw new InvalidDataException("Zapytanie wymaga jawnej zgody na wysłanie SHA-256.");
+                var configuredMalwareBazaarKey = await malwareBazaarCredentials.ReadAsync()
+                    ?? throw new InvalidOperationException("Najpierw skonfiguruj osobisty Auth-Key MalwareBazaar.");
+                var malwareHash = request.GetProperty("sha256").GetString() ?? "";
+                result = await malwareBazaar.LookupAsync(malwareHash, configuredMalwareBazaarKey);
                 break;
             case "clearHistory": await store.DeleteHistoryAsync(); result = new { deleted = true }; break;
             default: throw new InvalidDataException("Nieznana metoda.");

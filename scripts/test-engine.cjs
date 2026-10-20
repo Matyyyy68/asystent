@@ -27,6 +27,12 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.enterprise.variant, 'User');
   assert.equal(initialStatus.result.enterprise.paired, false);
   assert.equal(initialStatus.result.settings.monitorNetworkConnections, false, 'continuous TCP monitoring must default to off');
+  assert.equal((await call('malwareBazaarLookup', { sha256: 'a'.repeat(64), consent: false })).ok, false,
+    'MalwareBazaar hash lookup must require explicit consent');
+  assert.equal((await call('malwareBazaarConfigure', { apiKey: 'synthetic-test-key', consent: false })).ok, false,
+    'MalwareBazaar key configuration must require explicit consent');
+  assert.equal((await call('status')).result.malwareBazaar.configured, false,
+    'a rejected key configuration must not persist the API key');
   assert.equal((await call('enterprisePair', { server: 'https://sentinel.example', invitationCode: 'test-code', shareSecurityMetadata: false })).ok, false,
     'Enterprise pairing must require explicit metadata consent');
   assert.equal((await call('enterpriseConsent', { enabled: true })).ok, false,
