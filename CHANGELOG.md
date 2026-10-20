@@ -5,7 +5,7 @@
 - Naprawiono ekstrakcję instalatora: przed sprawdzeniem rozmiaru pliku opróżniany jest bufor zapisu, a błąd podaje rozmiar skopiowany i oczekiwany.
 - Self-test instalatora sprawdza teraz wskaźnik katalogu danych oraz prawidłowy nagłówek SQLite dla historii i lokalnej bazy wiedzy po uruchomieniu aplikacji w izolowanym katalogu.
 - Pełny lokalny build instalatora oraz jego self-test PASS; klient .NET 163/163, serwer 19/19, Engine IPC, desktop lint/build i website test/lint/build PASS.
-- Lokalny instalator: 279296377 B, SHA-256 `3c9f9d84f515a2496bde98332ffd9171b27c1aa706e9642283c404bdece5b218`. To odrębny build; instalator CI i release workflow pozostają do potwierdzenia dla taga `v0.15.13`.
+- Prerelease [v0.15.13](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.13): Windows CI build/test/self-test i publikacja PASS. Instalator CI ma 262496373 B, SHA-256 `25194a0f98fde84719bc6fcf565c8bce6269cf5932ab6163379f00420fe072fa`. Lokalny build (279296377 B, SHA-256 `3c9f9d84f515a2496bde98332ffd9171b27c1aa706e9642283c404bdece5b218`) był odrębnym artefaktem.
 
 ## 0.15.12 — prerelease (2026-10-20)
 
