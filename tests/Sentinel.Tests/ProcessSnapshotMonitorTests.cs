@@ -19,7 +19,9 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         snapshot.Add(42, "started-while-engine-stopped");
         var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
         Assert.Equal(1, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
-        Assert.Equal(42, Assert.Single(await store.ReadAsync()).ProcessId);
+        var started = Assert.Single(await store.ReadAsync());
+        Assert.Equal(42, started.ProcessId);
+        Assert.Equal(new[] { "process.snapshot.new-pid" }, started.EvidenceCodes);
 
         var restartedAgain = new ProcessSnapshotMonitor(() => new(snapshot));
         Assert.Equal(0, await restartedAgain.CollectAsync(store, paused: false, excludedApplications: ""));

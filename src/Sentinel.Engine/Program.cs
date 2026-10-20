@@ -250,7 +250,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                                 await RecordDetectionAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.High,
                                     "Domena na liście CERT Polska", "Cache DNS Windows", "Zaobserwowano domenę z aktualnej listy: " + name,
                                     "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New,
-                                    EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion), "url", "reputation.cert");
+                                    EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                                    EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"]), "url", "reputation.cert");
                                 detections.Add(name!);
                             }
                         }
@@ -413,7 +414,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     await RecordDetectionAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, assessment.Risk,
                         assessment.Category.ToString(), "Ręczna analiza", assessment.Explanation,
                         string.Join(" ", assessment.Recommendations), EventStatus.New,
-                        EventId: Guid.NewGuid(), Source: "manual-analysis", RuleVersion: ThreatAnalysisEngine.RulesVersion),
+                        EventId: Guid.NewGuid(), Source: "manual-analysis", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                        EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray()),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
                         "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
                 await store.ApplyRetentionAsync(settings.RetentionDays);

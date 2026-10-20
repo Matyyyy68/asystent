@@ -103,7 +103,8 @@ public sealed class ProcessSnapshotMonitor
                 "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: change.ProcessId, ProcessName: change.ProcessName,
-                CorrelationId: correlationId);
+                CorrelationId: correlationId,
+                EvidenceCodes: [change.Action == "Proces zaobserwowany" ? "process.snapshot.new-pid" : "process.snapshot.pid-absent"]);
         }).ToArray();
         try
         {

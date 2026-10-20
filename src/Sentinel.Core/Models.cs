@@ -5,7 +5,8 @@ public enum EventStatus { New, Reviewed, FalsePositive }
 public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel Risk,
     string Category, string Application, string Explanation, string Recommendation, EventStatus Status,
     Guid? EventId = null, string? Source = null, string? RuleVersion = null, int? Confidence = null, int SchemaVersion = 1,
-    int? ProcessId = null, string? ProcessName = null, Guid? CorrelationId = null);
+    int? ProcessId = null, string? ProcessName = null, Guid? CorrelationId = null,
+    IReadOnlyList<string>? EvidenceCodes = null);
 public sealed record AppSettings(int RetentionDays = 30, bool Notifications = true, bool Paused = true,
     int MinimumIntervalSeconds = 10,
     string ExcludedApplications = "1password;bitwarden;keepass;keepassxc;credentialuibroker;logonui",

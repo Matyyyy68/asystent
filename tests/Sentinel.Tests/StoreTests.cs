@@ -179,18 +179,45 @@ public sealed class StoreTests : IDisposable
     {
         var s = await Store();
         var correlationId = Guid.NewGuid();
-        var id = await s.AddLocalOnlyAsync(Event() with { Source = "process-snapshot", RuleVersion = "2026.10.1", ProcessId = 4242, ProcessName = "synthetic-process", CorrelationId = correlationId });
+        var evidence = new[] { "process.snapshot.new-pid", "network.tcp.connection-snapshot" };
+        var id = await s.AddLocalOnlyAsync(Event() with { Source = "process-snapshot", RuleVersion = "2026.10.1", ProcessId = 4242, ProcessName = "synthetic-process", CorrelationId = correlationId, EvidenceCodes = evidence });
         var item = Assert.Single(await (await Store()).ReadAsync());
         Assert.Equal(id, item.Id); Assert.NotEqual(Guid.Empty, item.EventId);
         Assert.Equal("process-snapshot", item.Source); Assert.Equal("2026.10.1", item.RuleVersion);
         Assert.Equal(4242, item.ProcessId); Assert.Equal("synthetic-process", item.ProcessName);
         Assert.Equal(correlationId, item.CorrelationId);
+        Assert.Equal(evidence, item.EvidenceCodes);
         Assert.Null(item.Confidence); // No calibrated confidence is claimed by deterministic rules.
         var export = Path.Combine(dir, "provenance.json"); await s.ExportAsync(export);
         var exported = Assert.Single(System.Text.Json.JsonSerializer.Deserialize<SecurityEvent[]>(await File.ReadAllTextAsync(export))!);
         Assert.Equal(item.EventId, exported.EventId); Assert.Equal(item.Source, exported.Source); Assert.Equal(item.RuleVersion, exported.RuleVersion);
         Assert.Equal(item.ProcessId, exported.ProcessId); Assert.Equal(item.ProcessName, exported.ProcessName);
         Assert.Equal(correlationId, exported.CorrelationId);
+        Assert.Equal(evidence, exported.EvidenceCodes);
+    }
+    [Fact] public async Task EvidenceCodesAreValidatedAndStayOutOfEnterprisePayload()
+    {
+        var store = await Store();
+        await Assert.ThrowsAsync<ArgumentException>(() => store.AddLocalOnlyAsync(Event() with { EvidenceCodes = ["contains spaces"] }));
+        await Assert.ThrowsAsync<ArgumentException>(() => store.AddLocalOnlyAsync(Event() with { EvidenceCodes = ["rule.alpha", "rule.alpha"] }));
+
+        await store.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
+        await store.AddAsync(Event() with { Risk = RiskLevel.High, EvidenceCodes = ["text.credentials", "url.brand"] });
+        var queued = Assert.Single(await store.ReadPendingEnterpriseEventsAsync());
+        Assert.DoesNotContain("EvidenceCodes", System.Text.Json.JsonSerializer.Serialize(queued));
+        Assert.Equal(new[] { "text.credentials", "url.brand" }, Assert.Single(await store.ReadAsync()).EvidenceCodes);
+    }
+    [Fact] public async Task CorruptPersistedEvidenceCodesFailClosed()
+    {
+        var store = await Store();
+        var id = await store.AddLocalOnlyAsync(Event() with { EvidenceCodes = ["rule.safe"] });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE events SET evidence_codes='[\"contains spaces\"]' WHERE id=$id";
+            command.Parameters.AddWithValue("$id", id); await command.ExecuteNonQueryAsync();
+        }
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.ReadAsync());
     }
     [Fact] public async Task VersionThreeHistoryMigratesWithoutLosingEvents()
     {
@@ -323,7 +350,7 @@ public sealed class StoreTests : IDisposable
     {
         var s = await Store();
         var correlationId = Guid.NewGuid();
-        await s.AddLocalOnlyAsync(Event() with { Explanation = "=HYPERLINK(\"https://evil.test\")", Recommendation = "quoted, value\nand second line", Application = " \t=HYPERLINK(\"https://evil.test\")", ProcessName = "-SUM(A1:A2)", CorrelationId = correlationId });
+        await s.AddLocalOnlyAsync(Event() with { Explanation = "=HYPERLINK(\"https://evil.test\")", Recommendation = "quoted, value\nand second line", Application = " \t=HYPERLINK(\"https://evil.test\")", ProcessName = "-SUM(A1:A2)", CorrelationId = correlationId, EvidenceCodes = ["url.brand", "text.credentials"] });
         var export = Path.Combine(dir, "events.csv"); await s.ExportCsvAsync(export);
         var bytes = await File.ReadAllBytesAsync(export);
         Assert.True(bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }));
@@ -333,6 +360,7 @@ public sealed class StoreTests : IDisposable
         Assert.Contains("\"' \t=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
         Assert.Contains("\"quoted, value\nand second line\"", csv);
         Assert.Contains(correlationId.ToString("D"), csv);
+        Assert.Contains("url.brand|text.credentials", csv);
     }
     [Fact] public async Task RestoreReplacesHistoryAndSettingsButPreservesInstalledIdentity()
     {
@@ -341,7 +369,8 @@ public sealed class StoreTests : IDisposable
         await source.InitializeAsync(new Sentinel.Core.Configuration.InstalledProductProfile(Sentinel.Core.Configuration.ProductVariant.EnterpriseClient,
             "https://sentinel.example", ShareSecurityMetadata: true));
         var correlationId = Guid.NewGuid();
-        await source.AddAsync(Event() with { Risk = RiskLevel.High, Category = "BackupEvent", Source = "process-snapshot", RuleVersion = "2026.10.1", CorrelationId = correlationId });
+        var evidence = new[] { "process.snapshot.new-pid", "network.tcp.connection-snapshot" };
+        await source.AddAsync(Event() with { Risk = RiskLevel.High, Category = "BackupEvent", Source = "process-snapshot", RuleVersion = "2026.10.1", CorrelationId = correlationId, EvidenceCodes = evidence });
         var restoredSettings = new AppSettings(RetentionDays: 30, Notifications: false, Paused: false);
         await source.SaveSettingsAsync(restoredSettings);
         var backupPath = Path.Combine(dir, "restore.db"); await source.BackupAsync(backupPath);
@@ -352,6 +381,7 @@ public sealed class StoreTests : IDisposable
 
         Assert.Equal("BackupEvent", Assert.Single(await target.ReadAsync()).Category);
         Assert.Equal(correlationId, Assert.Single(await target.ReadAsync()).CorrelationId);
+        Assert.Equal(evidence, Assert.Single(await target.ReadAsync()).EvidenceCodes);
         var restoredQueueItem = Assert.Single(await target.ReadPendingEnterpriseEventsAsync());
         Assert.Equal("process-snapshot", restoredQueueItem.Source);
         Assert.Equal("2026.10.1", restoredQueueItem.RuleVersion);
@@ -401,7 +431,7 @@ public sealed class StoreTests : IDisposable
         await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await c.OpenAsync(); using var command = c.CreateCommand();
-            command.CommandText = "DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; PRAGMA user_version=8;";
+            command.CommandText = "DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
             await command.ExecuteNonQueryAsync();
         }
         await store.InitializeAsync();
@@ -410,7 +440,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -419,7 +449,7 @@ public sealed class StoreTests : IDisposable
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync(); using var command = connection.CreateCommand();
-            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; PRAGMA user_version=10;";
+            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -429,7 +459,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(11L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(12L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
@@ -440,7 +470,7 @@ public sealed class StoreTests : IDisposable
         await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
         {
             await backup.OpenAsync(); using var command = backup.CreateCommand();
-            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; PRAGMA user_version=10;";
+            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -449,6 +479,26 @@ public sealed class StoreTests : IDisposable
         var restored = Assert.Single(await target.ReadAsync());
         Assert.Equal("LegacyV10Event", restored.Category);
         Assert.Null(restored.CorrelationId);
+        Assert.Empty(restored.EvidenceCodes!);
+    }
+    [Fact] public async Task RestoreAcceptsVersionElevenBackupWithoutEvidenceCodes()
+    {
+        var source = await Store();
+        await source.AddLocalOnlyAsync(Event() with { Category = "LegacyV11Event" });
+        var backupPath = Path.Combine(dir, "legacy-v11.db");
+        await source.BackupAsync(backupPath);
+        await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
+        {
+            await backup.OpenAsync(); using var command = backup.CreateCommand();
+            command.CommandText = "ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=11;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var target = await Store();
+        Assert.Equal(1, await target.RestoreAsync(backupPath));
+        var restored = Assert.Single(await target.ReadAsync());
+        Assert.Equal("LegacyV11Event", restored.Category);
+        Assert.Empty(restored.EvidenceCodes!);
     }
     [Fact] public async Task MonitoringSettingsSurviveReopening()
     {

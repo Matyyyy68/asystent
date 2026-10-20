@@ -226,7 +226,8 @@ public sealed class DownloadedFileMonitor : IDisposable
                     $"Nowy plik w Downloads ma SHA-256 {hash}, który znajduje się na lokalnej liście użytkownika. Źródło listy nie jest niezależnie zweryfikowane.",
                     "Sprawdź pochodzenie pliku i źródło listy. Dopasowanie nie jest automatycznym werdyktem zagrożenia.",
                     EventStatus.New, EventId: Guid.NewGuid(), Source: "downloads-local-hash",
-                    RuleVersion: ThreatAnalysisEngine.RulesVersion);
+                    RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                    EvidenceCodes: ["file.sha256.matches-local-list", "file.local-list-source-unverified"]);
                 await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), itemEvent, cancellationToken);
                 baseline[info.FullName] = fileFingerprint;
                 RememberFingerprint(fingerprint);

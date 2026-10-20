@@ -97,6 +97,7 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         var eventItem = Assert.Single(await store.ReadAsync(), item => item.Source == "tcp-connection-snapshot");
         Assert.Contains("korelacja czasowa", eventItem.Explanation);
         Assert.Equal(RiskLevel.Information, eventItem.Risk);
+        Assert.Equal(new[] { "network.tcp.connection-snapshot" }, eventItem.EvidenceCodes);
         var processEvent = Assert.Single(await store.ReadAsync(), item => item.Source == "process-snapshot");
         Assert.NotNull(eventItem.CorrelationId);
         Assert.Equal(processEvent.CorrelationId, eventItem.CorrelationId);

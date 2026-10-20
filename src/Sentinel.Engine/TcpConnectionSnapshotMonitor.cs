@@ -154,7 +154,8 @@ public sealed class TcpConnectionSnapshotMonitor
                 EventId: Guid.NewGuid(), Source: item.IsUdp ? "udp-endpoint-snapshot" : "tcp-connection-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName,
-                CorrelationId: correlationId);
+                CorrelationId: correlationId,
+                EvidenceCodes: [item.IsUdp ? "network.udp.local-endpoint-seen" : "network.tcp.connection-snapshot"]);
         }).ToArray();
 
         if (events.Length > 0)

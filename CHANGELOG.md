@@ -1,4 +1,10 @@
 # CHANGELOG
+## 0.15.35 — kandydat (2026-10-20)
+
+- Lokalny model zdarzenia zapisuje uporządkowane, walidowane kody dowodowe bez treści ani URL-i. Monitoring procesu, TCP/UDP, DNS, pobranych plików i ręczna analiza dodają kody właściwe dla źródła; historia pokazuje je użytkownikowi, a eksport JSON/CSV i kopie je zachowują.
+- Migracja SQLite v11→v12 dodaje pole `evidence_codes`; starsze zdarzenia dostają pustą listę. Restore obsługuje kopie v6–v12, a Enterprise payload nie zawiera kodów ani lokalnych przesłanek. Poziom pewności nadal pozostaje pusty, dopóki nie zostanie skalibrowany.
+- Weryfikacja lokalna: .NET 198/198, desktop 4/4, TypeScript/lint/build UI PASS; installer build i self-test PASS, 279355769 B, SHA-256 `9C58FA8081C3604D8A323D22ABB77147997FB6E265B4BBCD27E60B25B04BBC7B`. Windows CI i release workflow oczekują.
+
 ## 0.15.34 — prerelease (2026-10-20)
 
 - Procesy pojawiające się w migawce i nowe połączenia TCP i endpointy UDP z tego samego PID oraz nazwą procesu są łączone identyfikatorem korelacji, jeśli obserwacje są oddalone o najwyżej 60 sekund. Identyfikator jest lokalny; UI nazywa to korelacją czasową i wyjaśnia, że nie dowodzi związku przyczynowego.
