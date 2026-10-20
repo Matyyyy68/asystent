@@ -96,6 +96,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.Equal(1, eventRow.SchemaVersion);
         Assert.NotEqual(Guid.Empty, eventRow.EventId);
         Assert.NotNull(eventRow.CorrelationId);
+        Assert.Contains("url.brand", eventRow.EvidenceCodes!);
         Assert.DoesNotContain("paypal", eventRow.Explanation, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
     }

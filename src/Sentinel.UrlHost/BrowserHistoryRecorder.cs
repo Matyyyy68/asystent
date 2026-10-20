@@ -34,7 +34,8 @@ public sealed class BrowserHistoryRecorder
         var item = new SecurityEvent(0, observedAt, risk, $"Przeglądarka · {result.Category}", "Rozszerzenie Sentinel AI",
             explanation[..Math.Min(explanation.Length, 2000)],
             "Nie podawaj danych i zweryfikuj adres przez niezależny, znany kanał.", EventStatus.New,
-            Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion, CorrelationId: correlationId);
+            Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion, CorrelationId: correlationId,
+            EvidenceCodes: result.Indicators.Select(i => i.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray());
         await store.AddLocalOnlyAsync(item, cancellationToken);
         try
         {
