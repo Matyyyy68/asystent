@@ -1,6 +1,10 @@
 using System.IO.Compression;
 using System.Text;
 using Sentinel.Core.Knowledge;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
+using UglyToad.PdfPig.Fonts.Standard14Fonts;
+using UglyToad.PdfPig.Writer;
 using Xunit;
 
 namespace Sentinel.Tests;
@@ -72,12 +76,50 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task ExtractsSearchablePdfTextLocally()
+    {
+        var store = await CreateAsync();
+        var path = Path.Combine(directory, "payment-guide.pdf");
+        var builder = new PdfDocumentBuilder();
+        var page = builder.AddPage(PageSize.A4);
+        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+        page.AddText("Verify payment by phone before sending funds", 12, new PdfPoint(25, 700), font);
+        await File.WriteAllBytesAsync(path, builder.Build());
+
+        var document = await store.ImportAsync(path);
+        var hits = await store.SearchAsync("payment phone");
+
+        Assert.Equal("payment-guide.pdf", document.Name);
+        Assert.Contains(hits, hit => hit.DocumentId == document.Id && hit.SourceName == "payment-guide.pdf");
+    }
+
+    [Fact]
+    public async Task RejectsPdfOverPageLimitWithoutChangingIndex()
+    {
+        var store = await CreateAsync();
+        var path = Path.Combine(directory, "too-many-pages.pdf");
+        var builder = new PdfDocumentBuilder();
+        for (var index = 0; index <= LocalKnowledgeBase.MaximumPdfPages; index++) builder.AddPage(PageSize.A4);
+        await File.WriteAllBytesAsync(path, builder.Build());
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => store.ImportAsync(path));
+
+        Assert.Contains(LocalKnowledgeBase.MaximumPdfPages.ToString(), error.Message);
+        Assert.Empty(await store.ListAsync());
+    }
+
+    [Fact]
     public async Task RejectsUnsupportedFormatOversizedInputAndFtsSyntaxInjection()
     {
         var store = await CreateAsync();
-        var pdf = Path.Combine(directory, "document.pdf");
-        await File.WriteAllTextAsync(pdf, "%PDF synthetic");
-        await Assert.ThrowsAsync<NotSupportedException>(() => store.ImportAsync(pdf));
+        var unsupported = Path.Combine(directory, "document.bin");
+        await File.WriteAllTextAsync(unsupported, "unsupported content");
+        await Assert.ThrowsAsync<NotSupportedException>(() => store.ImportAsync(unsupported));
+
+        var malformedPdf = Path.Combine(directory, "malformed.pdf");
+        await File.WriteAllTextAsync(malformedPdf, "%PDF synthetic");
+        await Assert.ThrowsAnyAsync<Exception>(() => store.ImportAsync(malformedPdf));
+        Assert.Empty(await store.ListAsync());
 
         var large = Path.Combine(directory, "large.txt");
         await using (var stream = new FileStream(large, FileMode.CreateNew)) { stream.SetLength(LocalKnowledgeBase.MaximumFileBytes + 1L); }

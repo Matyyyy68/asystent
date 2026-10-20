@@ -1,4 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../Sentinel.Core/Sentinel.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Sentinel.Core/Sentinel.Core.csproj" />
+    <Content Include="../../third-party/PdfPig-LICENSE.txt"
+             Link="THIRD-PARTY-LICENSES/PdfPig-LICENSE.txt"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

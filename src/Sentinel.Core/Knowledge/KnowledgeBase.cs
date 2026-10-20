@@ -5,6 +5,8 @@ using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Data.Sqlite;
 using Sentinel.Core;
+using UglyToad.PdfPig;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 
 namespace Sentinel.Core.Knowledge;
 
@@ -23,12 +25,13 @@ public interface IKnowledgeBaseProvider
 
 /// <summary>
 /// Private, per-user FTS5 knowledge index. It deliberately makes no semantic/vector-search claim.
-/// Supported inputs are plain text, Markdown and DOCX; unsupported formats are rejected.
+/// Supported inputs are plain text, Markdown, DOCX and text-based PDF; unsupported formats are rejected.
 /// </summary>
 public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
 {
     public const int MaximumFileBytes = 10 * 1024 * 1024;
     public const int MaximumExtractedCharacters = 2_000_000;
+    public const int MaximumPdfPages = 500;
     public const int MaximumDocuments = 100;
     public const long MaximumIndexedCharacters = 20_000_000;
     private const int ChunkCharacters = 1200;
@@ -92,11 +95,16 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
         if (!info.Exists) throw new FileNotFoundException("Nie znaleziono wskazanego dokumentu.", filePath);
         if (info.Length is <= 0 or > MaximumFileBytes) throw new InvalidDataException("Dokument musi mieć od 1 bajta do 10 MB.");
         var extension = info.Extension.ToLowerInvariant();
-        if (extension is not (".txt" or ".md" or ".docx"))
-            throw new NotSupportedException("Obsługiwane formaty to TXT, Markdown i DOCX. PDF nie jest obsługiwany w tej wersji.");
+        if (extension is not (".txt" or ".md" or ".docx" or ".pdf"))
+            throw new NotSupportedException("Obsługiwane formaty to TXT, Markdown, DOCX i PDF.");
 
         var bytes = await ReadBoundedAsync(filePath, cancellationToken);
-        var extracted = extension == ".docx" ? ExtractDocx(bytes) : DecodeText(bytes);
+        var extracted = extension switch
+        {
+            ".docx" => ExtractDocx(bytes),
+            ".pdf" => ExtractPdf(bytes, cancellationToken),
+            _ => DecodeText(bytes)
+        };
         extracted = extracted.Replace("\0", "", StringComparison.Ordinal).Trim();
         if (extracted.Length == 0) throw new InvalidDataException("Dokument nie zawiera tekstu do zaindeksowania.");
         if (extracted.Length > MaximumExtractedCharacters) throw new InvalidDataException("Tekst po ekstrakcji przekracza limit 2 MB znaków.");
@@ -304,6 +312,25 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
     {
         try { return new UTF8Encoding(false, true).GetString(bytes); }
         catch (DecoderFallbackException exception) { throw new InvalidDataException("Dokument musi być zapisany w UTF-8.", exception); }
+    }
+
+    private static string ExtractPdf(byte[] bytes, CancellationToken cancellationToken)
+    {
+        using var input = new MemoryStream(bytes, writable: false);
+        using var document = PdfDocument.Open(input);
+        if (document.NumberOfPages > MaximumPdfPages)
+            throw new InvalidDataException($"PDF przekracza limit {MaximumPdfPages} stron.");
+
+        var text = new StringBuilder(Math.Min(MaximumExtractedCharacters, bytes.Length * 2));
+        for (var pageNumber = 1; pageNumber <= document.NumberOfPages; pageNumber++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var pageText = ContentOrderTextExtractor.GetText(document.GetPage(pageNumber));
+            if (text.Length + pageText.Length + Environment.NewLine.Length > MaximumExtractedCharacters)
+                throw new InvalidDataException("Tekst po ekstrakcji przekracza limit 2 MB znaków.");
+            if (pageText.Length > 0) text.AppendLine(pageText);
+        }
+        return text.ToString();
     }
 
     private static string ExtractDocx(byte[] bytes)

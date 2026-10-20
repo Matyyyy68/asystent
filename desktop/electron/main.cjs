@@ -28,7 +28,7 @@ app.whenReady().then(() => {
       return choice.canceled ? null : call('fileHashFeedImport', { path: choice.filePaths[0] });
     }
     if (method === 'chooseKnowledgeFile') {
-      const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Dokumenty tekstowe', extensions: ['txt', 'md', 'docx'] }] });
+      const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Dokumenty tekstowe i PDF', extensions: ['txt', 'md', 'docx', 'pdf'] }] });
       return choice.canceled ? null : call('knowledgeImport', { path: choice.filePaths[0] });
     }
     if (['databaseRestore', 'knowledgeRestore'].includes(method)) {

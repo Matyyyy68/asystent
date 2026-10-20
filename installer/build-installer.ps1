@@ -22,6 +22,10 @@ try {
   }
   npx.cmd electron-builder --win dir
   if ($LASTEXITCODE) { throw 'Electron packaging failed.' }
+  $pdfPigLicense = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/PdfPig-LICENSE.txt'
+  if (!(Test-Path $pdfPigLicense) -or !(Select-String -Path $pdfPigLicense -Pattern 'Apache License' -Quiet)) {
+    throw 'PdfPig license notice is missing from the packaged application.'
+  }
 } finally { Pop-Location }
 if (Test-Path $payload) { Remove-Item $payload -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
