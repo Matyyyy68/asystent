@@ -65,9 +65,15 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         using var monitor = new DownloadedFileMonitor(downloads, maximumBaselineFiles: 2);
         await monitor.SetEnabledAsync(store, true);
         await File.WriteAllTextAsync(Path.Combine(downloads, "new.bin"), payload);
-        await Task.Delay(TimeSpan.FromMilliseconds(900));
+        var detected = 0;
+        for (var attempt = 0; attempt < 50 && !monitor.State.Contains("osiągnięto limit 2", StringComparison.OrdinalIgnoreCase); attempt++)
+        {
+            detected += await monitor.CollectAsync(store, reputation);
+            if (!monitor.State.Contains("osiągnięto limit 2", StringComparison.OrdinalIgnoreCase))
+                await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
 
-        Assert.Equal(0, await monitor.CollectAsync(store, reputation));
+        Assert.Equal(0, detected);
         Assert.Contains("osiągnięto limit 2", monitor.State, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await store.ReadAsync());
     }
