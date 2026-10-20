@@ -6,11 +6,11 @@
 
 ## 0.15.30 — prerelease (2026-10-20)
 
-- Doprecyzowano w karcie bazy wiedzy, że przy włączonej Ollama do pięciu dopasowanych fragmentów trafia do modelu działającego lokalnie; fragmenty nie są wysyłane do Internetu ani zapisywane w historii zdarzeń. Test `SQLITE_FULL` wypełnia bazę dużymi, prawidłowymi rekordami i nie zależy od pozostałego miejsca po wycofaniu transakcji.
+- Doprecyzowano w karcie bazy wiedzy, że przy włączonej Ollama do pięciu dopasowanych fragmentów trafia do modelu działającego lokalnie; fragmenty nie są wysyłane do Internetu ani zapisywane w historii zdarzeń. Test `SQLITE_FULL` wypełnia bazę dużymi, prawidłowymi rekordami i nie zależy od pozostałego miejsca po wycofaniu transakcji. Windows CI `39464916564`, Pages `39464916630` oraz installer build/self-test/release `39464922942` PASS. [Release v0.15.30](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.30): instalator 262536309 B, SHA-256 `cff5abd1781c6b41648c169827eccf26c15c7ff1b34bbdf91cab2ee069089daa` i sidecar. Lokalny self-test instalatora: 279336825 B, SHA-256 `6494FDE494DDCE0D458539FC5B7C27908754C30F0A0F58D77FCAD1D4E4F555D2`.
 
 ## 0.15.29 — kandydat nieopublikowany (2026-10-20)
 
-- Tag nie przeszedł Windows installer workflow: test ponowienia po `SQLITE_FULL` nie wypełniał bazy deterministycznie na runnerze. Nie powstał Release ani instalator do pobrania. Poprawkę testu i korektę prywatności zawiera v0.15.30.
+- Pierwsza próba Windows installer workflow dla tagu nie przeszła: test ponowienia po `SQLITE_FULL` nie wypełniał bazy deterministycznie na runnerze. Poprawkę testu i korektę prywatności zawiera v0.15.30.
 
 ## 0.15.28 — prerelease (2026-10-20)
 
