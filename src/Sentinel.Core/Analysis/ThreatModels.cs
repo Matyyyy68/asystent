@@ -1,7 +1,9 @@
 namespace Sentinel.Core.Analysis;
 
 public enum ThreatCategory { None, SuspiciousNavigation, CredentialPhishing, PaymentFraud, UnsafeExecution, SecurityTampering, SocialEngineering }
-public sealed record ThreatIndicator(string Id, string Description, int Weight, ThreatCategory Category);
+public sealed record KnowledgeCitation(string SourceName, int ChunkNumber, string Excerpt);
+public sealed record ThreatIndicator(string Id, string Description, int Weight, ThreatCategory Category,
+    IReadOnlyList<KnowledgeCitation>? KnowledgeCitations = null);
 public sealed record ThreatAssessment(ThreatCategory Category, RiskLevel Risk,
     IReadOnlyList<ThreatIndicator> Indicators, IReadOnlyList<string> Uncertainties,
     IReadOnlyList<string> Recommendations, string Explanation);

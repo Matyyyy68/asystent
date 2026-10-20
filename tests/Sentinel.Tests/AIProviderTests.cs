@@ -12,7 +12,7 @@ namespace Sentinel.Tests;
 public sealed class AIProviderTests
 {
     private static readonly string ValidResponse = """
-        {"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"High\",\"indicators\":[\"Prośba o pilne logowanie\"],\"uncertainties\":[\"Nadawca niezweryfikowany\"],\"recommendations\":[\"Zweryfikuj przez oficjalny kanał\"],\"explanation\":\"Treść łączy presję czasu z prośbą o dane.\"}"}}
+        {"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"High\",\"indicators\":[{\"description\":\"Prośba o pilne logowanie\",\"sourceReferences\":[]}],\"uncertainties\":[\"Nadawca niezweryfikowany\"],\"recommendations\":[\"Zweryfikuj przez oficjalny kanał\"],\"explanation\":\"Treść łączy presję czasu z prośbą o dane.\"}"}}
         """;
 
     [Fact]
@@ -112,7 +112,7 @@ public sealed class AIProviderTests
             using var client = new HttpClient(new DelegateHandler(async request =>
             {
                 requestBody = await request.Content!.ReadAsStringAsync();
-                return Json(ValidResponse);
+                return Json("""{"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"High\",\"indicators\":[{\"description\":\"Zweryfikuj kanał obsługi\",\"sourceReferences\":[1]}],\"uncertainties\":[\"Nadawca niezweryfikowany\"],\"recommendations\":[\"Zweryfikuj przez oficjalny kanał\"],\"explanation\":\"Treść prosi o weryfikację przelewu.\"}"}}""");
             }));
             var service = new AnalysisOrchestrator(new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames())),
                 new OllamaLocalProvider(client), knowledge);
@@ -126,8 +126,32 @@ public sealed class AIProviderTests
             Assert.Contains("verified through the official support channel", userContent, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Lokalne źródła wiedzy", userContent, StringComparison.OrdinalIgnoreCase);
             Assert.Contains(result.Uncertainties, value => value.Contains("credential-policy.txt", StringComparison.OrdinalIgnoreCase));
+            var citedIndicator = Assert.Single(result.Indicators, item => item.Id == "ai.context.0");
+            var citation = Assert.Single(citedIndicator.KnowledgeCitations!);
+            Assert.Equal("credential-policy.txt", citation.SourceName);
+            Assert.Contains("official support channel", citation.Excerpt, StringComparison.OrdinalIgnoreCase);
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task RejectsModelCitationsOutsideRetrievedKnowledgeSources()
+    {
+        var response = """{"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"High\",\"indicators\":[{\"description\":\"Prośba o dane\",\"sourceReferences\":[2]}],\"uncertainties\":[],\"recommendations\":[],\"explanation\":\"Wiadomość prosi o dane.\"}"}}""";
+        using var client = new HttpClient(new DelegateHandler(_ => Task.FromResult(Json(response))));
+        var provider = new OllamaLocalProvider(client);
+        await Assert.ThrowsAsync<InvalidDataException>(() => provider.AnalyzeAsync("http://localhost:11434", "synthetic-model",
+            new AnalysisContext("Synthetic", "Synthetic test input", DateTimeOffset.UtcNow), []));
+    }
+
+    [Fact]
+    public async Task RejectsNullModelIndicatorInsteadOfFailingAnalysisUnexpectedly()
+    {
+        var response = """{"message":{"content":"{\"category\":\"None\",\"risk\":\"Low\",\"indicators\":[null],\"uncertainties\":[],\"recommendations\":[],\"explanation\":\"Brak dodatkowych sygnałów.\"}"}}""";
+        using var client = new HttpClient(new DelegateHandler(_ => Task.FromResult(Json(response))));
+        var provider = new OllamaLocalProvider(client);
+        await Assert.ThrowsAsync<InvalidDataException>(() => provider.AnalyzeAsync("http://localhost:11434", "synthetic-model",
+            new AnalysisContext("Synthetic", "Synthetic test input", DateTimeOffset.UtcNow), []));
     }
 
     private static HttpResponseMessage Json(string content) => new(HttpStatusCode.OK) { Content = new StringContent(content, Encoding.UTF8, "application/json") };
