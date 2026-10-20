@@ -45,6 +45,15 @@ const match = sidecar.match(/^([a-f\d]{64})\s+(.+)$/i);
 if (!match || match[2].trim() !== installerName)
   throw new Error(`The published checksum sidecar for ${installerName} has an invalid format.`);
 
+const externalLinks = [...new Set(links.filter(link => {
+  const url = new URL(link);
+  return url.protocol === 'https:' && url.origin !== new URL(finalPageUrl).origin && link !== installerUrl && link !== sidecarUrl;
+}))];
+for (const link of externalLinks) {
+  const response = await request(link, { method: 'HEAD' });
+  console.log(`PASS: external link ${response.status} ${link}`);
+}
+
 console.log(`PASS: live page ${pageResponse.status} ${finalPageUrl}`);
 console.log(`PASS: installer ${installerResponse.status} ${installerUrl}`);
 console.log(`PASS: SHA-256 sidecar ${sidecarResponse.status} ${match[1].toUpperCase()}`);
