@@ -7,7 +7,7 @@
 ## 0.15.21 — prerelease (2026-10-20)
 
 - Dodano eksport redagowanej historii CSV z poziomu widoku zdarzeń. Format zawiera metadane wszystkich zachowanych zdarzeń, nadaje się do otwarcia w Excelu i neutralizuje formuły arkusza.
-- Testy .NET 179/179, Engine IPC z redakcją eksportu CSV, desktop lint/build PASS. Website test/lint/build PASS. Lokalny instalator `Sentinel.AI.Setup.0.15.21.exe` (279324025 B) zbudowany; self-test PASS; SHA-256 `DEB91B1F70A2B31E224245A8FD2B33649AC3E5F6F5DFFAA831E99966B7D83C21`. Weryfikacja Windows CI i publikacja release/Pages po pushu.
+- Testy .NET 179/179, Engine IPC z redakcją eksportu CSV, desktop lint/build PASS. Website test/lint/build PASS. Windows validation `39444882046`, Pages `39444882532` i installer release/self-test `39444882540` PASS. [Release v0.15.21](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.21): instalator 262523509 B, SHA-256 `218d4202b85e598e5423b9a1881e5df0e81ebf2adbc46b004e345bcd20f9da72` oraz sidecar `.sha256`. Lokalny build instalatora (279324025 B, hash `DEB91B1F70A2B31E224245A8FD2B33649AC3E5F6F5DFFAA831E99966B7D83C21`) również przeszedł self-test.
 
 ## 0.15.20 — prerelease (2026-10-20)
 
