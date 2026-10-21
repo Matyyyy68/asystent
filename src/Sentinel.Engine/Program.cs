@@ -354,13 +354,19 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var safeExitCode = requestedExitCode is null ? null : new string(requestedExitCode.Where(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_').Take(40).ToArray());
                 var hostStderrObserved = hostLifecycle.ValueKind == JsonValueKind.Object && hostLifecycle.TryGetProperty("stderrObserved", out var hostStderrElement)
                     && hostStderrElement.ValueKind == JsonValueKind.True;
+                var requestedExceptionType = hostLifecycle.ValueKind == JsonValueKind.Object && hostLifecycle.TryGetProperty("stderrExceptionType", out var hostExceptionElement)
+                    && hostExceptionElement.ValueKind == JsonValueKind.String ? hostExceptionElement.GetString() : null;
+                var safeExceptionType = requestedExceptionType is { Length: > 0 and <= 160 } && requestedExceptionType.EndsWith("Exception", StringComparison.Ordinal)
+                    && char.IsAsciiLetter(requestedExceptionType[0])
+                    && requestedExceptionType.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '+' or '`')
+                    ? requestedExceptionType : null;
                 var diagnostics = new
                 {
                     exportedAtUtc = DateTimeOffset.UtcNow,
                     applicationVersion = typeof(Program).Assembly.GetName().Version?.ToString(3),
                     operatingSystem = new { version = Environment.OSVersion.Version.ToString(), architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString() },
                     runtime = new { framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString() },
-                    hostLifecycle = new { status = safeHostStatus, lastExitCode = safeExitCode, stderrObserved = hostStderrObserved },
+                    hostLifecycle = new { status = safeHostStatus, lastExitCode = safeExitCode, stderrObserved = hostStderrObserved, stderrExceptionType = safeExceptionType },
                     monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                         processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
                     settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,

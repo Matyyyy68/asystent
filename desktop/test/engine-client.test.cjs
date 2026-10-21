@@ -42,7 +42,7 @@ test('restarts the engine with backoff and serves requests after recovery', asyn
   assert.deepEqual(await client.call('status'), { method: 'status' });
   engines[0].emit('exit', 23, null);
   assert.equal(client.status, 'restarting');
-  assert.deepEqual(client.diagnostics(), { status: 'restarting', lastExitCode: '23', stderrObserved: false });
+  assert.deepEqual(client.diagnostics(), { status: 'restarting', lastExitCode: '23', stderrObserved: false, stderrExceptionType: null });
   assert.equal(timers.size, 1);
   const [restartId, restart] = timers.entries().next().value;
   assert.equal(restart.delay, 1000);
@@ -87,14 +87,15 @@ test('does not restart after shutdown and rejects outstanding requests on child 
   assert.equal(client.status, 'stopped');
 });
 
-test('records only that stderr existed and never exposes its contents in state', () => {
+test('records a safe .NET exception type without exposing stderr contents', () => {
   const child = makeEngine();
   const client = new EngineClient('engine.exe', { spawnProcess: () => child });
   client.start();
-  child.stderr.write('private path or token');
+  child.stderr.write('Unhandled exception. System.InvalidOperationException: private path or token\n   at C:\\private\\user\\path');
   assert.equal(client.stderrObserved, true);
-  assert.deepEqual(client.diagnostics(), { status: 'starting', lastExitCode: null, stderrObserved: true });
+  assert.deepEqual(client.diagnostics(), { status: 'starting', lastExitCode: null, stderrObserved: true, stderrExceptionType: 'System.InvalidOperationException' });
   assert.equal(JSON.stringify(client.diagnostics()).includes('private path'), false);
+  assert.equal(JSON.stringify(client.diagnostics()).includes('user'), false);
   assert.equal(JSON.stringify(client.status).includes('private path'), false);
   client.dispose();
 });

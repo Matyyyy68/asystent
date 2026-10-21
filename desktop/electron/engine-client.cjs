@@ -21,6 +21,8 @@ class EngineClient {
     this.status = 'starting';
     this.lastExitCode = null;
     this.stderrObserved = false;
+    this.stderrExceptionType = null;
+    this.stderrPrefix = '';
     this.state('starting');
   }
 
@@ -38,7 +40,8 @@ class EngineClient {
     return {
       status: this.status,
       lastExitCode: this.lastExitCode === null ? null : String(this.lastExitCode).slice(0, 40),
-      stderrObserved: this.stderrObserved
+      stderrObserved: this.stderrObserved,
+      stderrExceptionType: this.stderrExceptionType
     };
   }
 
@@ -56,10 +59,25 @@ class EngineClient {
     }
     this.engine = child;
     this.stderrObserved = false;
+    this.stderrPrefix = '';
     child.on('error', error => this.failed(child, error?.code ?? 'spawn-error'));
     child.on('exit', (code, signal) => this.failed(child, code ?? signal ?? 'unknown'));
     child.stdin?.on('error', error => this.failed(child, error?.code ?? 'stdin-error'));
-    child.stderr?.on('data', () => { this.stderrObserved = true; });
+    child.stderr?.on('data', chunk => {
+      this.stderrObserved = true;
+      if (this.stderrExceptionType) return;
+      const text = this.stderrPrefix + chunk.toString('utf8');
+      const lines = text.split(/\r?\n/);
+      this.stderrPrefix = lines.pop().slice(0, 256);
+      for (const line of [...lines, this.stderrPrefix]) {
+        const match = /^Unhandled exception\.\s+([A-Za-z_][A-Za-z0-9_.+`]{0,159})(?::|$)/.exec(line);
+        if (match) {
+          this.stderrExceptionType = match[1];
+          this.stderrPrefix = '';
+          break;
+        }
+      }
+    });
     createInterface({ input: child.stdout }).on('line', line => {
       let response;
       try { response = JSON.parse(line); }

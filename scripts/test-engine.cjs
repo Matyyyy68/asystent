@@ -206,11 +206,14 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.ok(!exportedCsv.includes('Pilnie zaloguj się i podaj hasło'));
   assert.ok(!exportedCsv.includes('dont-send-me'));
   const diagnosticsPath = path.join(backups, 'diagnostics.json');
-  const diagnosticsResult = await call('diagnosticsExport', { path: diagnosticsPath, hostLifecycle: { status: 'restarting', lastExitCode: 'exit code 23', stderrObserved: true } }); assert.equal(diagnosticsResult.ok, true, diagnosticsResult.error);
+  const diagnosticsResult = await call('diagnosticsExport', { path: diagnosticsPath, hostLifecycle: { status: 'restarting', lastExitCode: 'exit code 23', stderrObserved: true, stderrExceptionType: 'System.InvalidOperationException' } }); assert.equal(diagnosticsResult.ok, true, diagnosticsResult.error);
   const diagnostics = readFileSync(diagnosticsPath, 'utf8');
   assert.ok(diagnostics.includes('applicationVersion') && diagnostics.includes('monitorDownloadedFiles'));
   assert.ok(diagnostics.includes('lastDnsReadUtc') && diagnostics.includes('lastDnsErrorUtc'));
-  assert.ok(diagnostics.includes('"hostLifecycle":{"status":"restarting","lastExitCode":"exitcode23","stderrObserved":true}'));
+  assert.ok(diagnostics.includes('"hostLifecycle":{"status":"restarting","lastExitCode":"exitcode23","stderrObserved":true,"stderrExceptionType":"System.InvalidOperationException"}'));
+  const untrustedDiagnosticsPath = path.join(backups, 'diagnostics-untrusted.json');
+  const untrustedDiagnosticsResult = await call('diagnosticsExport', { path: untrustedDiagnosticsPath, hostLifecycle: { stderrExceptionType: 'System.InvalidOperationException:private-data' } }); assert.equal(untrustedDiagnosticsResult.ok, true, untrustedDiagnosticsResult.error);
+  assert.ok(!readFileSync(untrustedDiagnosticsPath, 'utf8').includes('private-data'));
   assert.ok(!diagnostics.includes('paypal.com.evil.test'));
   assert.ok(!diagnostics.includes('LocalAIEndpoint') && !diagnostics.includes('ExcludedApplications'));
   assert.ok(!diagnostics.includes(root));
