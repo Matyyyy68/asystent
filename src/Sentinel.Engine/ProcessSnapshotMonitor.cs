@@ -11,6 +11,8 @@ public sealed class ProcessSnapshotMonitor
     private Dictionary<int, string> persistedProcesses = [];
     private bool storeBaselineLoaded;
     private bool storeBaselineInitialized;
+    private bool storeBaselineTruncated;
+    private bool knownSnapshotTruncated;
     private long droppedEvents;
     private readonly Dictionary<int, (DateTimeOffset Timestamp, Guid CorrelationId, string ProcessName)> recentlyObservedStarts = [];
     private readonly Func<Dictionary<int, string>> capture;
@@ -22,7 +24,7 @@ public sealed class ProcessSnapshotMonitor
     public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
-        knownProcesses = CaptureSnapshot();
+        (knownProcesses, knownSnapshotTruncated) = CaptureSnapshot();
     }
 
     public Guid? WasRecentlyObservedStart(int processId, DateTimeOffset timestamp)
@@ -42,7 +44,8 @@ public sealed class ProcessSnapshotMonitor
     public async Task<int> CollectAsync(LocalStore store, bool paused, string excludedApplications, CancellationToken cancellationToken = default)
     {
         Dictionary<int, string> current;
-        try { current = CaptureSnapshot(); }
+        bool currentTruncated;
+        try { (current, currentTruncated) = CaptureSnapshot(); }
         catch (Exception exception)
         {
             State = "Snapshot procesów niedostępny: " + exception.GetType().Name;
@@ -53,15 +56,18 @@ public sealed class ProcessSnapshotMonitor
         {
             var saved = await store.ReadProcessMonitorSnapshotAsync(cancellationToken);
             storeBaselineInitialized = saved.Initialized;
+            storeBaselineTruncated = saved.Truncated;
             if (storeBaselineInitialized)
             {
                 persistedProcesses = new(saved.Processes);
                 knownProcesses = new(saved.Processes);
+                knownSnapshotTruncated = saved.Truncated;
             }
             storeBaselineLoaded = true;
         }
 
-        var changes = GetChanges(knownProcesses, current, excludedApplications);
+        var previousSnapshotTruncated = knownSnapshotTruncated;
+        var changes = GetChanges(knownProcesses, current, excludedApplications, previousSnapshotTruncated, currentTruncated);
         var persistedCurrent = GetPersistableProcesses(current, excludedApplications);
         var (upserts, removed) = GetPersistedDelta(persistedProcesses, persistedCurrent);
         if (paused)
@@ -69,8 +75,8 @@ public sealed class ProcessSnapshotMonitor
             recentlyObservedStarts.Clear();
             try
             {
-                if (!storeBaselineInitialized || upserts.Length > 0 || removed.Length > 0)
-                    await store.CommitProcessMonitorChangesAsync([], upserts, removed, cancellationToken);
+                if (!storeBaselineInitialized || storeBaselineTruncated != currentTruncated || upserts.Length > 0 || removed.Length > 0)
+                    await store.CommitProcessMonitorChangesAsync([], upserts, removed, cancellationToken, currentTruncated);
             }
             catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
             {
@@ -79,7 +85,9 @@ public sealed class ProcessSnapshotMonitor
             }
             persistedProcesses = persistedCurrent;
             knownProcesses = current;
+            knownSnapshotTruncated = currentTruncated;
             storeBaselineInitialized = true;
+            storeBaselineTruncated = currentTruncated;
             State = "Próbkowanie procesów wstrzymane.";
             return 0;
         }
@@ -108,8 +116,8 @@ public sealed class ProcessSnapshotMonitor
         }).ToArray();
         try
         {
-            if (!storeBaselineInitialized || events.Length > 0 || upserts.Length > 0 || removed.Length > 0)
-                await store.CommitProcessMonitorChangesAsync(events, upserts, removed, cancellationToken);
+            if (!storeBaselineInitialized || storeBaselineTruncated != currentTruncated || events.Length > 0 || upserts.Length > 0 || removed.Length > 0)
+                await store.CommitProcessMonitorChangesAsync(events, upserts, removed, cancellationToken, currentTruncated);
         }
         catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
         {
@@ -119,11 +127,14 @@ public sealed class ProcessSnapshotMonitor
 
         knownProcesses = current;
         persistedProcesses = persistedCurrent;
+        knownSnapshotTruncated = currentTruncated;
         storeBaselineInitialized = true;
+        storeBaselineTruncated = currentTruncated;
         droppedEvents += newlyDroppedEvents;
         foreach (var change in toStore.Where(change => change.Action == "Proces zaobserwowany"))
             recentlyObservedStarts[change.ProcessId] = (now, correlationIds[change.ProcessId], change.ProcessName);
-        var capped = current.Count >= MaximumProcesses ? " Limit snapshotu osiągnięty." : "";
+        var capped = currentTruncated ? " Limit snapshotu osiągnięty; zdarzenia zakończenia pominięto dla niepełnej próbki." :
+            previousSnapshotTruncated ? " Poprzednia próbka była obcięta; zdarzenia nowych procesów pominięto w tym kroku." : "";
         State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, pominięto łącznie {droppedEvents}.{capped}";
         return toStore.Length;
     }
@@ -134,7 +145,7 @@ public sealed class ProcessSnapshotMonitor
         try
         {
             var snapshot = new Dictionary<int, string>(Math.Min(processes.Length, MaximumProcesses));
-            foreach (var process in processes.Take(MaximumProcesses))
+            foreach (var process in processes.OrderBy(process => process.Id).Take(MaximumProcesses + 1))
             {
                 string name;
                 try { name = process.ProcessName; }
@@ -146,19 +157,26 @@ public sealed class ProcessSnapshotMonitor
         finally { foreach (var process in processes) process.Dispose(); }
     }
 
-    private Dictionary<int, string> CaptureSnapshot() => capture().Take(MaximumProcesses)
-        .ToDictionary(entry => entry.Key, entry => string.IsNullOrWhiteSpace(entry.Value) ? "unknown" : entry.Value[..Math.Min(entry.Value.Length, 260)]);
+    private (Dictionary<int, string> Processes, bool Truncated) CaptureSnapshot()
+    {
+        var captured = capture();
+        var truncated = captured.Count > MaximumProcesses;
+        var processes = captured.OrderBy(entry => entry.Key).Take(MaximumProcesses)
+            .ToDictionary(entry => entry.Key, entry => string.IsNullOrWhiteSpace(entry.Value) ? "unknown" : entry.Value[..Math.Min(entry.Value.Length, 260)]);
+        return (processes, truncated);
+    }
 
-    private List<ProcessChange> GetChanges(IReadOnlyDictionary<int, string> previous, IReadOnlyDictionary<int, string> current, string excludedApplications)
+    private List<ProcessChange> GetChanges(IReadOnlyDictionary<int, string> previous, IReadOnlyDictionary<int, string> current,
+        string excludedApplications, bool previousTruncated, bool currentTruncated)
     {
         var excluded = new HashSet<string>((excludedApplications ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase)
         { "Sentinel.Engine" };
         var changes = new List<ProcessChange>();
         foreach (var (id, name) in current)
-            if ((!previous.TryGetValue(id, out var previousName) || !string.Equals(name, previousName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
+            if (!previousTruncated && (!previous.TryGetValue(id, out var previousName) || !string.Equals(name, previousName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
                 changes.Add(new("Proces zaobserwowany", id, name));
         foreach (var (id, name) in previous)
-            if ((!current.TryGetValue(id, out var currentName) || !string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
+            if (!currentTruncated && (!current.TryGetValue(id, out var currentName) || !string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
                 changes.Add(new("Proces zniknął z migawki", id, name));
         return changes;
     }

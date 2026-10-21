@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Snapshot procesów wybiera deterministycznie pierwsze 10 000 PID i zapisuje w SQLite v14, czy próbka została obcięta. Monitor pomija wnioski o startach lub zniknięciach, których nie da się wiarygodnie wyciągnąć z niepełnej próbki; po pełnej próbce wraca do normalnego wykrywania. Dodano test limitu, restartu, metadanych bez zmian baseline'u i migracji v13→v14. Lokalna walidacja Windows: .NET 211/211 bez pominięć, pełny `scripts/build-user.ps1 -Installer`, testy serwera 22/22 PASS; commit i CI oczekują.
+
 - Windows CI ujawniło, że kontrola Authenticode może zwrócić `Unknown` przy wolnym starcie Windows PowerShell. Zwiększono timeout z 10 do 30 s, pozostawiając wynik `Unknown` przy timeout/błędzie. Pełny lokalny build/test/self-test instalatora PASS; Windows CI `39615470449` PASS: .NET 208/208, desktop 6/6, Engine IPC, self-test instalatora, Enterprise API 22/22 i HTTP API smoke.
 
 - Test Windows uruchamia aktywny proces Engine przy lokalnym API Enterprise po TLS: zatrzymuje API, sprawdza `sync_failed` i zachowanie kolejki, uruchamia tę samą bazę/certyfikat ponownie, a po skonfigurowanym interwale zwykłe `collect` automatycznie wysyła kolejkę i czyści rekord. Serwer nie otrzymuje lokalnej treści ani wyjaśnienia. Test przypina certyfikat wyłącznie w pamięci Debug Engine; magazyny Windows są nietknięte. Pełne testy serwera Windows 22/22 PASS. Pełny build/self-test instalatora, .NET 208/208, API smoke, Windows-live DNS i desktop 6/6 przeszły dla poprzedniej wersji testu; workflow dla bieżącego commitu nie został potwierdzony.

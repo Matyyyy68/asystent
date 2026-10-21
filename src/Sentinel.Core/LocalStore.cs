@@ -68,7 +68,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 13) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 14) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -154,6 +154,16 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (v < 13)
         {
             await Execute(c, "BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS domain_correlation(domain_key TEXT PRIMARY KEY CHECK(length(domain_key)=64), correlation_id TEXT NOT NULL CHECK(length(correlation_id)=36), last_seen_ticks INTEGER NOT NULL CHECK(last_seen_ticks>=0)); CREATE INDEX IF NOT EXISTS ix_domain_correlation_last_seen ON domain_correlation(last_seen_ticks); PRAGMA user_version=13; COMMIT;", ct);
+        }
+        if (v < 14)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "process_monitor_metadata", "truncated", "INTEGER NOT NULL DEFAULT 0 CHECK(truncated IN (0,1))", ct);
+                await Execute(c, "PRAGMA user_version=14; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
@@ -314,18 +324,21 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<ProcessMonitorSnapshot> ReadProcessMonitorSnapshotAsync(CancellationToken ct = default)
     {
         await using var c = await Open(ct);
-        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized FROM process_monitor_metadata WHERE id=1";
-        var initializedValue = await metadata.ExecuteScalarAsync(ct) ?? throw new InvalidDataException("Brak metadanych migawki procesów.");
-        var initialized = Convert.ToInt32(initializedValue, CultureInfo.InvariantCulture) == 1;
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,truncated FROM process_monitor_metadata WHERE id=1";
+        await using var metadataReader = await metadata.ExecuteReaderAsync(ct);
+        if (!await metadataReader.ReadAsync(ct)) throw new InvalidDataException("Brak metadanych migawki procesów.");
+        var initialized = metadataReader.GetInt32(0) == 1;
+        var truncated = metadataReader.GetInt32(1) == 1;
+        await metadataReader.DisposeAsync();
         using var query = c.CreateCommand(); query.CommandText = "SELECT process_id,process_name FROM process_snapshot ORDER BY process_id LIMIT 10000";
         using var reader = await query.ExecuteReaderAsync(ct); var processes = new Dictionary<int, string>();
         while (await reader.ReadAsync(ct)) processes.Add(reader.GetInt32(0), reader.GetString(1));
-        return new(initialized, processes);
+        return new(initialized, processes, truncated);
     }
     /// <summary>Atomically records process events and advances the persisted process baseline.</summary>
     public async Task CommitProcessMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
         IReadOnlyCollection<KeyValuePair<int, string>> upserts, IReadOnlyCollection<int> removedProcessIds,
-        CancellationToken ct = default)
+        CancellationToken ct = default, bool truncated = false)
     {
         ArgumentNullException.ThrowIfNull(events); ArgumentNullException.ThrowIfNull(upserts); ArgumentNullException.ThrowIfNull(removedProcessIds);
         if (events.Count > 100 || upserts.Count > 10_000 || removedProcessIds.Count > 10_000)
@@ -357,7 +370,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         using (var initialized = c.CreateCommand())
         {
-            initialized.Transaction = transaction; initialized.CommandText = "UPDATE process_monitor_metadata SET initialized=1 WHERE id=1";
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE process_monitor_metadata SET initialized=1,truncated=$truncated WHERE id=1";
+            initialized.Parameters.AddWithValue("$truncated", truncated ? 1 : 0);
             await initialized.ExecuteNonQueryAsync(ct);
         }
         await transaction.CommitAsync(ct);
@@ -734,7 +748,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v13 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v14 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -752,7 +766,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -760,13 +774,13 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 : backupVersion == 7
                     ? "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata')"
                     : "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
-            if (backupVersion is 9 or 10 or 11 or 12 or 13)
+            if (backupVersion is 9 or 10 or 11 or 12 or 13 or 14)
             {
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata')";
             }
-            if (backupVersion == 13)
+            if (backupVersion is 13 or 14)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation')";
-            var expectedTables = backupVersion == 13 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            var expectedTables = backupVersion is 13 or 14 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";

@@ -26,7 +26,7 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     bool MonitorNetworkConnections = false,
     bool MonitorDownloadedFiles = false);
 public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys);
-public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes);
+public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false);
 public sealed record DownloadFileFingerprint(string Path, long Length, long LastWriteTicks);
 public sealed record DownloadMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, DownloadFileFingerprint> Files);
 public interface IEventRepository

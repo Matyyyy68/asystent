@@ -86,6 +86,58 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task TruncatedSnapshotsDoNotInventProcessStartsOrStopsAndSurviveRestart()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = Enumerable.Range(1, 10_000).ToDictionary(id => id, _ => "synthetic-process");
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+
+        snapshot.Add(0, "new-low-pid");
+        Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(0, Assert.Single(await store.ReadAsync()).ProcessId);
+        Assert.True((await store.ReadProcessMonitorSnapshotAsync()).Truncated);
+
+        var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Single(await store.ReadAsync());
+
+        snapshot.Remove(0);
+        Assert.Equal(1, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        var events = await store.ReadAsync();
+        Assert.Equal(2, events.Count);
+        Assert.Contains(events, item => item.ProcessId == 0 && item.Category == "Proces zniknął z migawki");
+        Assert.DoesNotContain(events, item => item.ProcessId == 10_000);
+        Assert.False((await store.ReadProcessMonitorSnapshotAsync()).Truncated);
+
+        snapshot.Add(0, "new-after-complete-sample");
+        Assert.Equal(1, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal("new-after-complete-sample", Assert.Single(await store.ReadAsync(),
+            item => item.ProcessId == 0 && item.Category == "Proces zaobserwowany" && item.Application == "new-after-complete-sample").Application);
+    }
+
+    [Fact]
+    public async Task TruncationMetadataAdvancesWhenExcludedProcessesDoNotChangePersistedBaseline()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = Enumerable.Range(1, 10_000).ToDictionary(id => id, _ => "synthetic-process");
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false,
+            excludedApplications: "synthetic-process;extra-process"));
+        Assert.False((await store.ReadProcessMonitorSnapshotAsync()).Truncated);
+
+        snapshot.Add(10_001, "extra-process");
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false,
+            excludedApplications: "synthetic-process;extra-process"));
+        Assert.True((await store.ReadProcessMonitorSnapshotAsync()).Truncated);
+
+        snapshot.Remove(10_001);
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false,
+            excludedApplications: "synthetic-process;extra-process"));
+        Assert.False((await store.ReadProcessMonitorSnapshotAsync()).Truncated);
+    }
+
+    [Fact]
     public async Task UnavailableProcessSourceIsReportedAndCollectionRecovers()
     {
         var unavailable = false;
