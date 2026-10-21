@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Instalator sprawdza przed stagingiem, czy wolne miejsce wystarczy na pakiet, zachowywane pliki aktualizacji i zapas. Self-test sprawdza odrzucenie zmienionego payloadu i brak miejsca oraz potwierdza zachowanie poprzedniej instalacji po błędzie podczas stagingu.
 - Ponowiono test GUI instalatora po potwierdzeniu użytkownika. Kreator uruchomił się, ale przechwytywanie okna zwróciło `FrameArrived timed out`; nie rozpoczęto instalacji. Kontrole potwierdziły brak procesu, rejestracji, autostartu i katalogu instalacji po próbie. Pełny cykl GUI pozostaje nieweryfikowany.
 - Zaktualizowano `ARCHITECTURE.md` do aktywnego klienta Electron/.NET 10, rozszerzenia MV3 i osobnego backendu Enterprise. Dodano macierz pokrycia procesu, TCP/UDP, DNS, HTTPS, przeglądarek, plików Downloads i VPN wraz z potwierdzonymi ograniczeniami; stary opis WPF 0.14 nie przedstawia już nieaktualnej architektury jako bieżącej.
 - Sprawdzono dostępny dziennik Application Windows po zgłoszonych wyjątkach .NET: nie znaleziono awarii Sentinel. Jedyny pasujący rekord dotyczy procesu `Cp5Harness`; obrazy błędu nie ujawniają przyczyny i nie ma lokalnego zdarzenia aplikacji, które pozwoliłoby ją potwierdzić.

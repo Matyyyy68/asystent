@@ -15,6 +15,7 @@ internal static class Program
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", Product);
     private static string PayloadHash => Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
         .FirstOrDefault(x => x.Key == "SentinelPayloadSha256")?.Value ?? "";
+    private const long MinimumFreeSpaceMargin = 32L * 1024 * 1024;
 
     [STAThread]
     private static int Main(string[] args)
@@ -38,9 +39,7 @@ internal static class Program
         {
             using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
                 ?? throw new InvalidDataException("Brak pakietu aplikacji w instalatorze.");
-            var actual = Convert.ToHexString(SHA256.HashData(stream));
-            if (PayloadHash.Length != 64 || !CryptographicOperations.FixedTimeEquals(
-                    Encoding.ASCII.GetBytes(actual), Encoding.ASCII.GetBytes(PayloadHash.ToUpperInvariant())))
+            if (!PayloadHashMatches(stream, PayloadHash))
                 throw new InvalidDataException("Pakiet instalacyjny jest uszkodzony (niezgodna suma kontrolna).");
             stream.Position = 0;
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
@@ -57,6 +56,28 @@ internal static class Program
         }
     }
 
+    private static bool PayloadHashMatches(Stream payload, string expectedHash)
+    {
+        if (expectedHash.Length != 64) return false;
+        var actual = Convert.ToHexString(SHA256.HashData(payload));
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(actual), Encoding.ASCII.GetBytes(expectedHash.ToUpperInvariant()));
+    }
+
+    private static long CalculateRequiredFreeSpace(long payloadBytes, long preservedBytes)
+    {
+        if (payloadBytes < 0 || preservedBytes < 0) throw new ArgumentOutOfRangeException(nameof(payloadBytes));
+        var margin = Math.Max(MinimumFreeSpaceMargin, payloadBytes / 20);
+        return checked(payloadBytes + preservedBytes + margin);
+    }
+
+    private static void EnsureSufficientFreeSpace(long availableBytes, long requiredBytes)
+    {
+        if (availableBytes < 0 || requiredBytes < 0) throw new ArgumentOutOfRangeException(nameof(availableBytes));
+        if (availableBytes < requiredBytes)
+            throw new IOException($"Za mało wolnego miejsca na dysku. Wymagane: {requiredBytes / 1_048_576:N0} MB, dostępne: {availableBytes / 1_048_576:N0} MB.");
+    }
+
     private static int SelfTest()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -65,6 +86,21 @@ internal static class Program
         var data = Path.Combine(localAppData, "SentinelAI-Setup-SelfTest-" + testId);
         try
         {
+            var samplePayload = Encoding.UTF8.GetBytes("sentinel-installer-integrity-test");
+            var sampleHash = Convert.ToHexString(SHA256.HashData(samplePayload));
+            using (var validPayload = new MemoryStream(samplePayload))
+                if (!PayloadHashMatches(validPayload, sampleHash)) throw new InvalidDataException("Test poprawnego hasha pakietu nie przeszedł.");
+            samplePayload[0] ^= 0xFF;
+            using (var tamperedPayload = new MemoryStream(samplePayload))
+                if (PayloadHashMatches(tamperedPayload, sampleHash)) throw new InvalidDataException("Weryfikator zaakceptował zmieniony pakiet.");
+
+            var requiredSpace = CalculateRequiredFreeSpace(100L * 1024 * 1024, 10L * 1024 * 1024);
+            EnsureSufficientFreeSpace(requiredSpace, requiredSpace);
+            var rejectedLowSpace = false;
+            try { EnsureSufficientFreeSpace(requiredSpace - 1, requiredSpace); }
+            catch (IOException ex) when (ex.Message.StartsWith("Za mało wolnego miejsca", StringComparison.Ordinal)) { rejectedLowSpace = true; }
+            if (!rejectedLowSpace) throw new InvalidDataException("Kontrola miejsca na dysku nie odrzuciła niewystarczającej przestrzeni.");
+
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
             var fallbackDirectory = DefaultDirectory;
             if (!ResolveInstallDirectory(root, fallbackDirectory).Equals(Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase)
@@ -86,6 +122,26 @@ internal static class Program
             }
             if (File.ReadAllText(preservedFile) != "preserve across update and rollback")
                 throw new InvalidDataException("Aktualizacja nie zachowała pliku spoza pakietu.");
+
+            byte[] engineBeforeSpaceFailure;
+            using (var engine = File.OpenRead(engineExecutable)) engineBeforeSpaceFailure = SHA256.HashData(engine);
+            var parentDirectory = Path.GetDirectoryName(root)!;
+            var stagingBeforeSpaceFailure = Directory.GetDirectories(parentDirectory, ".sentinel-install-*", SearchOption.TopDirectoryOnly).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            var spaceFailureInjected = false;
+            try
+            {
+                Install(root, desktopShortcut: false, autoStart: false,
+                    (_, percent) => { if (percent > 10) throw new IOException("Simulated disk full during staging."); }, CancellationToken.None,
+                    testMode: true, registeredInstallOverride: root);
+            }
+            catch (IOException ex) when (ex.Message == "Simulated disk full during staging.") { spaceFailureInjected = true; }
+            if (!spaceFailureInjected) throw new InvalidDataException("Testowy błąd braku miejsca nie przerwał stagingu.");
+            using (var engine = File.OpenRead(engineExecutable))
+                if (!CryptographicOperations.FixedTimeEquals(engineBeforeSpaceFailure, SHA256.HashData(engine)))
+                    throw new InvalidDataException("Błąd miejsca podczas stagingu zmienił poprzednią instalację.");
+            if (File.ReadAllText(preservedFile) != "preserve across update and rollback" ||
+                !stagingBeforeSpaceFailure.SequenceEqual(Directory.GetDirectories(parentDirectory, ".sentinel-install-*", SearchOption.TopDirectoryOnly).Order(StringComparer.OrdinalIgnoreCase)))
+                throw new InvalidDataException("Błąd miejsca podczas stagingu nie posprzątał plików tymczasowych albo zmienił dane użytkownika.");
 
             Directory.CreateDirectory(data);
             var app = Path.Combine(root, "Sentinel AI.exe");
@@ -157,7 +213,7 @@ internal static class Program
             VerifySmokeDatabase(databaseDirectory, "sentinel.db");
             VerifySmokeDatabase(databaseDirectory, "knowledge.db");
 
-            Log("SELF_TEST_SUCCESS payload=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
+            Log("SELF_TEST_SUCCESS payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
             return 0;
         }
         catch (Exception ex)
@@ -247,6 +303,27 @@ internal static class Program
             throw new InvalidOperationException("Wybrany folder zawiera pliki, które nie należą do Sentinel AI. Wybierz pusty folder albo lokalizację istniejącej instalacji.");
 
         var parent = Path.GetDirectoryName(target) ?? throw new InvalidOperationException("Nieprawidłowy folder instalacji.");
+        using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
+        using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
+        {
+            var files = archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)).ToArray();
+            var payloadPaths = files.Select(x => x.FullName.Replace('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var payloadBytes = files.Sum(x => x.Length);
+            long preservedBytes = 0;
+            if (Directory.Exists(target))
+                foreach (var existingFile in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
+                {
+                    var relative = Path.GetRelativePath(target, existingFile).Replace('\\', '/');
+                    if (relative.Equals("Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase) || payloadPaths.Contains(relative)) continue;
+                    preservedBytes = checked(preservedBytes + new FileInfo(existingFile).Length);
+                }
+
+            var requiredBytes = CalculateRequiredFreeSpace(payloadBytes, preservedBytes);
+            var volumeRoot = Path.GetPathRoot(parent) ?? throw new IOException("Nie można określić dysku instalacji.");
+            var availableBytes = new DriveInfo(volumeRoot).AvailableFreeSpace;
+            EnsureSufficientFreeSpace(availableBytes, requiredBytes);
+            Log($"INSTALL_SPACE_CHECK required={requiredBytes} available={availableBytes}");
+        }
         Directory.CreateDirectory(parent);
         var staging = Path.Combine(parent, ".sentinel-install-" + Guid.NewGuid().ToString("N"));
         var backup = Path.Combine(parent, ".sentinel-backup-" + Guid.NewGuid().ToString("N"));
