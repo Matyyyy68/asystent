@@ -11,7 +11,7 @@ try {
     dotnet publish "src/$project/$project.csproj" -c Release -r win-x64 --self-contained true -o artifacts/engine
     if ($LASTEXITCODE) { throw "Build $project failed" }
   }
-  node scripts/test-engine.cjs
+  node scripts/test-engine.cjs --dns-live
   if ($LASTEXITCODE) { throw 'IPC test failed' }
   Push-Location desktop
   try {
