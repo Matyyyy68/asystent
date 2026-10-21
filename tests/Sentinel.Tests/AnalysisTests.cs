@@ -84,6 +84,14 @@ public sealed class AnalysisTests
     [InlineData("https://apple-pie.example")]
     public void SimilarWordsAndTrustedSubdomainsDoNotTriggerBrandRule(string url) =>
         Assert.DoesNotContain(Urls().Analyze(url).Indicators, i => i.Id == "url.brand");
+    [Fact]
+    public void UserInfoThatMasksTheActualHostRaisesAtLeastAModerateWarning()
+    {
+        var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
+        Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
+        Assert.Equal(RiskLevel.Moderate, result.Risk);
+        Assert.Equal("2026.10.2", ThreatAnalysisEngine.RulesVersion);
+    }
     [Theory]
     [InlineData("http://example.test")]
     [InlineData("https://example.xyz")]
@@ -114,7 +122,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.1", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.2", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]

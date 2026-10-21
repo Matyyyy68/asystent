@@ -23,6 +23,7 @@ public sealed class DetectionScenarioEvaluationTests
         new("HTTP IP destination", "", "http://192.0.2.10:8080/login", true),
         new("visible link and actual target differ", "Sprawdź link przed kliknięciem.", "https://example.test", true, "https://paypal.com"),
         new("hosted brand name outside official domain", "", "https://login.paypal.com.attacker.test", true),
+        new("userinfo masks the actual destination host", "", "https://paypal.com@attacker.test/login", true),
 
         new("ordinary work urgency", "Pilnie wyślij raport do zespołu przed spotkaniem.", null, false),
         new("routine intranet sign-in", "Zaloguj się do firmowego intranetu, aby sprawdzić grafik.", null, false),
@@ -59,8 +60,8 @@ public sealed class DetectionScenarioEvaluationTests
 
         Assert.True(failures.Count == 0,
             $"Synthetic scenario mismatches (TP={truePositives}, FP={falsePositives}, TN={trueNegatives}, FN={falseNegatives}): {string.Join("; ", failures)}");
-        Assert.Equal(12, truePositives);
+        Assert.Equal(13, truePositives);
         Assert.Equal(12, trueNegatives);
-        Assert.Equal(24, Scenarios.Length);
+        Assert.Equal(25, Scenarios.Length);
     }
 }

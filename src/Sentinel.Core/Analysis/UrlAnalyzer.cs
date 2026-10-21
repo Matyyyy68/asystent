@@ -25,7 +25,7 @@ public sealed class UrlAnalyzer(DomainNames domains)
         if (uri.Scheme != "https") Add("url.http", "Połączenie nie używa HTTPS.", 1);
         if (ip) Add("url.ip", "Adres docelowy używa adresu IP zamiast nazwy domeny.", 1);
         if (!uri.IsDefaultPort) Add("url.port", "Adres zawiera niestandardowy port.", 1);
-        if (uri.UserInfo.Length > 0) Add("url.userinfo", "Adres zawiera część przed znakiem @, która może mylić co do celu.", 2);
+        if (uri.UserInfo.Length > 0) Add("url.userinfo", "Adres zawiera część przed znakiem @, która może mylić co do celu.", 3);
         if (host.Split('.').Any(l => l.StartsWith("xn--", StringComparison.Ordinal))) Add("url.idn", "Nazwa domeny zawiera znaki IDN; sama ta cecha nie dowodzi oszustwa.", 1);
         if (new[] { "zip", "mov", "top", "xyz" }.Contains(host.Split('.')[^1])) Add("url.tld", "Sufiks domeny wymaga dodatkowej weryfikacji.", 1);
         if (registered is not null)

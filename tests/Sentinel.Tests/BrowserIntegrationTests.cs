@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
 using Sentinel.Core;
+using Sentinel.Core.Analysis;
 using Sentinel.UrlHost;
 using Xunit;
 
@@ -83,7 +84,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         await store.InitializeAsync();
         var pointer = Path.Combine(directory, "data-path.txt");
         await File.WriteAllTextAsync(pointer, directory);
-        var result = new BrowserResponse("1", true, "2026.10.1", "Moderate", "SuspiciousNavigation", true,
+        var result = new BrowserResponse("1", true, ThreatAnalysisEngine.RulesVersion, "Moderate", "SuspiciousNavigation", true,
             [new BrowserIndicator("url.brand", "Domena przypomina znaną markę.")], "Niepewny adres.", new string('a', 64), "Sygnał lokalny.", "login.example.test");
         var recorder = new BrowserHistoryRecorder(pointer);
 
@@ -92,7 +93,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         var eventRow = Assert.Single(await store.ReadAsync());
         Assert.Equal("Przeglądarka · SuspiciousNavigation", eventRow.Category);
         Assert.Equal("browser-extension", eventRow.Source);
-        Assert.Equal("2026.10.1", eventRow.RuleVersion);
+        Assert.Equal(ThreatAnalysisEngine.RulesVersion, eventRow.RuleVersion);
         Assert.Equal(1, eventRow.SchemaVersion);
         Assert.NotEqual(Guid.Empty, eventRow.EventId);
         Assert.NotNull(eventRow.CorrelationId);

@@ -11,9 +11,11 @@ Pakiet diagnostyczny zawiera stan hosta: allowlistowany status, sanitowany kod z
 
 Procesy są teraz próbkowane co około 1 s (wcześniej co 5 s), aby zmniejszyć okno pomijania krótkich procesów. Benchmark kontrolowany 30 s: CPU 0,377% mocy logicznych procesorów i working set maks. 56 MiB przy interwale 1 s; przy 5 s: 0,130% i 51 MiB. Windows CI `39628465280` PASS; wynik benchmarku jest wstępny, z jednej lokalnej sesji. Event stream nadal nie działa z powodu odmowy dostępu ETW/WMI.
 
-Dodano 24 jawnie syntetyczne scenariusze detekcji: 12 podwyższonego ryzyka oraz 12 legalnych/niejednoznacznych. Reguły uzyskały TP=12, FP=0, TN=12, FN=0 na tym zestawie. To test regresyjny, nie niezależny pomiar skuteczności; F03 pozostaje częściowe do czasu dostępności reprezentatywnego korpusu z etykietami.
+Dodano 25 jawnie syntetycznych scenariuszy detekcji: 13 podwyższonego ryzyka oraz 12 legalnych/niejednoznacznych. Reguły uzyskały TP=13, FP=0, TN=12, FN=0 na tym zestawie, w tym dla URL-a `https://paypal.com@attacker.test/login`. To test regresyjny, nie niezależny pomiar skuteczności; F03 pozostaje częściowe do czasu dostępności reprezentatywnego korpusu z etykietami. Wersja reguł wzrosła do `2026.10.2`.
 
 Windows CI `39630341977` dla commita `c467939` zakończył się PASS: .NET 215/215 bez pominięć, Engine IPC, DNS/TCP/UDP, desktop 6/6, UI build, instalator i autotest instalatora, Enterprise API 22/22 oraz HTTP API smoke. Lokalnie odtworzyłem .NET 213 PASS / 2 pominięte z powodu DPAPI/profileu, desktop 6/6 i UI production build. Ujawniono też, że pauza nadal odświeża lokalny baseline PID/nazw co sekundę bez tworzenia zdarzeń; opis onboarding/UI, diagnostyka i test mówią teraz o tym wprost.
+
+Commit `659190d` z opisem pauzy w UI/diagnostyce przeszedł CI `39631656704` (aplikacja i Enterprise API PASS). Następna poprawka reguł URL została lokalnie zweryfikowana pełnym `scripts/build-user.ps1 -Installer`: .NET 216/216 bez pominięć, Engine IPC, Windows DNS/TCP/UDP, desktop 6/6, UI build i autotest instalatora PASS. Lokalny instalator testowy ma SHA-256 `76BFBC8F0C33B6EDCB22B99994F73E4BCBFFB73E4674142E1642BA3D257895C9`; nie jest wydaniem.
 
 **Następny krok:** kontynuować PLAN-001/PLAN-004 przez analizę bezpiecznej drogi do niezawodnych zdarzeń procesu i korelacji źródeł. Na maszynie audytu ETW/WMI odmawia dostępu; nie nadawać uprawnień ani nie zmieniać audytu systemowego bez jawnego, kontrolowanego testu. Wykonalne prace kodowe i testy offline mają pierwszeństwo, a wynik ma pozostać oznaczony jako polling, dopóki nie ma dowodu na event stream.
 
