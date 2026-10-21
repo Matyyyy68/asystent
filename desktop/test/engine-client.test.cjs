@@ -100,6 +100,32 @@ test('records a safe .NET exception type without exposing stderr contents', () =
   client.dispose();
 });
 
+test('updates the diagnostic exception type after a later engine crash', () => {
+  const engines = [];
+  const timers = new Map();
+  let nextTimer = 0;
+  const client = new EngineClient('engine.exe', {
+    spawnProcess: () => { const child = makeEngine(); engines.push(child); return child; },
+    setTimer: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
+    clearTimer: id => timers.delete(id)
+  });
+
+  client.start();
+  engines[0].stderr.write('Unhandled exception. System.InvalidOperationException: private first message\n');
+  engines[0].emit('exit', 1, null);
+  assert.equal(client.diagnostics().stderrExceptionType, 'System.InvalidOperationException');
+
+  const [restartId, restart] = timers.entries().next().value;
+  timers.delete(restartId);
+  restart.callback();
+  engines[1].stderr.write('Unhandled exception. System.IO.IOException: private second message\n');
+
+  const diagnostics = client.diagnostics();
+  assert.equal(diagnostics.stderrExceptionType, 'System.IO.IOException');
+  assert.equal(JSON.stringify(diagnostics).includes('private'), false);
+  client.dispose();
+});
+
 test('kills and restarts a hung engine after a request timeout', async () => {
   const timers = new Map();
   let nextTimer = 0;

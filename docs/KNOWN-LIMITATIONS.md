@@ -5,7 +5,7 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 ## Wydanie i instalacja
 
 - Publicznym wydaniem pozostaje [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący `main` zawiera późniejsze poprawki, w tym automatyczną rotację poświadczeń Enterprise po 90 dniach. Zmiany te nie trafiły jeszcze do opublikowanego instalatora; lokalny build bieżącego kodu nie jest publicznym wydaniem.
-- Pełny build i self-test instalatora przechodzą, ale pełnego kreatora GUI, rejestracji Native Messaging, skrótów, autostartu oraz install/update/uninstall nie zweryfikowano na czystym Windows. Próby automatyzacji nie mogły niezawodnie przechwycić ani wypełnić okna kreatora, więc instalacji nie rozpoczęto.
+- Pełny build i self-test instalatora przechodzą, ale pełnego cyklu GUI, rejestracji Native Messaging, skrótów, autostartu oraz install/update/uninstall nie zweryfikowano na czystym Windows. Kreator v0.15.38 uruchomił się, a izolowaną ścieżkę dało się ustawić; sterowanie przerwało się przed kliknięciem instalacji, więc rzeczywistej instalacji nie wykonano.
 - Instalator nie jest podpisany Authenticode, nie ma podpisanego manifestu aktualizacji ani automatycznego updatera. Nie należy traktować lokalnego SHA-256 jako podpisu wydawcy.
 - Rozszerzenie Chrome/Edge wymaga ręcznego załadowania. Izolowane testy na fixture `.test` przeszły, ale ręcznego przepływu w zwykłym profilu użytkownika nie zweryfikowano. Ostrzeżenie może pojawić się po rozpoczęciu ładowania strony i nie blokuje nawigacji.
 
@@ -31,4 +31,4 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 
 ## Ostatnia walidacja źródła
 
-Pełne `scripts/build-user.ps1 -Installer` dla bieżącego kodu przeszło 229/229 testów .NET bez pominięć, testy desktop 9/9, Engine IPC, procesy, Windows DNS/TCP/UDP, produkcyjny build UI, `npm audit` bez podatności oraz self-test instalatora. Self-test obejmuje teraz odrzucenie zmienionego payloadu, preflight braku miejsca i zachowanie poprzedniej instalacji po wstrzykniętym błędzie stagingu; nie używa fizycznie pełnego woluminu. Lokalny, nieopublikowany instalator v0.15.38 ma 281240953 B i SHA-256 `EE9D608778B10CC69671E2FAE879B0E044D654361F13EDA79B66DEC67CF8339E`. Test self-test nie zastępuje pełnej interakcji GUI ani zaufanego podpisu wydawcy.
+Pełne `scripts/build-user.ps1 -Installer` dla bieżącego kodu przeszło 229/229 testów .NET, testy desktop 10/10, Engine IPC, procesy, Windows DNS/TCP/UDP, produkcyjny build UI, `npm audit` bez podatności oraz self-test instalatora. Self-test obejmuje odrzucenie zmienionego payloadu, preflight braku miejsca i zachowanie poprzedniej instalacji po wstrzykniętym błędzie stagingu; nie używa fizycznie pełnego woluminu. Lokalny, nieopublikowany instalator v0.15.38 ma 281240953 B i SHA-256 `43C32A738038C81505D778679465C473BBDD96552A3E42C3CBF671A2E91FB87D`. Test self-test nie zastępuje pełnej interakcji GUI ani zaufanego podpisu wydawcy.

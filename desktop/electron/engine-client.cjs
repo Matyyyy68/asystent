@@ -22,6 +22,7 @@ class EngineClient {
     this.lastExitCode = null;
     this.stderrObserved = false;
     this.stderrExceptionType = null;
+    this.stderrExceptionCaptured = false;
     this.stderrPrefix = '';
     this.state('starting');
   }
@@ -59,13 +60,14 @@ class EngineClient {
     }
     this.engine = child;
     this.stderrObserved = false;
+    this.stderrExceptionCaptured = false;
     this.stderrPrefix = '';
     child.on('error', error => this.failed(child, error?.code ?? 'spawn-error'));
     child.on('exit', (code, signal) => this.failed(child, code ?? signal ?? 'unknown'));
     child.stdin?.on('error', error => this.failed(child, error?.code ?? 'stdin-error'));
     child.stderr?.on('data', chunk => {
       this.stderrObserved = true;
-      if (this.stderrExceptionType) return;
+      if (this.stderrExceptionCaptured) return;
       const text = this.stderrPrefix + chunk.toString('utf8');
       const lines = text.split(/\r?\n/);
       this.stderrPrefix = lines.pop().slice(0, 256);
@@ -73,6 +75,7 @@ class EngineClient {
         const match = /^Unhandled exception\.\s+([A-Za-z_][A-Za-z0-9_.+`]{0,159})(?::|$)/.exec(line);
         if (match) {
           this.stderrExceptionType = match[1];
+          this.stderrExceptionCaptured = true;
           this.stderrPrefix = '';
           break;
         }
