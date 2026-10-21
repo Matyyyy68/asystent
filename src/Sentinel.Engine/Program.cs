@@ -510,6 +510,17 @@ while (await Console.In.ReadLineAsync() is { } line)
                     var reputationText = !fileReputation.FeedImported ? "Brak lokalnej listy hashy."
                         : fileReputation.Match ? "Hash znajduje się na ręcznie zaimportowanej lokalnej liście; źródło nie zostało niezależnie zweryfikowane."
                         : "Hash nie znajduje się na ręcznie zaimportowanej lokalnej liście; brak dopasowania nie potwierdza bezpieczeństwa.";
+                    if (fileReputation.Match)
+                    {
+                        await store.AddLocalOnlyAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
+                            "Plik · dopasowanie lokalnej listy SHA-256", "Ręczna analiza pliku",
+                            "SHA-256 pliku pasuje do lokalnej listy użytkownika; źródło listy nie jest niezależnie zweryfikowane.",
+                            "Sprawdź pochodzenie pliku i źródło listy. Dopasowanie nie jest automatycznym werdyktem zagrożenia.",
+                            EventStatus.New, EventId: Guid.NewGuid(), Source: "manual-file-analysis",
+                            RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                            EvidenceCodes: ["file.sha256.matches-local-list", "file.local-list-source-unverified"],
+                            SignalHash: hash));
+                    }
                     result = new { name = info.Name, size = stream.Length, sha256 = hash, signature,
                         reputation = new { feedImported = fileReputation.FeedImported, match = fileReputation.Match, explanation = reputationText },
                         verdict = "Obliczono SHA-256 i sprawdzono stan podpisu Authenticode. " + reputationText + " Żaden z tych wyników sam nie potwierdza bezpieczeństwa pliku." };

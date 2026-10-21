@@ -94,8 +94,9 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   await new Promise(resolve => setTimeout(resolve, 1000));
   const downloadSample = await call('collect'); assert.equal(downloadSample.ok, true, downloadSample.error);
   let downloadedHistory = (await call('history')).result;
-  assert.ok(downloadedHistory.some(event => event.source === 'downloads-local-hash' && event.application === 'synthetic-download.ps1'),
-    'opt-in Downloads monitor must record local hash-list matches without sending data to a service');
+  assert.ok(downloadedHistory.some(event => event.observations?.some(observation => observation.source === 'downloads-local-hash') &&
+      !JSON.stringify(event).includes('synthetic-download.ps1')),
+    'opt-in Downloads monitor must merge matching local file signals without storing the filename or sending data to a service');
   const oversizedDownload = path.join(downloadsDirectory, 'synthetic-oversized-download.bin'); writeFileSync(oversizedDownload, 'x');
   truncateSync(oversizedDownload, 256 * 1024 * 1024 + 1);
   mkdirSync(path.join(downloadsDirectory, 'nested'));

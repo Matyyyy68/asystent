@@ -72,8 +72,32 @@ public sealed class StoreTests : IDisposable
         await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid() }); // Same source remains a separate observation.
         await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid(), Source = "dns-cache", Risk = RiskLevel.Moderate });
         await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid(), Source = "dns-cache", Timestamp = at.AddMinutes(2) });
+        await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid(), Source = "downloads-local-hash",
+            EvidenceCodes = ["file.sha256.matches-local-list"] }); // A file digest never aliases a host digest.
 
-        Assert.Equal(4, await store.CountEventsAsync());
+        Assert.Equal(5, await store.CountEventsAsync());
+    }
+    [Fact] public async Task MatchingManualAndDownloadsFileSignalsMergeWithoutPersistingFileNames()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var codes = new[] { "file.sha256.matches-local-list", "file.local-list-source-unverified" };
+        var downloads = new SecurityEvent(0, at, RiskLevel.Information, "Pobrany plik pasuje do lokalnej listy hashy", "Monitoring Downloads",
+            "Nowy plik z Downloads pasuje do lokalnej listy SHA-256.", "Sprawdź źródło listy.", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "downloads-local-hash", EvidenceCodes: codes,
+            SignalHash: "A1B2C3D4E5F60718293A4B5C6D7E8F90123456789ABCDEF0123456789ABCDEF0");
+        await store.AddLocalOnlyAsync(downloads);
+        var manual = downloads with { EventId = Guid.NewGuid(), Timestamp = at.AddSeconds(11),
+            Category = "Plik · dopasowanie lokalnej listy SHA-256", Application = "Ręczna analiza pliku",
+            Source = "manual-file-analysis", Explanation = "SHA-256 pasuje do lokalnej listy." };
+        var canonical = await store.AddLocalOnlyAsync(manual);
+
+        Assert.Equal(1, await store.CountEventsAsync());
+        var saved = Assert.Single(await store.ReadAsync());
+        Assert.Equal(downloads.EventId, saved.EventId);
+        Assert.Equal(new[] { "downloads-local-hash", "manual-file-analysis" }, saved.Observations!.Select(observation => observation.Source));
+        Assert.DoesNotContain("A1B2C3D4E5F60718293A4B5C6D7E8F90123456789ABCDEF0123456789ABCDEF0", System.Text.Json.JsonSerializer.Serialize(saved), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(saved.Id, canonical);
     }
     [Fact] public async Task BackupRestorePreservesMergedCERTObservations()
     {

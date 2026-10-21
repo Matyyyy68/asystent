@@ -111,7 +111,8 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         Assert.Equal(1, detected);
         var events = await store.ReadAsync();
         Assert.Single(events);
-        Assert.Equal("arrived-while-stopped.bin", events[0].Application);
+        Assert.Equal("Monitoring Downloads", events[0].Application);
+        Assert.DoesNotContain("arrived-while-stopped.bin", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.OrdinalIgnoreCase);
         var baseline = await store.ReadDownloadedFileMonitorSnapshotAsync();
         Assert.True(baseline.Initialized);
         Assert.Equal(2, baseline.Files.Count);

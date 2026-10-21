@@ -666,10 +666,14 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     private static bool HasCertEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
         string.Equals(code, "reputation.cert", StringComparison.Ordinal) ||
         code.StartsWith("reputation.cert.", StringComparison.Ordinal)) == true;
+    private static bool HasFileReputationEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        string.Equals(code, "file.sha256.matches-local-list", StringComparison.Ordinal)) == true;
     private static async Task<long?> FindCrossSourceDuplicateAsync(SqliteConnection c, SqliteTransaction transaction,
         SecurityEvent item, string source, CancellationToken ct)
     {
-        if (item.SignalHash is null || item.Risk < RiskLevel.Moderate || !HasCertEvidence(item.EvidenceCodes)) return null;
+        var isCertSignal = HasCertEvidence(item.EvidenceCodes);
+        var isFileSignal = HasFileReputationEvidence(item.EvidenceCodes);
+        if (item.SignalHash is null || (!isCertSignal && !isFileSignal) || (isCertSignal && item.Risk < RiskLevel.Moderate)) return null;
         var from = item.Timestamp.ToUniversalTime().AddSeconds(-60).ToString("O");
         var to = item.Timestamp.ToUniversalTime().AddSeconds(60).ToString("O");
         using var candidates = c.CreateCommand(); candidates.Transaction = transaction;
@@ -690,7 +694,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             var hasCertFromSameSource = false;
             while (await reader.ReadAsync(ct))
             {
-                if (!HasCertEvidence(ParseEvidenceCodes(reader.GetString(1)))) continue;
+                var codes = ParseEvidenceCodes(reader.GetString(1));
+                if (isCertSignal ? !HasCertEvidence(codes) : !HasFileReputationEvidence(codes)) continue;
                 if (string.Equals(reader.GetString(0), source, StringComparison.Ordinal)) hasCertFromSameSource = true;
                 else hasCertFromOtherSource = true;
             }
