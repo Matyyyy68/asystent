@@ -21,6 +21,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
 (async () => {
  try {
   const initialStatus = await call('status'); assert.equal(initialStatus.result.engine, 'ready');
+  assert.equal(initialStatus.result.lastDnsReadUtc, null);
+  assert.equal(initialStatus.result.lastDnsErrorUtc, null);
   assert.ok(initialStatus.result.storage.history.totalBytes > 0, 'status must include history database size');
   assert.ok(initialStatus.result.storage.knowledge.totalBytes > 0, 'status must include knowledge database size');
   assert.equal(initialStatus.result.storage.history.recordCount, 0);
@@ -158,11 +160,17 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal((await call('status')).result.settings.monitorNetworkConnections, false);
   console.log(`PASS: process snapshot and child lifecycle; sample IPC+DB=${sampleDurationMs.toFixed(1)}ms`);
   await call('clearHistory'); await call('pause', { paused: true });
-  if (process.argv.includes('--windows-live')) {
-    const feed = await call('updateFeed'); assert.equal(feed.ok, true); assert.ok(feed.result.count > 100);
-    console.log('PASS: CERT feed import; domain count=' + feed.result.count);
-    await call('pause', {paused:false}); const dns = await call('collect'); assert.equal(dns.ok,true);
+  if (process.argv.includes('--windows-live') || process.argv.includes('--dns-live')) {
+    if (process.argv.includes('--windows-live')) {
+      const feed = await call('updateFeed'); assert.equal(feed.ok, true); assert.ok(feed.result.count > 100);
+      console.log('PASS: CERT feed import; domain count=' + feed.result.count);
+    }
+    await call('pause', {paused:false}); await new Promise(resolve => setTimeout(resolve, 15_100));
+    const dns = await call('collect'); assert.equal(dns.ok,true);
     assert.ok(dns.result.dns.startsWith('Odczyt cache DNS działa'), dns.result.dns);
+    const dnsStatus = (await call('status')).result;
+    assert.ok(Number.isFinite(Date.parse(dnsStatus.lastDnsReadUtc)), 'successful DNS cache read must expose its UTC timestamp');
+    assert.equal(dnsStatus.lastDnsErrorUtc, null, 'successful first DNS cache read must not report an error');
     const snapshot = await call('connections'); assert.equal(snapshot.ok, true, snapshot.error);
     assert.ok(Array.isArray(snapshot.result));
     assert.ok(snapshot.result.some(c => c.protocol === 'TCP' && c.localPort === ollamaServer.address().port && c.processId === process.pid), 'loopback TCP listener must be attributed to this test process');
@@ -200,6 +208,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const diagnosticsResult = await call('diagnosticsExport', { path: diagnosticsPath }); assert.equal(diagnosticsResult.ok, true, diagnosticsResult.error);
   const diagnostics = readFileSync(diagnosticsPath, 'utf8');
   assert.ok(diagnostics.includes('applicationVersion') && diagnostics.includes('monitorDownloadedFiles'));
+  assert.ok(diagnostics.includes('lastDnsReadUtc') && diagnostics.includes('lastDnsErrorUtc'));
   assert.ok(!diagnostics.includes('paypal.com.evil.test'));
   assert.ok(!diagnostics.includes('LocalAIEndpoint') && !diagnostics.includes('ExcludedApplications'));
   assert.ok(!diagnostics.includes(root));

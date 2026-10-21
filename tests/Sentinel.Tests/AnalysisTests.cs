@@ -8,6 +8,32 @@ namespace Sentinel.Tests;
 public sealed class AnalysisTests
 {
     private static readonly DomainNames Domains = new();
+
+    [Fact]
+    public void WindowsDnsCacheParserExtractsNormalizedNamesAndIgnoresLocalizedMetadata()
+    {
+        const string output = """
+            Windows IP Configuration
+
+                example.test
+            ----------------------------------------
+                Record Name . . . . . : example.test
+                Record Type . . . . . : 1
+                Time To Live . . . . . : 42
+                A (Host) Record . . . : 192.0.2.10
+
+                example.test.
+            ----------------------------------------
+                No records of type AAAA
+
+                _service._tcp.example.test
+            ----------------------------------------
+                Text . . . : metadata
+            """;
+
+        Assert.Equal(["example.test"], WindowsDnsCacheParser.Parse(output));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WindowsDnsCacheParser.Parse(output, 2001));
+    }
     private static UrlAnalyzer Urls() => new(Domains);
     private static ThreatAnalysisEngine Engine() => new(Urls());
     private static AnalysisContext Input(string text, string? url = null, string? key = null, DateTimeOffset? time = null) =>

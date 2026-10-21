@@ -135,6 +135,7 @@ async Task RecordDetectionAsync(SecurityEvent item, string category, string rule
         enterpriseError = "queue_full";
 }
 DateTimeOffset? lastDnsRead = null;
+DateTimeOffset? lastDnsError = null;
 DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
 Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
@@ -202,7 +203,8 @@ while (await Console.In.ReadLineAsync() is { } line)
         {
             case "status":
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
-                    dns = dnsState, lastDnsRead, processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
+                    dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
+                    processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
                     runtime = ReadRuntimeMetrics(),
@@ -228,12 +230,10 @@ while (await Console.In.ReadLineAsync() is { } line)
                     {
                         using var process = new System.Diagnostics.Process { StartInfo = new System.Diagnostics.ProcessStartInfo
                         {
-                            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe"),
+                            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "ipconfig.exe"),
                             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
                         } };
-                        process.StartInfo.ArgumentList.Add("-NoProfile"); process.StartInfo.ArgumentList.Add("-NonInteractive");
-                        process.StartInfo.ArgumentList.Add("-Command");
-                        process.StartInfo.ArgumentList.Add("$ErrorActionPreference='Stop'; Get-DnsClientCache | Select-Object -First 2000 -ExpandProperty Entry | ConvertTo-Json -Compress");
+                        process.StartInfo.ArgumentList.Add("/displaydns");
                         process.Start();
                         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                         var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
@@ -244,9 +244,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                         if (process.ExitCode != 0 || content.Length > 600000) throw new InvalidDataException("Odczyt DNS niedostępny.");
                         if (!string.IsNullOrWhiteSpace(content))
                         {
-                            using var entries = JsonDocument.Parse(content);
-                            var names = entries.RootElement.ValueKind == JsonValueKind.Array
-                                ? entries.RootElement.EnumerateArray().Select(e => e.GetString()).ToArray() : [entries.RootElement.GetString()];
+                            var names = WindowsDnsCacheParser.Parse(content);
                             foreach (var name in reputation.FindMatches(names.OfType<string>(), DateTimeOffset.UtcNow))
                             {
                                 var dnsObservedAt = DateTimeOffset.UtcNow;
@@ -265,7 +263,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                         lastDnsRead = DateTimeOffset.UtcNow; dnsState = "Odczyt cache DNS działa; bez DoH, pełnych URL i PID";
                         await store.ApplyRetentionAsync(settings.RetentionDays);
                     }
-                    catch (Exception ex) { dnsState = "Odczyt cache DNS niedostępny: " + ex.GetType().Name; }
+                    catch (Exception ex) { lastDnsError = DateTimeOffset.UtcNow; dnsState = "Odczyt cache DNS niedostępny: " + ex.GetType().Name; }
                 }
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
                     ? await SyncEnterpriseAsync(force: false) : null;
@@ -320,7 +318,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     applicationVersion = typeof(Program).Assembly.GetName().Version?.ToString(3),
                     operatingSystem = new { version = Environment.OSVersion.Version.ToString(), architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString() },
                     runtime = new { framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString() },
-                    monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
+                    monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
+                        processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
                     settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,
                         monitorForegroundChanges = settings.MonitorForegroundChanges, monitorNetworkConnections = settings.MonitorNetworkConnections,
                         monitorDownloadedFiles = settings.MonitorDownloadedFiles, dnsPollIntervalSeconds = settings.DnsPollIntervalSeconds },
