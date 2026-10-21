@@ -340,12 +340,26 @@ while (await Console.In.ReadLineAsync() is { } line)
                 break;
             case "diagnosticsExport":
                 var diagnosticsPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku diagnostyki.");
+                var hostLifecycle = request.TryGetProperty("hostLifecycle", out var hostLifecycleElement) && hostLifecycleElement.ValueKind == JsonValueKind.Object
+                    ? hostLifecycleElement
+                    : default;
+                var requestedHostStatus = hostLifecycle.ValueKind == JsonValueKind.Object && hostLifecycle.TryGetProperty("status", out var hostStatusElement) && hostStatusElement.ValueKind == JsonValueKind.String
+                    ? hostStatusElement.GetString()
+                    : null;
+                var safeHostStatus = requestedHostStatus is "starting" or "ready" or "restarting" or "stopped" ? requestedHostStatus : "unknown";
+                var requestedExitCode = hostLifecycle.ValueKind == JsonValueKind.Object && hostLifecycle.TryGetProperty("lastExitCode", out var hostExitElement) && hostExitElement.ValueKind == JsonValueKind.String
+                    ? hostExitElement.GetString()
+                    : null;
+                var safeExitCode = requestedExitCode is null ? null : new string(requestedExitCode.Where(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_').Take(40).ToArray());
+                var hostStderrObserved = hostLifecycle.ValueKind == JsonValueKind.Object && hostLifecycle.TryGetProperty("stderrObserved", out var hostStderrElement)
+                    && hostStderrElement.ValueKind == JsonValueKind.True;
                 var diagnostics = new
                 {
                     exportedAtUtc = DateTimeOffset.UtcNow,
                     applicationVersion = typeof(Program).Assembly.GetName().Version?.ToString(3),
                     operatingSystem = new { version = Environment.OSVersion.Version.ToString(), architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString() },
                     runtime = new { framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString() },
+                    hostLifecycle = new { status = safeHostStatus, lastExitCode = safeExitCode, stderrObserved = hostStderrObserved },
                     monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                         processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
                     settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,

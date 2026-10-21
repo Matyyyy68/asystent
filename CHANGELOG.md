@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pakiet diagnostyczny do pomocy technicznej zawiera teraz stan procesu .NET, ograniczony kod zakończenia i samą flagę obecności stderr. Status jest allowlistowany, kod jest filtrowany do ASCII alfanumerycznych/`-_` i 40 znaków; treść stderr nie trafia do eksportu. Test IPC sprawdza eksport i oczyszczenie kodu.
+
 - Czytnik TCP/UDP wybiera teraz deterministyczne 800 połączeń i 200 endpointów UDP oraz przekazuje do monitora informację o obcięciu tabel. SQLite v15 utrwala osobne flagi TCP/UDP; monitor wstrzymuje alerty podczas niepełnej próbki i po restarcie, a wznawia je po kolejnej pełnej próbce. Dodano testy stabilnego limitera, zmian składu, restartu i migracji v14→v15. Aktualna walidacja lokalna: .NET 214/214 bez pominięć, pełny build/self-test instalatora PASS; Windows CI `39622774776` PASS dla poprzedniej iteracji (213/213 .NET, installer self-test, 22/22 serwera i API smoke). CI po dodaniu testu czytnika oczekuje.
 
 - Snapshot procesów wybiera deterministycznie pierwsze 10 000 PID i zapisuje w SQLite v14, czy próbka została obcięta. Monitor pomija wnioski o startach lub zniknięciach, których nie da się wiarygodnie wyciągnąć z niepełnej próbki; po pełnej próbce wraca do normalnego wykrywania. Dodano test limitu, restartu, metadanych bez zmian baseline'u i migracji v13→v14. Lokalna walidacja Windows: .NET 211/211 bez pominięć, pełny `scripts/build-user.ps1 -Installer`, testy serwera 22/22 PASS. Windows CI `39619932040` PASS dla commita `484126f`, w tym build/test aplikacji i Enterprise API.
