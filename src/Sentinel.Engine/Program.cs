@@ -41,7 +41,11 @@ var urlAnalyzer = new UrlAnalyzer(domainNames);
 var rules = new ThreatAnalysisEngine(urlAnalyzer);
 var reputation = new DomainReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
-var processMonitor = new ProcessSnapshotMonitor();
+await using var processImageInspectionQueue = new ProcessImageInspectionQueue(store, fileHashReputation, ReadAuthenticodeSignatureAsync);
+var processMonitor = new ProcessSnapshotMonitor(ProcessImageInspectionQueue.ResolveExecutablePath, processImageInspectionQueue.TryEnqueue);
+foreach (var pendingInspection in await store.ReadPendingProcessImageInspectionsAsync())
+    if (!processImageInspectionQueue.TryEnqueue(pendingInspection.EventId, pendingInspection.Path))
+        await store.UpdateProcessImageInspectionAsync(pendingInspection.EventId, null, "QueueFull", null);
 var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationToken =>
     await ReadConnectionSnapshotBatchAsync(cancellationToken),
     wasRecentlyObservedStart: processMonitor.WasRecentlyObservedStart);
@@ -182,9 +186,9 @@ object ReadRuntimeMetrics()
     return new { workingSetBytes = current.WorkingSet64, privateMemoryBytes = current.PrivateMemorySize64,
         cpuTimeMilliseconds = current.TotalProcessorTime.TotalMilliseconds, processorCount = Environment.ProcessorCount };
 }
-async Task<object> ReadAuthenticodeSignatureAsync(string path, CancellationToken cancellationToken)
+async Task<AuthenticodeSignatureInfo> ReadAuthenticodeSignatureAsync(string path, CancellationToken cancellationToken)
 {
-    if (!OperatingSystem.IsWindows()) return new { status = "Unsupported", signer = (string?)null, thumbprint = (string?)null };
+    if (!OperatingSystem.IsWindows()) return new("Unknown", null, null);
     const string script = "$ErrorActionPreference='Stop'; Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; $p=[Environment]::GetEnvironmentVariable('SENTINEL_FILE_TO_VERIFY'); " +
         "$s=Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop; " +
         "$subject=$null; $thumbprint=$null; if($s.SignerCertificate){$subject=$s.SignerCertificate.Subject;$thumbprint=$s.SignerCertificate.Thumbprint}; " +
@@ -208,18 +212,18 @@ async Task<object> ReadAuthenticodeSignatureAsync(string path, CancellationToken
     {
         await process.WaitForExitAsync(timeout.Token);
         var jsonText = await output; await errors;
-        if (process.ExitCode != 0 || jsonText.Length > 16_384) return new { status = "Unknown", signer = (string?)null, thumbprint = (string?)null };
+        if (process.ExitCode != 0 || jsonText.Length > 16_384) return new("Unknown", null, null);
         using var document = JsonDocument.Parse(jsonText, new JsonDocumentOptions { MaxDepth = 4 });
         var root = document.RootElement;
         var status = root.TryGetProperty("status", out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         var signer = root.TryGetProperty("signer", out var signerValue) && signerValue.ValueKind == JsonValueKind.String ? signerValue.GetString() : null;
         var thumbprint = root.TryGetProperty("thumbprint", out var thumbprintValue) && thumbprintValue.ValueKind == JsonValueKind.String ? thumbprintValue.GetString() : null;
-        return new { status = status is "Valid" or "NotSigned" or "HashMismatch" or "NotTrusted" ? status : "Unknown", signer, thumbprint };
+        return new(status is "Valid" or "NotSigned" or "HashMismatch" or "NotTrusted" ? status : "Unknown", signer, thumbprint);
     }
     catch
     {
         try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
-        return new { status = "Unknown", signer = (string?)null, thumbprint = (string?)null };
+        return new("Unknown", null, null);
     }
 }
 while (await Console.In.ReadLineAsync() is { } line)

@@ -9,7 +9,9 @@ public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel 
     Guid? EventId = null, string? Source = null, string? RuleVersion = null, int? Confidence = null, int SchemaVersion = 1,
     int? ProcessId = null, string? ProcessName = null, Guid? CorrelationId = null,
     IReadOnlyList<string>? EvidenceCodes = null, [property: JsonIgnore] string? SignalHash = null,
-    IReadOnlyList<EventObservation>? Observations = null);
+    IReadOnlyList<EventObservation>? Observations = null,
+    string? ProcessImagePath = null, string? ProcessImageSha256 = null,
+    string? ProcessImageSignatureStatus = null, bool? ProcessImageLocalHashMatch = null);
 public sealed record EventObservation(Guid EventId, DateTimeOffset ObservedAt, string Source,
     IReadOnlyList<string> EvidenceCodes);
 public sealed record AppSettings(int RetentionDays = 30, bool Notifications = true, bool Paused = true,

@@ -21,11 +21,31 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         Assert.Equal(1, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
         var started = Assert.Single(await store.ReadAsync());
         Assert.Equal(42, started.ProcessId);
-        Assert.Equal(new[] { "process.snapshot.new-pid" }, started.EvidenceCodes);
+        Assert.Equal(new[] { "process.snapshot.new-pid", "process.image.path-unavailable" }, started.EvidenceCodes);
 
         var restartedAgain = new ProcessSnapshotMonitor(() => new(snapshot));
         Assert.Equal(0, await restartedAgain.CollectAsync(store, paused: false, excludedApplications: ""));
         Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task ProcessStartPersistsLocalImagePathAndQueuesInspectionAfterCommit()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string> { [41] = "existing-process" };
+        var queued = new List<(Guid EventId, string Path)>();
+        var path = Path.Combine(directory, "synthetic.exe");
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot), (_, _) => path,
+            (eventId, imagePath) => { queued.Add((eventId, imagePath)); return true; });
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+        snapshot.Add(42, "new-process");
+
+        Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        var saved = Assert.Single(await store.ReadAsync());
+        Assert.Equal(path, saved.ProcessImagePath);
+        Assert.Equal("Pending", saved.ProcessImageSignatureStatus);
+        Assert.Contains("process.image.path-available", saved.EvidenceCodes!);
+        Assert.Equal((saved.EventId!.Value, path), Assert.Single(queued));
     }
 
     [Fact]

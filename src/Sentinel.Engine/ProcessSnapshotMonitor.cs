@@ -16,14 +16,28 @@ public sealed class ProcessSnapshotMonitor
     private long droppedEvents;
     private readonly Dictionary<int, (DateTimeOffset Timestamp, Guid CorrelationId, string ProcessName)> recentlyObservedStarts = [];
     private readonly Func<Dictionary<int, string>> capture;
+    private readonly Func<int, string, string?>? resolveExecutablePath;
+    private readonly Func<Guid, string, bool>? enqueueImageInspection;
 
     public string State { get; private set; } = "Próbkowanie procesów nie zostało uruchomione.";
 
-    public ProcessSnapshotMonitor() : this(Capture) { }
+    public ProcessSnapshotMonitor() : this(Capture, null, null, true) { }
 
-    public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture)
+    public ProcessSnapshotMonitor(Func<int, string, string?> resolveExecutablePath,
+        Func<Guid, string, bool> enqueueImageInspection) : this(Capture, resolveExecutablePath, enqueueImageInspection, true) { }
+
+    public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture) : this(capture, null, null, true) { }
+
+    public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture,
+        Func<int, string, string?>? resolveExecutablePath, Func<Guid, string, bool>? enqueueImageInspection)
+        : this(capture, resolveExecutablePath, enqueueImageInspection, true) { }
+
+    private ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture,
+        Func<int, string, string?>? resolveExecutablePath, Func<Guid, string, bool>? enqueueImageInspection, bool _ = false)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
+        this.resolveExecutablePath = resolveExecutablePath;
+        this.enqueueImageInspection = enqueueImageInspection;
         (knownProcesses, knownSnapshotTruncated) = CaptureSnapshot();
     }
 
@@ -99,20 +113,36 @@ public sealed class ProcessSnapshotMonitor
             recentlyObservedStarts.Remove(processId);
         var correlationIds = toStore.Where(change => change.Action == "Proces zaobserwowany")
             .ToDictionary(change => change.ProcessId, _ => Guid.NewGuid());
+        var imageInspections = new List<(Guid EventId, string Path)>();
         var events = toStore.Select(change =>
         {
             var correlationId = correlationIds.TryGetValue(change.ProcessId, out var newCorrelationId)
                 ? newCorrelationId : WasRecentlyObservedStart(change.ProcessId, now);
+            var eventId = change.Action == "Proces zaobserwowany" ? Guid.NewGuid() : (Guid?)null;
+            string? imagePath = null;
+            if (eventId is not null && resolveExecutablePath is not null)
+            {
+                try { imagePath = resolveExecutablePath(change.ProcessId, change.ProcessName); }
+                catch { imagePath = null; }
+                if (imagePath is { } candidate && (candidate.Length is 0 or > 4096 || !Path.IsPathFullyQualified(candidate) || candidate.StartsWith(@"\\", StringComparison.Ordinal) || candidate.Any(char.IsControl)))
+                    imagePath = null;
+                if (imagePath is not null && enqueueImageInspection is not null) imageInspections.Add((eventId.Value, imagePath));
+            }
             var explanation = change.Action == "Proces zaobserwowany"
                 ? $"Windows pokazał nowy PID {change.ProcessId} o nazwie {change.ProcessName} od poprzedniej próbki. Krótkie procesy mogą zostać pominięte."
                 : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
+            var evidenceCodes = new List<string> { change.Action == "Proces zaobserwowany" ? "process.snapshot.new-pid" : "process.snapshot.pid-absent" };
+            if (change.Action == "Proces zaobserwowany") evidenceCodes.Add(imagePath is null ? "process.image.path-unavailable" : "process.image.path-available");
             return new SecurityEvent(0, now, RiskLevel.Information,
                 change.Action, change.ProcessName, explanation,
                 "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
+                EventId: eventId,
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: change.ProcessId, ProcessName: change.ProcessName,
                 CorrelationId: correlationId,
-                EvidenceCodes: [change.Action == "Proces zaobserwowany" ? "process.snapshot.new-pid" : "process.snapshot.pid-absent"]);
+                EvidenceCodes: evidenceCodes,
+                ProcessImagePath: imagePath,
+                ProcessImageSignatureStatus: imagePath is not null ? "Pending" : null);
         }).ToArray();
         try
         {
@@ -131,6 +161,12 @@ public sealed class ProcessSnapshotMonitor
         storeBaselineInitialized = true;
         storeBaselineTruncated = currentTruncated;
         droppedEvents += newlyDroppedEvents;
+        foreach (var inspection in imageInspections)
+        {
+            if (enqueueImageInspection!(inspection.EventId, inspection.Path)) continue;
+            try { await store.UpdateProcessImageInspectionAsync(inspection.EventId, null, "QueueFull", null, cancellationToken); }
+            catch { /* The process event remains stored even if diagnostic metadata cannot be updated. */ }
+        }
         foreach (var change in toStore.Where(change => change.Action == "Proces zaobserwowany"))
             recentlyObservedStarts[change.ProcessId] = (now, correlationIds[change.ProcessId], change.ProcessName);
         var capped = currentTruncated ? " Limit snapshotu osiągnięty; zdarzenia zakończenia pominięto dla niepełnej próbki." :

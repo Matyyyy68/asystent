@@ -227,7 +227,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(17L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(18L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -684,6 +684,41 @@ public sealed class StoreTests : IDisposable
     [Fact] public async Task RetentionRemovesOnlyOldEvents() { var s = await Store(); await s.AddAsync(Event(DateTimeOffset.UtcNow.AddDays(-60))); await s.AddAsync(Event()); await s.ApplyRetentionAsync(30); Assert.Single(await s.ReadAsync()); }
     [Fact] public async Task InvalidRetentionRejected() { var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(0))); }
     [Fact] public async Task BackupCanReopenAndExportIsValid() { var s = await Store(); await s.AddAsync(Event()); var export = Path.Combine(dir,"events.json"); await s.ExportAsync(export); Assert.Contains("Synthetic",await File.ReadAllTextAsync(export)); var backupDir = Path.Combine(dir,"backup"); Directory.CreateDirectory(backupDir); await s.BackupAsync(Path.Combine(backupDir,"sentinel.db")); var backup = new LocalStore(backupDir); await backup.InitializeAsync(); Assert.Single(await backup.ReadAsync()); }
+    [Fact] public async Task ProcessImageInspectionPersistsAndRestoresLocallyButNeverExportsPathOrHash()
+    {
+        var store = await Store();
+        var path = Path.Combine(dir, "private-process-image.exe");
+        const string hash = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        var eventId = Guid.NewGuid();
+        await store.AddLocalOnlyAsync(Event() with { EventId = eventId, Source = "process-snapshot", ProcessId = 123,
+            ProcessName = "private-process-image", ProcessImagePath = path, ProcessImageSignatureStatus = "Pending",
+            EvidenceCodes = ["process.snapshot.new-pid", "process.image.path-available"] });
+        Assert.Equal((eventId, path), Assert.Single(await store.ReadPendingProcessImageInspectionsAsync()));
+
+        await store.UpdateProcessImageInspectionAsync(eventId, hash, "Valid", true);
+        Assert.Empty(await store.ReadPendingProcessImageInspectionsAsync());
+        var inspected = Assert.Single(await store.ReadAsync());
+        Assert.Equal(path, inspected.ProcessImagePath);
+        Assert.Equal(hash, inspected.ProcessImageSha256);
+        Assert.Equal("Valid", inspected.ProcessImageSignatureStatus);
+        Assert.True(inspected.ProcessImageLocalHashMatch);
+        Assert.Contains("process.image.sha256.available", inspected.EvidenceCodes!);
+
+        var backupPath = Path.Combine(dir, "process-image-backup.db");
+        await store.BackupAsync(backupPath);
+        var restored = await Store();
+        await restored.RestoreAsync(backupPath);
+        var restoredEvent = Assert.Single(await restored.ReadAsync());
+        Assert.Equal(path, restoredEvent.ProcessImagePath);
+        Assert.Equal(hash, restoredEvent.ProcessImageSha256);
+        Assert.True(restoredEvent.ProcessImageLocalHashMatch);
+
+        var jsonPath = Path.Combine(dir, "process-image-export.json");
+        await restored.ExportAsync(jsonPath);
+        var json = await File.ReadAllTextAsync(jsonPath);
+        Assert.DoesNotContain(path, json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(hash, json, StringComparison.OrdinalIgnoreCase);
+    }
     [Fact] public async Task CsvExportQuotesFieldsAndPreventsSpreadsheetFormulas()
     {
         var s = await Store();
@@ -803,7 +838,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(17L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(18L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -822,7 +857,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(17L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(18L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
