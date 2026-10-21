@@ -281,9 +281,23 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         Validate(settings); await using var c = await Open(cancellationToken);
         await Execute(c, "INSERT INTO settings VALUES(1,$j) ON CONFLICT(id) DO UPDATE SET json=$j", cancellationToken, ("$j", JsonSerializer.Serialize(settings)));
     }
-    public Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: true, cancellationToken);
+    public async Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default) =>
+        (await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken)).EventRowId;
     /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
-    public Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) => AddCoreAsync(item, enqueueEnterprise: false, cancellationToken);
+    public async Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) =>
+        (await AddCoreAsync(item, enqueueEnterprise: false, cancellationToken)).EventRowId;
+    /// <summary>Atomically persists a detection and its explicitly categorized Enterprise outbox entry when sharing is enabled.</summary>
+    /// <returns>True when Enterprise sharing is enabled but the bounded outbox is full; the local detection remains saved.</returns>
+    public async Task<bool> AddWithEnterpriseMetadataAsync(SecurityEvent item, string category, string ruleCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
+            string.IsNullOrEmpty(ruleCode) || ruleCode.Length > 80 ||
+            ruleCode.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(category));
+        var result = await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken, category, ruleCode);
+        return result.EnterpriseQueueFull;
+    }
 
     /// <summary>Returns a short-lived local correlation id for the registrable domain, storing only its SHA-256 key.</summary>
     public async Task<Guid> GetDomainCorrelationIdAsync(string host, DateTimeOffset observedAt,
@@ -597,12 +611,14 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         await transaction.CommitAsync(ct);
     }
-    private async Task<long> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise, CancellationToken cancellationToken)
+    private async Task<(long EventRowId, bool EnterpriseQueueFull)> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise,
+        CancellationToken cancellationToken, string? enterpriseCategoryOverride = null, string? enterpriseRuleCodeOverride = null)
     {
         var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(cancellationToken);
         using var transaction = c.BeginTransaction();
         long id;
+        var enterpriseQueueFull = false;
         // A retried event id may already be either a canonical event or a merged observation.
         using (var prior = c.CreateCommand())
         {
@@ -655,15 +671,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (profile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } &&
                 item.Timestamp <= DateTimeOffset.UtcNow.AddMinutes(5) && item.Timestamp >= DateTimeOffset.UtcNow.AddDays(-30))
             {
-                var category = MapEnterpriseCategory(item, source);
-                var ruleCode = "local." + category;
-                await EnqueueEnterpriseEventCoreAsync(c, transaction, new PendingEnterpriseEvent(eventId, item.Timestamp, category,
+                var category = enterpriseCategoryOverride ?? MapEnterpriseCategory(item, source);
+                var ruleCode = enterpriseRuleCodeOverride ?? "local." + category;
+                enterpriseQueueFull = !await EnqueueEnterpriseEventCoreAsync(c, transaction, new PendingEnterpriseEvent(eventId, item.Timestamp, category,
                     (int)item.Risk, ruleCode, EnterpriseEventV1Rules.NormalizeSource(source),
                     EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
             }
         }
         await transaction.CommitAsync(cancellationToken);
-        return id;
+        return (id, enterpriseQueueFull);
     }
     private static bool HasCertEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
         string.Equals(code, "reputation.cert", StringComparison.Ordinal) ||

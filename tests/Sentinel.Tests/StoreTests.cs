@@ -495,10 +495,24 @@ public sealed class StoreTests : IDisposable
         }
 
         var item = Event() with { Risk = RiskLevel.High, EventId = Guid.NewGuid(), Source = "manual-analysis" };
-        await Assert.ThrowsAsync<SqliteException>(() => store.AddAsync(item));
+        await Assert.ThrowsAsync<SqliteException>(() => store.AddWithEnterpriseMetadataAsync(item, "url", "local.url"));
 
         Assert.Empty(await store.ReadAsync());
         Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
+    }
+    [Fact] public async Task EnterpriseDetectionMetadataIsPersistedWithItsEvent()
+    {
+        var store = await Store();
+        await store.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
+        var item = Event() with { Risk = RiskLevel.High, EventId = Guid.NewGuid(), Source = "manual-analysis" };
+
+        Assert.False(await store.AddWithEnterpriseMetadataAsync(item, "url", "local.url"));
+
+        Assert.Single(await store.ReadAsync());
+        var queued = Assert.Single(await store.ReadPendingEnterpriseEventsAsync());
+        Assert.Equal(item.EventId, queued.EventId);
+        Assert.Equal("url", queued.Category);
+        Assert.Equal("local.url", queued.RuleCode);
     }
     [Fact] public async Task EnterpriseCategoryMappingUsesStableCategoryOrKnownSourceNotDisplayText()
     {
@@ -574,7 +588,10 @@ public sealed class StoreTests : IDisposable
             await seed.ExecuteNonQueryAsync();
         }
         Assert.False(await s.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url")));
+        var localDetection = Event() with { Risk = RiskLevel.High, EventId = Guid.NewGuid(), Source = "manual-analysis" };
+        Assert.True(await s.AddWithEnterpriseMetadataAsync(localDetection, "url", "local.url"));
         Assert.Equal(10000, await s.CountPendingEnterpriseEventsAsync());
+        Assert.Equal(localDetection.EventId, Assert.Single(await s.ReadAsync()).EventId);
     }
     [Fact] public async Task RevokingEnterpriseConsentClearsPendingMetadataWithoutDeletingLocalHistory()
     {
