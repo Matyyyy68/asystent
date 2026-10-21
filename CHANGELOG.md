@@ -42,6 +42,7 @@
 - Rozszerzono izolowany self-test instalatora o aktualizację istniejącego katalogu, zachowanie plików spoza payloadu i rollback po anulowaniu po zamianie katalogów. Test sprawdza też, że anulowanie loguje etap transakcji, a nie ekstrakcji.
 - Instalator wstępnie wybiera teraz zarejestrowaną lokalizację Sentinel AI, jeśli znajduje się ona w profilu użytkownika; test odrzuca lokalizację systemową.
 - Dodano ręczną rotację poświadczenia Enterprise z potwierdzeniem użytkownika, ochroną DPAPI i blokadą komunikacji po cofnięciu zgody.
+- Dodano automatyczną rotację poświadczenia Enterprise po 90 dniach; panel ustawień pokazuje termin rotacji, a wymiana wymaga aktywnej zgody i dostępności serwera.
 - Dodano test rzeczywistego procesu Engine: kolejka Enterprise i pairing przetrwają brak serwera oraz restart procesu, cofnięcie zgody czyści kolejkę bez kasowania historii lokalnej. Weryfikacja: .NET 203/203, server 21/21, desktop 6/6. Wcześniejsza próba retry procesu Engine wyświetliła prośbę o zaufanie certyfikatowi testowemu; instalacji do magazynu Windows nie zatwierdzono. Osobny live TLS E2E odtwarza awarię i wznowienie API, przypinając tymczasowy certyfikat wyłącznie w pamięci klienta testowego, bez zmian w Windows. Ponowienie kolejki wewnątrz procesu Engine po powrocie serwera pozostaje niezweryfikowane.
 - Testy wymagające Windows (DPAPI, rzeczywisty Engine z DPAPI oraz ACL systemu plików) jawnie raportują pominięcie poza Windows zamiast liczyć brak wykonania jako sukces. Pełny zestaw Windows .NET po tej zmianie: 203/203.
 

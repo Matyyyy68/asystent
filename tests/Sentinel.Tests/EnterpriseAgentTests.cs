@@ -145,6 +145,42 @@ public sealed class EnterpriseAgentTests
             "012345678901234567890123456789012345678901234567890123456789", "replacement-device-token-12345678901234567890");
     }
 
+    [Fact]
+    public async Task AutomaticCredentialRotationWaitsNinetyDaysThenStagesAndStoresReplacement()
+    {
+        var now = new DateTimeOffset(2026, 10, 21, 12, 0, 0, TimeSpan.Zero);
+        var store = new InMemoryCredentialStore("012345678901234567890123456789012345678901234567890123456789", now - TimeSpan.FromDays(89), now);
+        var requests = 0;
+        string? stagedToken = null;
+        var handler = new DelegateHandler(async request =>
+        {
+            requests++;
+            if (request.RequestUri!.AbsolutePath.EndsWith("/rotate", StringComparison.Ordinal))
+            {
+                Assert.Equal("Bearer " + store.Token, request.Headers.Authorization!.ToString());
+                using var body = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+                stagedToken = body.RootElement.GetProperty("newDeviceToken").GetString();
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            Assert.NotEqual("Bearer 012345678901234567890123456789012345678901234567890123456789", request.Headers.Authorization!.ToString());
+            return Json(HttpStatusCode.OK, "{}");
+        });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        var rotator = new EnterpriseCredentialRotator(client, store, new FixedTimeProvider(now));
+        var server = EnterpriseAgentClient.ValidateServer("https://sentinel.example");
+
+        Assert.False(await rotator.RotateIfDueAsync(server));
+        Assert.Equal(0, requests);
+
+        store.LastUpdatedAt = now - TimeSpan.FromDays(90);
+        Assert.True(await rotator.RotateIfDueAsync(server));
+        Assert.Equal(2, requests);
+        Assert.Equal(stagedToken, store.Token);
+        Assert.Equal(64, store.Token.Length);
+        Assert.Equal(now, store.LastUpdatedAt);
+    }
+
     [WindowsDpapiFact]
     public async Task WindowsCredentialStoreProtectsTokenAtRestAndSupportsDelete()
     {
@@ -155,6 +191,9 @@ public sealed class EnterpriseAgentTests
             var credentials = new WindowsDpapiCredentialStore(directory);
             Assert.Null(await credentials.ReadAsync());
             await credentials.WriteAsync(token);
+            var writtenAt = await credentials.GetLastUpdatedAtUtcAsync();
+            Assert.NotNull(writtenAt);
+            Assert.InRange(writtenAt.Value, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1));
             var path = Path.Combine(directory, "enterprise-credential.bin");
             Assert.DoesNotContain(token, Encoding.UTF8.GetString(await File.ReadAllBytesAsync(path)), StringComparison.Ordinal);
             Assert.Equal(token, await credentials.ReadAsync());
@@ -180,5 +219,22 @@ public sealed class EnterpriseAgentTests
     private sealed class DelegateHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> callback) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => callback(request);
+    }
+
+    private sealed class InMemoryCredentialStore(string token, DateTimeOffset? lastUpdatedAt, DateTimeOffset writeTime) : IDeviceCredentialStore
+    {
+        public string Token { get; private set; } = token;
+        public DateTimeOffset? LastUpdatedAt { get; set; } = lastUpdatedAt;
+        public Task<string?> ReadAsync(CancellationToken cancellationToken = default) => Task.FromResult<string?>(Token);
+        public Task WriteAsync(string value, CancellationToken cancellationToken = default)
+        { Token = value; LastUpdatedAt = writeTime; return Task.CompletedTask; }
+        public Task DeleteAsync(CancellationToken cancellationToken = default)
+        { Token = ""; LastUpdatedAt = null; return Task.CompletedTask; }
+        public Task<DateTimeOffset?> GetLastUpdatedAtUtcAsync(CancellationToken cancellationToken = default) => Task.FromResult(LastUpdatedAt);
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 }

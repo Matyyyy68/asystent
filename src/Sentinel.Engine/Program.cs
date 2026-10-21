@@ -83,16 +83,22 @@ async Task<bool> IsMalwareBazaarConfiguredAsync()
 async Task<object> EnterpriseStatusAsync()
 {
     string? token = null;
+    DateTimeOffset? credentialRotationDueAt = null;
     try
     {
         if (OperatingSystem.IsWindows() && installationProfile.Variant == ProductVariant.EnterpriseClient)
+        {
             token = await deviceCredentials.ReadAsync();
+            var credentialUpdatedAt = await deviceCredentials.GetLastUpdatedAtUtcAsync();
+            if (credentialUpdatedAt is { } updatedAt)
+                credentialRotationDueAt = updatedAt + EnterpriseCredentialRotator.AutomaticRotationInterval;
+        }
     }
     catch { enterpriseError = "credential_unavailable"; }
     return new { variant = installationProfile.Variant.ToString(), server = installationProfile.EnterpriseServerUri,
         paired = !string.IsNullOrEmpty(token), sharingMetadata = installationProfile.ShareSecurityMetadata,
         queuedEvents = installationProfile.Variant == ProductVariant.EnterpriseClient ? await store.CountPendingEnterpriseEventsAsync() : 0,
-        lastSync = lastEnterpriseSync, error = enterpriseError };
+        lastSync = lastEnterpriseSync, credentialRotationDueAtUtc = credentialRotationDueAt, error = enterpriseError };
 }
 async Task<object> SyncEnterpriseAsync(bool force)
 {
@@ -110,6 +116,8 @@ async Task<object> SyncEnterpriseAsync(bool force)
     var server = EnterpriseAgentClient.ValidateServer(installationProfile.EnterpriseServerUri);
     try
     {
+        if (await enterpriseCredentialRotator.RotateIfDueAsync(server))
+            token = await deviceCredentials.ReadAsync() ?? throw new InvalidDataException("Poświadczenie zniknęło po rotacji.");
         await enterpriseAgent.SendHeartbeatAsync(server, token);
         using var configuration = await enterpriseAgent.ReadConfigurationAsync(server, token);
         var policy = EnterprisePolicy.Parse(configuration);

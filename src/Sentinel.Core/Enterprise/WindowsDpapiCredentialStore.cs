@@ -29,6 +29,13 @@ public sealed class WindowsDpapiCredentialStore(string directory, string fileNam
         finally { CryptographicOperations.ZeroMemory(clear); }
     }
 
+    public Task<DateTimeOffset?> GetLastUpdatedAtUtcAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureWindows(); cancellationToken.ThrowIfCancellationRequested();
+        if (!File.Exists(path)) return Task.FromResult<DateTimeOffset?>(null);
+        return Task.FromResult<DateTimeOffset?>(new DateTimeOffset(File.GetLastWriteTimeUtc(path), TimeSpan.Zero));
+    }
+
     public async Task WriteAsync(string token, CancellationToken cancellationToken = default)
     {
         EnsureWindows();

@@ -16,6 +16,7 @@ public interface IDeviceCredentialStore
     Task<string?> ReadAsync(CancellationToken cancellationToken = default);
     Task WriteAsync(string token, CancellationToken cancellationToken = default);
     Task DeleteAsync(CancellationToken cancellationToken = default);
+    Task<DateTimeOffset?> GetLastUpdatedAtUtcAsync(CancellationToken cancellationToken = default) => Task.FromResult<DateTimeOffset?>(null);
 }
 
 /// <summary>Small HTTPS-only client for pairing and privacy-minimal Enterprise synchronization.</summary>

@@ -2,9 +2,32 @@ using System.Security.Cryptography;
 
 namespace Sentinel.Core.Enterprise;
 
-/// <summary>Rotates an Enterprise credential without losing the currently working credential on staging failure.</summary>
-public sealed class EnterpriseCredentialRotator(EnterpriseAgentClient client, IDeviceCredentialStore credentialStore)
+/// <summary>Rotates Enterprise credentials without losing the currently working credential on staging failure.</summary>
+public sealed class EnterpriseCredentialRotator
 {
+    public static readonly TimeSpan AutomaticRotationInterval = TimeSpan.FromDays(90);
+    private readonly EnterpriseAgentClient client;
+    private readonly IDeviceCredentialStore credentialStore;
+    private readonly TimeProvider timeProvider;
+
+    public EnterpriseCredentialRotator(EnterpriseAgentClient client, IDeviceCredentialStore credentialStore, TimeProvider? timeProvider = null)
+    {
+        this.client = client ?? throw new ArgumentNullException(nameof(client));
+        this.credentialStore = credentialStore ?? throw new ArgumentNullException(nameof(credentialStore));
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    public async Task<bool> RotateIfDueAsync(Uri server, CancellationToken cancellationToken = default)
+    {
+        var current = await credentialStore.ReadAsync(cancellationToken);
+        if (string.IsNullOrEmpty(current)) return false;
+        var lastUpdated = await credentialStore.GetLastUpdatedAtUtcAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        if (lastUpdated is { } updated && updated <= now && now - updated < AutomaticRotationInterval) return false;
+        await RotateAsync(server, cancellationToken);
+        return true;
+    }
+
     public async Task RotateAsync(Uri server, CancellationToken cancellationToken = default)
     {
         var current = await credentialStore.ReadAsync(cancellationToken)
