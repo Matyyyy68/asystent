@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- SQLite v16 łączy potwierdzone wykrycia CERT dla tego samego hosta oraz zgodne dopasowania lokalnego SHA-256 pliku między Downloads i ręczną analizą. Scalanie wymaga tego samego rodzaju sygnału, ryzyka, okna 60 s i nowego źródła; każda obserwacja zachowuje własny identyfikator, czas, źródło i dowody. Alert Downloads nie zapisuje nazwy pliku, a hash pozostaje lokalnie i nie trafia do JSON/CSV ani Enterprise. Testy .NET 223/223, desktop 9/9, DNS/TCP/UDP + Engine IPC, produkcyjny UI build i autotest instalatora PASS; Windows CI dla tego zakresu oczekuje na zakończenie.
+- SQLite v16 łączy potwierdzone wykrycia CERT dla tego samego hosta oraz zgodne dopasowania lokalnego SHA-256 pliku między Downloads i ręczną analizą. Scalanie wymaga tego samego rodzaju sygnału, ryzyka, okna 60 s i nowego źródła; każda obserwacja zachowuje własny identyfikator, czas, źródło i dowody. Alert Downloads nie zapisuje nazwy pliku, a hash pozostaje lokalnie i nie trafia do JSON/CSV ani Enterprise. Testy .NET 223/223, desktop 9/9, DNS/TCP/UDP + Engine IPC, produkcyjny UI build i autotest instalatora PASS; Windows CI `39649636891` PASS.
 
 - Doprecyzowano opisy pauzy: silnik nadal pobiera co sekundę PID i nazwy procesów oraz aktualizuje lokalny baseline, ale nie zapisuje zdarzeń z tego monitora. Diagnostyka pokazuje teraz ten stan wprost; test sprawdza komunikat i zachowanie baseline'u.
 
