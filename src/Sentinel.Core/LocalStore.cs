@@ -646,21 +646,23 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 }
             }
         }
+        if (enqueueEnterprise && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
+        {
+            using var profileRead = c.CreateCommand(); profileRead.Transaction = transaction;
+            profileRead.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+            var profileJson = await profileRead.ExecuteScalarAsync(cancellationToken) as string;
+            var profile = profileJson is null ? null : JsonSerializer.Deserialize<InstalledProductProfile>(profileJson)?.Validate();
+            if (profile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } &&
+                item.Timestamp <= DateTimeOffset.UtcNow.AddMinutes(5) && item.Timestamp >= DateTimeOffset.UtcNow.AddDays(-30))
+            {
+                var category = MapEnterpriseCategory(item, source);
+                var ruleCode = "local." + category;
+                await EnqueueEnterpriseEventCoreAsync(c, transaction, new PendingEnterpriseEvent(eventId, item.Timestamp, category,
+                    (int)item.Risk, ruleCode, EnterpriseEventV1Rules.NormalizeSource(source),
+                    EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
+            }
+        }
         await transaction.CommitAsync(cancellationToken);
-        string? profileJson = null;
-        if (enqueueEnterprise)
-        {
-            using var profileRead = c.CreateCommand(); profileRead.CommandText = "SELECT json FROM installation_profile WHERE id=1";
-            profileJson = await profileRead.ExecuteScalarAsync(cancellationToken) as string;
-        }
-        var profile = profileJson is null ? null : JsonSerializer.Deserialize<InstalledProductProfile>(profileJson)?.Validate();
-        if (enqueueEnterprise && profile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
-        {
-            var category = MapEnterpriseCategory(item, source);
-            var ruleCode = "local." + category;
-            await EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, item.Timestamp, category, (int)item.Risk, ruleCode,
-                EnterpriseEventV1Rules.NormalizeSource(source), EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
-        }
         return id;
     }
     private static bool HasCertEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
@@ -801,13 +803,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     }
     public async Task<bool> EnqueueEnterpriseEventAsync(PendingEnterpriseEvent item, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(item);
-        if (item.EventId == Guid.Empty || item.Category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
-            item.RiskLevel is < 2 or > 4 || item.RuleCode.Length is < 1 or > 80 ||
-            item.RuleCode.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '_' or '-')) ||
-            item.SchemaVersion != 1 ||
-            item.OccurredAt > DateTimeOffset.UtcNow.AddMinutes(5) || item.OccurredAt < DateTimeOffset.UtcNow.AddDays(-30))
-            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(item));
+        ValidatePendingEnterpriseEvent(item);
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using var profileRead = c.CreateCommand(); profileRead.Transaction = transaction;
         profileRead.CommandText = "SELECT json FROM installation_profile WHERE id=1";
@@ -815,11 +811,28 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var profile = JsonSerializer.Deserialize<InstalledProductProfile>(raw)?.Validate() ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
         if (profile.Variant != ProductVariant.EnterpriseClient || !profile.ShareSecurityMetadata)
             throw new InvalidOperationException("Synchronizacja metadanych nie została jawnie włączona.");
+        var inserted = await EnqueueEnterpriseEventCoreAsync(c, transaction, item, ct);
+        await transaction.CommitAsync(ct);
+        return inserted;
+    }
+    private static void ValidatePendingEnterpriseEvent(PendingEnterpriseEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.EventId == Guid.Empty || item.Category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
+            item.RiskLevel is < 2 or > 4 || string.IsNullOrEmpty(item.RuleCode) || item.RuleCode.Length > 80 ||
+            item.RuleCode.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '_' or '-')) ||
+            item.SchemaVersion != 1 || item.OccurredAt > DateTimeOffset.UtcNow.AddMinutes(5) || item.OccurredAt < DateTimeOffset.UtcNow.AddDays(-30))
+            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(item));
+    }
+    private static async Task<bool> EnqueueEnterpriseEventCoreAsync(SqliteConnection c, SqliteTransaction transaction,
+        PendingEnterpriseEvent item, CancellationToken ct)
+    {
+        ValidatePendingEnterpriseEvent(item);
         using (var existing = c.CreateCommand())
         {
             existing.Transaction = transaction; existing.CommandText = "SELECT 1 FROM enterprise_event_queue WHERE event_id=$id";
             existing.Parameters.AddWithValue("$id", item.EventId.ToString("D"));
-            if (await existing.ExecuteScalarAsync(ct) is not null) { await transaction.CommitAsync(ct); return true; }
+            if (await existing.ExecuteScalarAsync(ct) is not null) return true;
         }
         using (var prune = c.CreateCommand())
         {
@@ -831,7 +844,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         {
             count.Transaction = transaction; count.CommandText = "SELECT COUNT(*) FROM enterprise_event_queue";
             if (Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) >= 10000)
-            { await transaction.CommitAsync(ct); return false; }
+                return false;
         }
         using var command = c.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "INSERT OR IGNORE INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version) VALUES($id,$time,$category,$risk,$rule,$source,$ruleVersion,$schemaVersion)";
@@ -840,7 +853,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         command.Parameters.AddWithValue("$source", EnterpriseEventV1Rules.NormalizeSource(item.Source));
         command.Parameters.AddWithValue("$ruleVersion", (object?)EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion) ?? DBNull.Value);
         command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
-        var inserted = await command.ExecuteNonQueryAsync(ct) == 1; await transaction.CommitAsync(ct); return inserted;
+        return await command.ExecuteNonQueryAsync(ct) == 1;
     }
     public async Task<int> CountPendingEnterpriseEventsAsync(CancellationToken ct = default)
     {

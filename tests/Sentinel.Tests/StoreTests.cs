@@ -482,6 +482,24 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(Assert.Single(await s.ReadAsync()).EventId, item.EventId);
         await s.MarkEnterpriseEventsSentAsync([item.EventId]); Assert.Empty(await s.ReadPendingEnterpriseEventsAsync());
     }
+    [Fact] public async Task EnterpriseEventAndOfflineQueueEntryCommitAtomically()
+    {
+        var store = await Store();
+        await store.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var trigger = connection.CreateCommand();
+            trigger.CommandText = "CREATE TRIGGER reject_enterprise_queue BEFORE INSERT ON enterprise_event_queue BEGIN SELECT RAISE(ABORT, 'synthetic queue write failure'); END";
+            await trigger.ExecuteNonQueryAsync();
+        }
+
+        var item = Event() with { Risk = RiskLevel.High, EventId = Guid.NewGuid(), Source = "manual-analysis" };
+        await Assert.ThrowsAsync<SqliteException>(() => store.AddAsync(item));
+
+        Assert.Empty(await store.ReadAsync());
+        Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
+    }
     [Fact] public async Task EnterpriseCategoryMappingUsesStableCategoryOrKnownSourceNotDisplayText()
     {
         var store = await Store();
