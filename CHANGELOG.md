@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Bieżący build po poprawce atomowego cofania zgody: pełny `scripts/build-user.ps1 -Installer` PASS, .NET 227/227 bez pominięć, Engine IPC, procesy, Windows DNS/TCP/UDP, desktop 9/9, `npm audit` 0, UI build i autotest instalatora PASS. Nieopublikowany instalator v0.15.38: 281235321 B, SHA-256 `2D9A1649EC3EEC15512283D4D50CAFF1A95A6D2B23DE17925B451FC9A3706714`. Windows CI `39663289184` w toku.
 - Cofnięcie zgody Enterprise i usunięcie zarówno standardowej, jak i odroczonej kolejki odbywają się teraz w jednej transakcji SQLite. Awaria czyszczenia cofa też zmianę zgody, więc nie zostaje stan, który mógłby ponownie wysłać stare metadane po późniejszym włączeniu. Test wstrzykuje błąd SQLite i sprawdza rollback profilu oraz outboxa; Release .NET 225 PASS / 2 testy platformowe pominięte.
 - Pełna walidacja SQLite v17: .NET 225/225 bez pominięć, Engine IPC, procesy, Windows DNS/TCP/UDP, desktop 9/9, `npm audit` 0 podatności, UI build i autotest instalatora PASS. Lokalny, nieopublikowany instalator v0.15.38 ma 281235321 B i SHA-256 `003B2F198C6C88F654D381EE9D26146FB5B4CD877D0BE9468BBD10FAA8E184B3`. CI `39661127030` PASS.
 - Dodano regresję backup/restore: deferred metadata przetrwa pełną kolejkę 10 000 rekordów, kopię i przywrócenie do innej bazy. Release .NET testy: 224 PASS, 2 platformowe pominięte.
