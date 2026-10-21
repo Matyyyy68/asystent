@@ -181,6 +181,36 @@ public sealed class EnterpriseAgentTests
         Assert.Equal(now, store.LastUpdatedAt);
     }
 
+    [Fact]
+    public async Task AutomaticCredentialRotationKeepsCurrentCredentialAndRetriesAfterServerFailure()
+    {
+        var now = new DateTimeOffset(2026, 10, 21, 12, 0, 0, TimeSpan.Zero);
+        const string currentToken = "012345678901234567890123456789012345678901234567890123456789";
+        var store = new InMemoryCredentialStore(currentToken, now - TimeSpan.FromDays(90), now);
+        var stageAttempts = 0;
+        var handler = new DelegateHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/rotate", StringComparison.Ordinal))
+            {
+                stageAttempts++;
+                Assert.Equal("Bearer " + currentToken, request.Headers.Authorization!.ToString());
+                return Task.FromResult(new HttpResponseMessage(stageAttempts == 1 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NoContent));
+            }
+            return Task.FromResult(Json(HttpStatusCode.OK, "{}"));
+        });
+        using var http = new HttpClient(handler);
+        var rotator = new EnterpriseCredentialRotator(new EnterpriseAgentClient(http), store, new FixedTimeProvider(now));
+        var server = EnterpriseAgentClient.ValidateServer("https://sentinel.example");
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => rotator.RotateIfDueAsync(server));
+        Assert.Equal(currentToken, store.Token);
+        Assert.Equal(now - TimeSpan.FromDays(90), store.LastUpdatedAt);
+
+        Assert.True(await rotator.RotateIfDueAsync(server));
+        Assert.Equal(2, stageAttempts);
+        Assert.NotEqual(currentToken, store.Token);
+    }
+
     [WindowsDpapiFact]
     public async Task WindowsCredentialStoreProtectsTokenAtRestAndSupportsDelete()
     {
