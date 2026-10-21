@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ponowiono test GUI instalatora po potwierdzeniu użytkownika. Kreator uruchomił się, ale przechwytywanie okna zwróciło `FrameArrived timed out`; nie rozpoczęto instalacji. Kontrole potwierdziły brak procesu, rejestracji, autostartu i katalogu instalacji po próbie. Pełny cykl GUI pozostaje nieweryfikowany.
 - Zaktualizowano `ARCHITECTURE.md` do aktywnego klienta Electron/.NET 10, rozszerzenia MV3 i osobnego backendu Enterprise. Dodano macierz pokrycia procesu, TCP/UDP, DNS, HTTPS, przeglądarek, plików Downloads i VPN wraz z potwierdzonymi ograniczeniami; stary opis WPF 0.14 nie przedstawia już nieaktualnej architektury jako bieżącej.
 - Sprawdzono dostępny dziennik Application Windows po zgłoszonych wyjątkach .NET: nie znaleziono awarii Sentinel. Jedyny pasujący rekord dotyczy procesu `Cp5Harness`; obrazy błędu nie ujawniają przyczyny i nie ma lokalnego zdarzenia aplikacji, które pozwoliłoby ją potwierdzić.
 - Bieżący build po poprawce atomowego cofania zgody: pełny `scripts/build-user.ps1 -Installer` PASS, .NET 227/227 bez pominięć, Engine IPC, procesy, Windows DNS/TCP/UDP, desktop 9/9, `npm audit` 0, UI build i autotest instalatora PASS. Nieopublikowany instalator v0.15.38: 281235321 B, SHA-256 `2D9A1649EC3EEC15512283D4D50CAFF1A95A6D2B23DE17925B451FC9A3706714`. Windows CI `39663289184` PASS.
