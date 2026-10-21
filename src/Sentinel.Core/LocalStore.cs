@@ -555,20 +555,40 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var profile = profileJson is null ? null : JsonSerializer.Deserialize<InstalledProductProfile>(profileJson)?.Validate();
         if (enqueueEnterprise && profile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
         {
-            var category = item.Category.ToLowerInvariant() switch
-            {
-                var value when value.Contains("url", StringComparison.Ordinal) => "url",
-                var value when value.Contains("document", StringComparison.Ordinal) => "document",
-                var value when value.Contains("attachment", StringComparison.Ordinal) => "attachment",
-                var value when value.Contains("sender", StringComparison.Ordinal) => "sender",
-                var value when value.Contains("login", StringComparison.Ordinal) => "login",
-                _ => "message"
-            };
+            var category = MapEnterpriseCategory(item, source);
             var ruleCode = "local." + category;
             await EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, item.Timestamp, category, (int)item.Risk, ruleCode,
                 EnterpriseEventV1Rules.NormalizeSource(source), EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
         }
         return id;
+    }
+    private static string MapEnterpriseCategory(SecurityEvent item, string source)
+    {
+        // Map stable category identifiers and known event sources. Do not infer a
+        // transport category by searching localized, user-visible text.
+        var category = item.Category.Trim();
+        if (Enum.GetNames<Sentinel.Core.Analysis.ThreatCategory>()
+            .Any(name => string.Equals(name, category, StringComparison.OrdinalIgnoreCase)))
+        {
+            return category.ToLowerInvariant() switch
+            {
+                "suspiciousnavigation" => "url",
+                "credentialphishing" => "login",
+                "unsafeexecution" => "attachment",
+                _ => "message"
+            };
+        }
+        if (string.Equals(category, "url", StringComparison.OrdinalIgnoreCase)) return "url";
+        if (string.Equals(category, "document", StringComparison.OrdinalIgnoreCase)) return "document";
+        if (string.Equals(category, "attachment", StringComparison.OrdinalIgnoreCase)) return "attachment";
+        if (string.Equals(category, "sender", StringComparison.OrdinalIgnoreCase)) return "sender";
+        if (string.Equals(category, "login", StringComparison.OrdinalIgnoreCase)) return "login";
+        return source switch
+        {
+            "browser-extension" or "dns-cache" => "url",
+            "downloads-local-hash" => "attachment",
+            _ => "message"
+        };
     }
     private static (Guid EventId, string Source) ValidateEvent(SecurityEvent item)
     {

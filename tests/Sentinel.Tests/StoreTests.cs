@@ -380,6 +380,28 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(Assert.Single(await s.ReadAsync()).EventId, item.EventId);
         await s.MarkEnterpriseEventsSentAsync([item.EventId]); Assert.Empty(await s.ReadPendingEnterpriseEventsAsync());
     }
+    [Fact] public async Task EnterpriseCategoryMappingUsesStableCategoryOrKnownSourceNotDisplayText()
+    {
+        var store = await Store();
+        await store.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
+        var cases = new (string Category, string Source, string Expected)[]
+        {
+            ("SuspiciousNavigation", "manual-analysis", "url"),
+            ("CredentialPhishing", "manual-analysis", "login"),
+            ("PaymentFraud", "manual-analysis", "message"),
+            ("UnsafeExecution", "manual-analysis", "attachment"),
+            ("Domena na liście CERT Polska", "dns-cache", "url"),
+            ("File hash match", "downloads-local-hash", "attachment"),
+            ("The word URL in a display label", "manual-analysis", "message"),
+            ("1", "manual-analysis", "message")
+        };
+
+        foreach (var (category, source, _) in cases)
+            await store.AddAsync(Event() with { Risk = RiskLevel.High, Category = category, Source = source });
+
+        var queued = await store.ReadPendingEnterpriseEventsAsync();
+        Assert.Equal(cases.Select(item => item.Expected), queued.Select(item => item.Category));
+    }
     [Fact] public async Task VersionNineDatabaseMigratesPendingEnterpriseQueueWithSafeDefaults()
     {
         Directory.CreateDirectory(dir);
