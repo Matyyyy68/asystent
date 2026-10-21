@@ -55,6 +55,18 @@ public sealed class BrowserIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void BrowserWarningCatchesUserInfoThatHidesTheDestinationHost()
+    {
+        var requestUrl = "https://paypal.com@attacker.test/login";
+        var response = new UrlRequestProcessor().Process(new BrowserRequest("userinfo-1", "analyze", requestUrl));
+
+        Assert.True(response.ShouldWarn);
+        Assert.Equal("Moderate", response.Risk);
+        Assert.Contains(response.Indicators, item => item.Id == "url.userinfo");
+        Assert.DoesNotContain("attacker.test", JsonSerializer.Serialize(response));
+    }
+
+    [Fact]
     public void ProcessorWarnsOnDeceptiveBrandAndDoesNotReturnSubmittedUrl()
     {
         var url = "https://paypal.com.evil.test/login?email=private@example.test";

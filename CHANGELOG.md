@@ -4,7 +4,7 @@
 
 - Doprecyzowano opisy pauzy: silnik nadal pobiera co sekundę PID i nazwy procesów oraz aktualizuje lokalny baseline, ale nie zapisuje zdarzeń z tego monitora. Diagnostyka pokazuje teraz ten stan wprost; test sprawdza komunikat i zachowanie baseline'u.
 
-- URL z częścią przed `@` podnosi teraz ryzyko z niskiego do umiarkowanego, bo może ukryć właściwy host przed użytkownikiem. Wersja reguł wzrosła do `2026.10.2`. Korpus regresyjny obejmuje 25 ręcznie przygotowanych scenariuszy, w tym `https://paypal.com@attacker.test/login`: TP=13, FP=0, TN=12, FN=0 przy progu Moderate. To test syntetyczny, nie reprezentatywny pomiar skuteczności produkcyjnej.
+- URL z częścią przed `@` podnosi teraz ryzyko z niskiego do umiarkowanego, bo może ukryć właściwy host przed użytkownikiem. Wersja reguł wzrosła do `2026.10.2`. Korpus regresyjny obejmuje 25 ręcznie przygotowanych scenariuszy, w tym `https://paypal.com@attacker.test/login`: TP=13, FP=0, TN=12, FN=0 przy progu Moderate. Test Browser Host potwierdza ostrzeżenie i brak ujawnienia domeny w odpowiedzi. To test syntetyczny, nie reprezentatywny pomiar skuteczności produkcyjnej.
 
 - Procesy są teraz próbkowane co około 1 s zamiast co 5 s, by ograniczyć pomijanie krótkich zdarzeń. Profil lokalny 30 s: CPU 0,377% całkowitej mocy procesorów i working set maks. 56 MiB przy 1 s; punkt odniesienia 5 s: 0,130% i 51 MiB. Windows CI `39628465280` PASS (214/214 .NET, installer self-test, Enterprise API 22/22, HTTP API smoke). To krótka sesja na jednej maszynie; procesy krótsze od próbki nadal mogą zostać pominięte.
 
