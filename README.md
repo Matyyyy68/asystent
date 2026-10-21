@@ -2,7 +2,7 @@
 
 Rozwojowa aplikacja Windows 10/11 x64. React + TypeScript + Electron jest jedynym wspieranym interfejsem. Osobny proces .NET 10 używa lokalnych reguł i SQLite. Nie wymaga konta ani serwera Enterprise. Kod WPF zachowano wyłącznie w `legacy/` jako archiwum migracji; nie jest częścią bieżącego rozwiązania ani instalatora.
 
-**Stan: wersja do testów technicznych, nie gotowy produkt ochronny.** Aplikacja analizuje wklejoną wiadomość lub URL, sprawdza dokładną domenę na jawnie pobranej liście CERT Polska i odczytuje cache DNS Windows po włączeniu obserwacji. Opcjonalny, domyślnie wyłączony monitoring TCP próbuje co 10 sekund wykrywać nowe połączenia `Established`/`SynSent` i zapisuje lokalnie ich metadane (IP, port, PID i nazwę procesu, jeśli dostępne). Może pominąć krótkie połączenia; nie rejestruje payloadu ani nie blokuje ruchu. DNS nie obejmuje DoH, VPN, pełnych URL ani połączeń po IP; UDP pozostaje ręcznym snapshotem endpointów. Historia ma limit 512 MiB; zapis przy braku miejsca zostaje odrzucony bez automatycznego usuwania starszych zdarzeń. WFP i monitoring pobranych plików nie są wdrożone; ręczny skan oblicza SHA-256, sprawdza Authenticode i może dopasować hash do ręcznie zaimportowanej lokalnej listy. Nieznany lub niedopasowany hash nie oznacza, że plik jest bezpieczny, a źródło importowanej listy nie jest niezależnie weryfikowane. Brak wykrycia nie potwierdza bezpieczeństwa. Sentinel nie zastępuje Windows Defender.
+**Stan: wersja do testów technicznych, nie gotowy produkt ochronny.** Aplikacja analizuje wklejoną wiadomość lub URL, sprawdza dokładną domenę na jawnie pobranej liście CERT Polska i odczytuje cache DNS Windows po włączeniu obserwacji. Procesy są próbkowane lokalnie mniej więcej co sekundę. Opcjonalny monitoring TCP/UDP jest domyślnie wyłączony; po włączeniu próbuje co sekundę wykrywać nowe połączenia TCP `Established`/`SynSent` i lokalne endpointy UDP, zapisując dostępne metadane. Może pominąć krótkie połączenia; endpoint UDP nie potwierdza wysłania datagramu. Aplikacja nie odczytuje payloadu ani nie blokuje ruchu. DNS nie obejmuje DoH, VPN, pełnych URL ani połączeń po IP. Historia ma limit 512 MiB; zapis przy braku miejsca zostaje odrzucony bez automatycznego usuwania starszych zdarzeń. Monitoring plików w folderze Downloads jest opcjonalny i domyślnie wyłączony: po włączeniu sprawdza nowe pliki bezpośrednio w tym folderze (do 256 MiB) względem lokalnej listy SHA-256; plik ani hash nie są wysyłane. Ścieżki, rozmiary i czasy modyfikacji zapisuje lokalnie bez szyfrowania, aby wznowić obserwację po restarcie. Ręczny skan oblicza SHA-256, sprawdza Authenticode i może dopasować hash do ręcznie zaimportowanej listy. Nieznany lub niedopasowany hash nie oznacza bezpieczeństwa, a źródło listy nie jest niezależnie weryfikowane. WFP, filtrowanie i automatyczne blokowanie ruchu nie są wdrożone. Brak wykrycia nie potwierdza bezpieczeństwa. Sentinel nie zastępuje Windows Defender.
 
 ## Wymagania i budowanie
 
@@ -34,6 +34,8 @@ cd ../website; npm.cmd ci; npm.cmd test; npm.cmd run build -- --base=/asystent/
 ```
 
 Przed testem na czystym komputerze przeczytaj [procedurę Windows](docs/USER-VALIDATION.md), [architekturę](ARCHITECTURE.md), [ograniczenia](docs/KNOWN-LIMITATIONS.md) i [changelog](CHANGELOG.md).
+
+Do połączenia z serwerem organizacji zobacz [konfigurację klienta Enterprise](docs/ENTERPRISE-CLIENT-SETUP.md). Serwer jest osobnym projektem i wymaga własnego wdrożenia HTTPS.
 
 ## Witryna
 

@@ -1,5 +1,7 @@
 # Sentinel AI Server — etapy A, B1, B2a i B2b (częściowo)
 
+Instrukcję parowania klienta Windows z serwerem i zakres przesyłanych danych opisuje [konfiguracja klienta Enterprise](../docs/ENTERPRISE-CLIENT-SETUP.md).
+
 Wersja API i aplikacji jest wspólna z klientem i pochodzi z `eng/ProductVersion.props`; endpoint `/readyz` zwraca wersję uruchomionego serwera.
 
 Serwer jest odrębnym projektem w `server/`; istniejący klient WPF i jego reguły pozostają bez zmian. Wymagany jest .NET SDK 10.0.402. API może działać jako usługa Windows przez `Microsoft.Extensions.Hosting.WindowsServices` 10.0.13.
