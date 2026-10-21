@@ -77,6 +77,36 @@ public sealed class StoreTests : IDisposable
 
         Assert.Equal(5, await store.CountEventsAsync());
     }
+    [Fact] public async Task MatchingManualAndBrowserUrlSignalsMergeWithoutStoringHostOrRuleHash()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var evidence = new[] { "url.brand", "url.userinfo" };
+        var hash = LocalStore.CreateUrlEvidenceSignalHash("login.example.com", evidence);
+        Assert.NotNull(hash);
+        Assert.Equal(hash, LocalStore.CreateUrlEvidenceSignalHash("LOGIN.example.com", evidence.Reverse()));
+        Assert.Null(LocalStore.CreateUrlEvidenceSignalHash("login.example.com", ["text.credential"]));
+
+        var manual = new SecurityEvent(0, at, RiskLevel.Moderate, "SuspiciousNavigation", "Manual analysis", "Synthetic URL warning", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "manual-analysis", EvidenceCodes: evidence, SignalHash: hash);
+        var canonicalId = await store.AddLocalOnlyAsync(manual);
+        var browser = manual with { EventId = Guid.NewGuid(), Timestamp = at.AddSeconds(8), Source = "browser-extension",
+            Application = "Browser extension", EvidenceCodes = evidence.Reverse().ToArray() };
+        Assert.Equal(canonicalId, await store.AddLocalOnlyAsync(browser));
+
+        var sameSource = manual with { EventId = Guid.NewGuid(), Timestamp = at.AddSeconds(10) };
+        Assert.NotEqual(canonicalId, await store.AddLocalOnlyAsync(sameSource));
+        var otherSignal = browser with { EventId = Guid.NewGuid(), Timestamp = at.AddSeconds(11), EvidenceCodes = ["url.brand"],
+            SignalHash = LocalStore.CreateUrlEvidenceSignalHash("login.example.com", ["url.brand"]) };
+        Assert.NotEqual(canonicalId, await store.AddLocalOnlyAsync(otherSignal));
+
+        Assert.Equal(3, await store.CountEventsAsync());
+        var saved = (await store.ReadAsync()).Single(item => item.Id == canonicalId);
+        Assert.Equal(new[] { "manual-analysis", "browser-extension" }, saved.Observations!.Select(item => item.Source));
+        var serialized = System.Text.Json.JsonSerializer.Serialize(await store.ReadAsync());
+        Assert.DoesNotContain("login.example.com", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(hash, serialized, StringComparison.OrdinalIgnoreCase);
+    }
     [Fact] public async Task MatchingManualAndDownloadsFileSignalsMergeWithoutPersistingFileNames()
     {
         var store = await Store();

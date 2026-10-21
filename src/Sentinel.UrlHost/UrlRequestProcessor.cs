@@ -58,11 +58,14 @@ public sealed class UrlRequestProcessor
             result = result with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
                 Indicators = result.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray() };
         var historyKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{analysis.Origin}|{string.Join(',', result.Indicators.Select(x => x.Id).Order(StringComparer.Ordinal))}")));
+        var evidenceCodes = result.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).ToArray();
+        var isCertSignal = evidenceCodes.Contains("reputation.cert", StringComparer.Ordinal);
         return new(request.Id, true, ThreatAnalysisEngine.RulesVersion, result.Risk.ToString(), result.Category.ToString(),
             result.Risk >= RiskLevel.Moderate && result.Indicators.Count != 0,
             result.Indicators.Select(i => new BrowserIndicator(i.Id, i.Description)).ToArray(),
             result.Uncertainties.FirstOrDefault() ?? "Wynik nie potwierdza bezpieczeństwa adresu.", historyKey, result.Explanation,
             analysis.RegistrableDomain ?? analysis.Host,
-            result.Indicators.Any(indicator => indicator.Id == "reputation.cert") ? LocalStore.CreateHostSignalHash(analysis.Host) : null);
+            isCertSignal ? LocalStore.CreateHostSignalHash(analysis.Host)
+                : LocalStore.CreateUrlEvidenceSignalHash(analysis.Host, evidenceCodes));
     }
 }

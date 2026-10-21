@@ -28,6 +28,17 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         catch (ArgumentException) { return null; }
     }
+    /// <summary>Returns a local-only key for matching the same URL rule signals across manual and browser analysis.</summary>
+    public static string? CreateUrlEvidenceSignalHash(string? host, IEnumerable<string>? evidenceCodes)
+    {
+        var urlEvidence = evidenceCodes?.Where(code => code.StartsWith("url.", StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray() ?? [];
+        if (urlEvidence.Length == 0 || urlEvidence.Any(code => code.Length > 64 || code.Any(char.IsControl))) return null;
+        var hostHash = CreateHostSignalHash(host);
+        if (hostHash is null) return null;
+        var material = "url-evidence-v1\n" + hostHash + "\n" + string.Join('\n', urlEvidence);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
+    }
     public Task<DatabaseStorageMetrics> GetStorageMetricsAsync(CancellationToken cancellationToken = default) =>
         DatabaseStorageMetricsReader.ReadAsync(DatabasePath, "SELECT COUNT(*) FROM events", cancellationToken);
     public LocalStore(string directory, long maximumDatabaseBytes = DefaultMaximumDatabaseBytes)
@@ -697,12 +708,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         code.StartsWith("reputation.cert.", StringComparison.Ordinal)) == true;
     private static bool HasFileReputationEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
         string.Equals(code, "file.sha256.matches-local-list", StringComparison.Ordinal)) == true;
+    private static bool HasUrlRuleEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        code.StartsWith("url.", StringComparison.Ordinal)) == true;
     private static async Task<long?> FindCrossSourceDuplicateAsync(SqliteConnection c, SqliteTransaction transaction,
         SecurityEvent item, string source, CancellationToken ct)
     {
         var isCertSignal = HasCertEvidence(item.EvidenceCodes);
         var isFileSignal = HasFileReputationEvidence(item.EvidenceCodes);
-        if (item.SignalHash is null || (!isCertSignal && !isFileSignal) || (isCertSignal && item.Risk < RiskLevel.Moderate)) return null;
+        var isUrlSignal = !isCertSignal && HasUrlRuleEvidence(item.EvidenceCodes) && (source is "manual-analysis" or "browser-extension");
+        if (item.SignalHash is null || (!isCertSignal && !isFileSignal && !isUrlSignal) || (isCertSignal && item.Risk < RiskLevel.Moderate)) return null;
         var from = item.Timestamp.ToUniversalTime().AddSeconds(-60).ToString("O");
         var to = item.Timestamp.ToUniversalTime().AddSeconds(60).ToString("O");
         using var candidates = c.CreateCommand(); candidates.Transaction = transaction;
@@ -719,16 +733,20 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             observations.CommandText = "SELECT source,evidence_codes FROM event_observations WHERE event_row_id=$id";
             observations.Parameters.AddWithValue("$id", id);
             await using var reader = await observations.ExecuteReaderAsync(ct);
-            var hasCertFromOtherSource = false;
-            var hasCertFromSameSource = false;
+            var hasSignalFromOtherSource = false;
+            var hasSignalFromSameSource = false;
             while (await reader.ReadAsync(ct))
             {
                 var codes = ParseEvidenceCodes(reader.GetString(1));
-                if (isCertSignal ? !HasCertEvidence(codes) : !HasFileReputationEvidence(codes)) continue;
-                if (string.Equals(reader.GetString(0), source, StringComparison.Ordinal)) hasCertFromSameSource = true;
-                else hasCertFromOtherSource = true;
+                var observationSource = reader.GetString(0);
+                var matchingSignal = isCertSignal ? HasCertEvidence(codes)
+                    : isFileSignal ? HasFileReputationEvidence(codes)
+                    : HasUrlRuleEvidence(codes) && (observationSource is "manual-analysis" or "browser-extension");
+                if (!matchingSignal) continue;
+                if (string.Equals(observationSource, source, StringComparison.Ordinal)) hasSignalFromSameSource = true;
+                else hasSignalFromOtherSource = true;
             }
-            if (!hasCertFromSameSource && hasCertFromOtherSource) return id;
+            if (!hasSignalFromSameSource && hasSignalFromOtherSource) return id;
         }
         return null;
     }

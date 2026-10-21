@@ -63,6 +63,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.True(response.ShouldWarn);
         Assert.Equal("Moderate", response.Risk);
         Assert.Contains(response.Indicators, item => item.Id == "url.userinfo");
+        Assert.Equal(LocalStore.CreateUrlEvidenceSignalHash("attacker.test", response.Indicators.Select(item => item.Id)), response.SignalHash);
         Assert.DoesNotContain("attacker.test", JsonSerializer.Serialize(response));
     }
 

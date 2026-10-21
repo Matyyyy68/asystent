@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ręczna analiza i rozszerzenie przeglądarki scalają teraz powtarzające się ostrzeżenia URL tylko przy zgodnym hashu hosta, identycznych kodach reguł URL, poziomie ryzyka i oknie 60 s. Każde źródło zachowuje własne ID, czas i dowody; surowy host i skrót pozostają poza eksportem. Testy Store i BrowserIntegration potwierdzają wymagane warunki i redakcję. Pełny `scripts/build-user.ps1 -Installer` PASS: .NET 230/230, Electron 10/10, `npm audit` 0, Engine IPC, Windows DNS/TCP/UDP, UI produkcyjny i installer self-test. Lokalny, nieopublikowany v0.15.38: 281241465 B, SHA-256 `4A4C233C20F1BDE7A3624D78B68415F7B1A0F8820B340DA8C2EE29A4FDEF775A`.
+
 - Instalator sprawdza przed stagingiem, czy wolne miejsce wystarczy na pakiet, zachowywane pliki aktualizacji i zapas. Self-test sprawdza odrzucenie zmienionego payloadu i brak miejsca oraz potwierdza zachowanie poprzedniej instalacji po błędzie podczas stagingu.
 - Ponowiono test GUI instalatora po potwierdzeniu użytkownika. Kreator uruchomił się, ale przechwytywanie okna zwróciło `FrameArrived timed out`; nie rozpoczęto instalacji. Kontrole potwierdziły brak procesu, rejestracji, autostartu i katalogu instalacji po próbie. Pełny cykl GUI pozostaje nieweryfikowany.
 - Diagnostyka Electron aktualizuje teraz zapamiętany typ wyjątku .NET po kolejnych restartach silnika. Eksport nadal zawiera wyłącznie typ wyjątku, bez treści stderr; test regresyjny potwierdza zmianę typu po drugim błędzie.

@@ -497,7 +497,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                         CorrelationId: correlationId,
                         EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
                         SignalHash: assessment.Indicators.Any(indicator => indicator.Id == "reputation.cert")
-                            ? LocalStore.CreateHostSignalHash(urlAnalysis?.Host) : null),
+                            ? LocalStore.CreateHostSignalHash(urlAnalysis?.Host)
+                            : LocalStore.CreateUrlEvidenceSignalHash(urlAnalysis?.Host, assessment.Indicators.Select(indicator => indicator.Id))),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
                         "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
                 }
