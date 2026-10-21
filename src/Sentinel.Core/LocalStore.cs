@@ -262,6 +262,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var connection = await Open(ct);
         using var transaction = connection.BeginTransaction();
         Guid correlationId = Guid.NewGuid();
+        var lastSeenTicksToStore = observedTicks;
+        var persistCorrelation = true;
         using (var find = connection.CreateCommand())
         {
             find.Transaction = transaction;
@@ -272,17 +274,34 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             {
                 var previousId = reader.GetString(0);
                 var previousTicks = reader.GetInt64(1);
-                if (Guid.TryParse(previousId, out var parsed) && observedTicks >= previousTicks && observedTicks - previousTicks <= windowTicks)
-                    correlationId = parsed;
+                if (Guid.TryParse(previousId, out var parsed))
+                {
+                    if (observedTicks >= previousTicks && observedTicks - previousTicks <= windowTicks)
+                        correlationId = parsed;
+                    else if (observedTicks < previousTicks && previousTicks - observedTicks <= windowTicks)
+                    {
+                        // A late-arriving event may join the recent group, but it
+                        // must never move that group's sliding timestamp backward.
+                        correlationId = parsed;
+                        lastSeenTicksToStore = previousTicks;
+                    }
+                    else if (observedTicks < previousTicks)
+                    {
+                        // Keep the current group intact when an old event arrives
+                        // outside its window; this event receives an isolated ID.
+                        persistCorrelation = false;
+                    }
+                }
             }
         }
-        using (var upsert = connection.CreateCommand())
+        if (persistCorrelation)
         {
+            using var upsert = connection.CreateCommand();
             upsert.Transaction = transaction;
             upsert.CommandText = "INSERT INTO domain_correlation(domain_key,correlation_id,last_seen_ticks) VALUES($key,$id,$seen) ON CONFLICT(domain_key) DO UPDATE SET correlation_id=excluded.correlation_id,last_seen_ticks=excluded.last_seen_ticks";
             upsert.Parameters.AddWithValue("$key", domainKey);
             upsert.Parameters.AddWithValue("$id", correlationId.ToString("D"));
-            upsert.Parameters.AddWithValue("$seen", observedTicks);
+            upsert.Parameters.AddWithValue("$seen", lastSeenTicksToStore);
             await upsert.ExecuteNonQueryAsync(ct);
         }
         using (var prune = connection.CreateCommand())

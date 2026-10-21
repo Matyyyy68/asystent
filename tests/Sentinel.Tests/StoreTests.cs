@@ -49,6 +49,21 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(first, expired);
         Assert.NotEqual(expired, otherDomain);
     }
+    [Fact] public async Task OutOfOrderDomainEventsDoNotMoveCorrelationWindowBackward()
+    {
+        var store = await Store();
+        var firstSeen = DateTimeOffset.UtcNow;
+        var first = await store.GetDomainCorrelationIdAsync("example.test", firstSeen);
+        var recent = await store.GetDomainCorrelationIdAsync("example.test", firstSeen.AddSeconds(30));
+        var lateWithinWindow = await store.GetDomainCorrelationIdAsync("example.test", firstSeen.AddSeconds(15));
+        var lateOutsideWindow = await store.GetDomainCorrelationIdAsync("example.test", firstSeen.AddSeconds(-61));
+        var current = await store.GetDomainCorrelationIdAsync("example.test", firstSeen.AddSeconds(45));
+
+        Assert.Equal(first, recent);
+        Assert.Equal(first, lateWithinWindow);
+        Assert.NotEqual(first, lateOutsideWindow);
+        Assert.Equal(first, current);
+    }
     [Fact] public async Task DomainCorrelationRejectsIpAddressAndMalformedHost()
     {
         var store = await Store();
