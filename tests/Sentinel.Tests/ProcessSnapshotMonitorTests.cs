@@ -38,6 +38,8 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
 
         snapshot.Add(42, "started-during-pause");
         Assert.Equal(0, await first.CollectAsync(store, paused: true, excludedApplications: ""));
+        Assert.Contains("Zdarzenia procesów wstrzymane", first.State);
+        Assert.Contains("baseline PID/nazw jest nadal aktualizowany", first.State);
         var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
         Assert.Equal(0, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
         Assert.Empty(await store.ReadAsync());

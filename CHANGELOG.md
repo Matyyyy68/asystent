@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Doprecyzowano opisy pauzy: silnik nadal pobiera co sekundę PID i nazwy procesów oraz aktualizuje lokalny baseline, ale nie zapisuje zdarzeń z tego monitora. Diagnostyka pokazuje teraz ten stan wprost; test sprawdza komunikat i zachowanie baseline'u.
+
 - Dodano test ewaluacyjny 24 jawnie syntetycznych przypadków reguł: 12 podwyższonego ryzyka i 12 legalnych/niejednoznacznych. Wynik w tym zestawie: TP=12, FP=0, TN=12, FN=0 przy progu Moderate. To regresyjny korpus testowy, nie reprezentatywny pomiar skuteczności w rzeczywistych wiadomościach i adresach.
 
 - Procesy są teraz próbkowane co około 1 s zamiast co 5 s, by ograniczyć pomijanie krótkich zdarzeń. Profil lokalny 30 s: CPU 0,377% całkowitej mocy procesorów i working set maks. 56 MiB przy 1 s; punkt odniesienia 5 s: 0,130% i 51 MiB. Windows CI `39628465280` PASS (214/214 .NET, installer self-test, Enterprise API 22/22, HTTP API smoke). To krótka sesja na jednej maszynie; procesy krótsze od próbki nadal mogą zostać pominięte.

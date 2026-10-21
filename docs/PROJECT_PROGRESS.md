@@ -13,6 +13,8 @@ Procesy są teraz próbkowane co około 1 s (wcześniej co 5 s), aby zmniejszyć
 
 Dodano 24 jawnie syntetyczne scenariusze detekcji: 12 podwyższonego ryzyka oraz 12 legalnych/niejednoznacznych. Reguły uzyskały TP=12, FP=0, TN=12, FN=0 na tym zestawie. To test regresyjny, nie niezależny pomiar skuteczności; F03 pozostaje częściowe do czasu dostępności reprezentatywnego korpusu z etykietami.
 
+Windows CI `39630341977` dla commita `c467939` zakończył się PASS: .NET 215/215 bez pominięć, Engine IPC, DNS/TCP/UDP, desktop 6/6, UI build, instalator i autotest instalatora, Enterprise API 22/22 oraz HTTP API smoke. Lokalnie odtworzyłem .NET 213 PASS / 2 pominięte z powodu DPAPI/profileu, desktop 6/6 i UI production build. Ujawniono też, że pauza nadal odświeża lokalny baseline PID/nazw co sekundę bez tworzenia zdarzeń; opis onboarding/UI, diagnostyka i test mówią teraz o tym wprost.
+
 **Następny krok:** kontynuować PLAN-001/PLAN-004 przez analizę bezpiecznej drogi do niezawodnych zdarzeń procesu i korelacji źródeł. Na maszynie audytu ETW/WMI odmawia dostępu; nie nadawać uprawnień ani nie zmieniać audytu systemowego bez jawnego, kontrolowanego testu. Wykonalne prace kodowe i testy offline mają pierwszeństwo, a wynik ma pozostać oznaczony jako polling, dopóki nie ma dowodu na event stream.
 
 **Weryfikacja Enterprise:** aktywny Engine przechowuje kolejkę po błędzie TLS API, a po restarcie tego samego API automatycznie wysyła ją przez zwykłe `collect` po skonfigurowanym interwale. Windows DPAPI/live TLS test, testy serwera 22/22 PASS. Certyfikat testowy jest przypięty wyłącznie w pamięci Debug Engine; magazyny Windows nie są zmieniane. Zapis API potwierdza, że treść i wyjaśnienie pozostają lokalne. Osobny live TLS E2E potwierdza idempotencję, rotację i revoke.

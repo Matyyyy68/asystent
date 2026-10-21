@@ -88,7 +88,7 @@ public sealed class ProcessSnapshotMonitor
             knownSnapshotTruncated = currentTruncated;
             storeBaselineInitialized = true;
             storeBaselineTruncated = currentTruncated;
-            State = "Próbkowanie procesów wstrzymane.";
+            State = "Zdarzenia procesów wstrzymane; lokalny baseline PID/nazw jest nadal aktualizowany.";
             return 0;
         }
 
