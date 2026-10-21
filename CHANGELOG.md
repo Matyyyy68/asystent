@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Czytnik TCP/UDP wybiera teraz deterministyczne 800 połączeń i 200 endpointów UDP oraz przekazuje do monitora informację o obcięciu tabel. SQLite v15 utrwala osobne flagi TCP/UDP; monitor wstrzymuje alerty podczas niepełnej próbki i po restarcie, a wznawia je po kolejnej pełnej próbce. Dodano testy zmian składu, restartu i migracji v14→v15. Lokalna walidacja Windows: .NET 213/213 bez pominięć, pełny build/self-test instalatora i testy serwera 22/22 PASS; CI dla tej zmiany oczekuje.
+
 - Snapshot procesów wybiera deterministycznie pierwsze 10 000 PID i zapisuje w SQLite v14, czy próbka została obcięta. Monitor pomija wnioski o startach lub zniknięciach, których nie da się wiarygodnie wyciągnąć z niepełnej próbki; po pełnej próbce wraca do normalnego wykrywania. Dodano test limitu, restartu, metadanych bez zmian baseline'u i migracji v13→v14. Lokalna walidacja Windows: .NET 211/211 bez pominięć, pełny `scripts/build-user.ps1 -Installer`, testy serwera 22/22 PASS. Windows CI `39619932040` PASS dla commita `484126f`, w tym build/test aplikacji i Enterprise API.
 
 - Windows CI ujawniło, że kontrola Authenticode może zwrócić `Unknown` przy wolnym starcie Windows PowerShell. Zwiększono timeout z 10 do 30 s, pozostawiając wynik `Unknown` przy timeout/błędzie. Pełny lokalny build/test/self-test instalatora PASS; Windows CI `39615470449` PASS: .NET 208/208, desktop 6/6, Engine IPC, self-test instalatora, Enterprise API 22/22 i HTTP API smoke.

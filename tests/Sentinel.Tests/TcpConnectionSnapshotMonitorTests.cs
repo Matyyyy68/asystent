@@ -179,6 +179,41 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task TruncatedNetworkSamplesSuppressAmbiguousAlertsAcrossRestartUntilCompleteSample()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample = [Connection(443)];
+        var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+
+        sample = new ConnectionSnapshotBatch([Connection(443)], tcpTruncated: true);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.True((await store.ReadNetworkMonitorSnapshotAsync()).TcpTruncated);
+        Assert.Contains("Osiągnięto limit tabeli", monitor.State);
+
+        sample = new ConnectionSnapshotBatch([Connection(443), Connection(8443)], tcpTruncated: true);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Empty(await store.ReadAsync());
+
+        var restarted = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, await restarted.CollectAsync(store, enabled: true, paused: false, ""));
+
+        sample = new ConnectionSnapshotBatch([Connection(443), Connection(8443)]);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(0, await restarted.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.False((await store.ReadNetworkMonitorSnapshotAsync()).TcpTruncated);
+
+        sample = new ConnectionSnapshotBatch([Connection(443), Connection(8443), Connection(9443)]);
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await restarted.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
     public async Task DisabledMonitoringInvalidatesPersistedBaselineBeforeNextOptIn()
     {
         var store = new LocalStore(directory); await store.InitializeAsync();

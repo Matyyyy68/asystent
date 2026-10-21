@@ -13,36 +13,34 @@ public static class WindowsConnectionTableReader
     private const int ErrorInsufficientBuffer = 122;
     private const int MaximumTableBytes = 16 * 1024 * 1024;
 
-    public static ConnectionSnapshot[] Read(int maximumTcp = 800, int maximumUdp = 200)
+    public static ConnectionSnapshot[] Read(int maximumTcp = 800, int maximumUdp = 200) =>
+        ReadBatch(maximumTcp, maximumUdp).Connections.ToArray();
+
+    public static ConnectionSnapshotBatch ReadBatch(int maximumTcp = 800, int maximumUdp = 200)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Migawka TCP/UDP wymaga Windows.");
         if (maximumTcp is < 1 or > 10_000 || maximumUdp is < 1 or > 10_000) throw new ArgumentOutOfRangeException();
 
         var processNames = ReadProcessNames();
-        var result = new List<ConnectionSnapshot>(maximumTcp + maximumUdp);
-        foreach (var row in ReadRows<TcpRowOwnerPidV4>(ReadTcpV4).Take(maximumTcp))
-            result.Add(new("TCP", Address(row.LocalAddress), Port(row.LocalPort), Address(row.RemoteAddress), Port(row.RemotePort),
-                TcpState(row.State), unchecked((int)row.OwningPid), Name(row.OwningPid, processNames)));
-        var remainingTcp = maximumTcp - result.Count;
-        if (remainingTcp > 0)
-            foreach (var row in ReadRows<TcpRowOwnerPidV6>(ReadTcpV6).Take(remainingTcp))
-                result.Add(new("TCP", Address(row.LocalAddress), Port(row.LocalPort), Address(row.RemoteAddress), Port(row.RemotePort),
-                    TcpState(row.State), unchecked((int)row.OwningPid), Name(row.OwningPid, processNames)));
-
-        var udpCount = 0;
-        foreach (var row in ReadRows<UdpRowOwnerPidV4>(ReadUdpV4).Take(maximumUdp))
-        {
-            result.Add(new("UDP", Address(row.LocalAddress), Port(row.LocalPort), null, null, "Endpoint",
-                unchecked((int)row.OwningPid), Name(row.OwningPid, processNames)));
-            udpCount++;
-        }
-        var remainingUdp = maximumUdp - udpCount;
-        if (remainingUdp > 0)
-            foreach (var row in ReadRows<UdpRowOwnerPidV6>(ReadUdpV6).Take(remainingUdp))
-                result.Add(new("UDP", Address(row.LocalAddress), Port(row.LocalPort), null, null, "Endpoint",
-                    unchecked((int)row.OwningPid), Name(row.OwningPid, processNames)));
-        return result.ToArray();
+        var tcp = ReadRows<TcpRowOwnerPidV4>(ReadTcpV4)
+            .Select(row => new ConnectionSnapshot("TCP", Address(row.LocalAddress), Port(row.LocalPort), Address(row.RemoteAddress), Port(row.RemotePort),
+                TcpState(row.State), unchecked((int)row.OwningPid), Name(row.OwningPid, processNames)))
+            .Concat(ReadRows<TcpRowOwnerPidV6>(ReadTcpV6).Select(row => new ConnectionSnapshot("TCP", Address(row.LocalAddress), Port(row.LocalPort), Address(row.RemoteAddress), Port(row.RemotePort),
+                TcpState(row.State), unchecked((int)row.OwningPid), Name(row.OwningPid, processNames))))
+            .OrderBy(ConnectionOrder, StringComparer.Ordinal).ToArray();
+        var udp = ReadRows<UdpRowOwnerPidV4>(ReadUdpV4)
+            .Select(row => new ConnectionSnapshot("UDP", Address(row.LocalAddress), Port(row.LocalPort), null, null, "Endpoint",
+                unchecked((int)row.OwningPid), Name(row.OwningPid, processNames)))
+            .Concat(ReadRows<UdpRowOwnerPidV6>(ReadUdpV6).Select(row => new ConnectionSnapshot("UDP", Address(row.LocalAddress), Port(row.LocalPort), null, null, "Endpoint",
+                unchecked((int)row.OwningPid), Name(row.OwningPid, processNames))))
+            .OrderBy(ConnectionOrder, StringComparer.Ordinal).ToArray();
+        var tcpTruncated = tcp.Length > maximumTcp;
+        var udpTruncated = udp.Length > maximumUdp;
+        return new(tcp.Take(maximumTcp).Concat(udp.Take(maximumUdp)).ToArray(), tcpTruncated, udpTruncated);
     }
+
+    private static string ConnectionOrder(ConnectionSnapshot row) =>
+        $"{row.LocalAddress}|{row.LocalPort:D5}|{row.RemoteAddress}|{row.RemotePort:D5}|{row.State}|{row.ProcessId:D10}|{row.ProcessName}";
 
     private static Dictionary<int, string> ReadProcessNames()
     {

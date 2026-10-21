@@ -43,7 +43,7 @@ var reputation = new DomainReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
 var processMonitor = new ProcessSnapshotMonitor();
 var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationToken =>
-    (IReadOnlyCollection<ConnectionSnapshot>)await ReadConnectionSnapshotAsync(cancellationToken),
+    await ReadConnectionSnapshotBatchAsync(cancellationToken),
     wasRecentlyObservedStart: processMonitor.WasRecentlyObservedStart);
 using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
@@ -163,6 +163,11 @@ Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancell
 {
     cancellationToken.ThrowIfCancellationRequested();
     return Task.FromResult(WindowsConnectionTableReader.Read());
+}
+Task<ConnectionSnapshotBatch> ReadConnectionSnapshotBatchAsync(CancellationToken cancellationToken)
+{
+    cancellationToken.ThrowIfCancellationRequested();
+    return Task.FromResult(WindowsConnectionTableReader.ReadBatch());
 }
 object ReadRuntimeMetrics()
 {

@@ -8,6 +8,17 @@ using Sentinel.Core.Analysis;
 public sealed record ConnectionSnapshot(string Protocol, string LocalAddress, int LocalPort, string? RemoteAddress,
     int? RemotePort, string State, int ProcessId, string? ProcessName);
 
+public sealed class ConnectionSnapshotBatch(IReadOnlyCollection<ConnectionSnapshot> connections,
+    bool tcpTruncated = false, bool udpTruncated = false) : IReadOnlyCollection<ConnectionSnapshot>
+{
+    public IReadOnlyCollection<ConnectionSnapshot> Connections { get; } = connections ?? throw new ArgumentNullException(nameof(connections));
+    public bool TcpTruncated { get; } = tcpTruncated;
+    public bool UdpTruncated { get; } = udpTruncated;
+    public int Count => Connections.Count;
+    public IEnumerator<ConnectionSnapshot> GetEnumerator() => Connections.GetEnumerator();
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
 /// <summary>Opt-in, bounded polling of TCP metadata. It never inspects packet contents.</summary>
 public sealed class TcpConnectionSnapshotMonitor
 {
@@ -19,6 +30,8 @@ public sealed class TcpConnectionSnapshotMonitor
     private readonly TimeProvider timeProvider;
     private HashSet<string>? knownConnections;
     private HashSet<string>? knownUdpEndpoints;
+    private bool knownTcpTruncated;
+    private bool knownUdpTruncated;
     private DateTimeOffset? lastAttempt;
     private long droppedEvents;
     private bool disabledModeHandled;
@@ -51,6 +64,8 @@ public sealed class TcpConnectionSnapshotMonitor
             }
             knownConnections = null;
             knownUdpEndpoints = null;
+            knownTcpTruncated = false;
+            knownUdpTruncated = false;
             lastAttempt = null;
             disabledModeHandled = true;
             State = enabled ? "Ciągła obserwacja TCP/UDP wstrzymana." : "Ciągła obserwacja TCP/UDP jest wyłączona.";
@@ -71,30 +86,39 @@ public sealed class TcpConnectionSnapshotMonitor
             {
                 knownConnections = null;
                 knownUdpEndpoints = null;
+                knownTcpTruncated = false;
+                knownUdpTruncated = false;
                 State = "Migawka TCP/UDP niedostępna: " + exception.GetType().Name + "; nie można też unieważnić poprzedniej migawki z powodu braku miejsca w bazie.";
                 return 0;
             }
             knownConnections = null;
             knownUdpEndpoints = null;
+            knownTcpTruncated = false;
+            knownUdpTruncated = false;
             State = "Migawka TCP/UDP niedostępna: " + exception.GetType().Name + "; po odzyskaniu źródła powstanie nowa baza porównania.";
             return 0;
         }
 
         var excluded = new HashSet<string>((excludedApplications ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase)
         { "Sentinel.Engine" };
-        var currentTcp = sample.Where(IsTrackable)
+        var batch = sample as ConnectionSnapshotBatch;
+        var tcpCandidates = sample.Where(IsTrackable)
             .Where(connection => !excluded.Contains(connection.ProcessName ?? "unknown"))
-            .Take(MaximumConnections)
             .Select(connection => (Key: ConnectionKey.From(connection).ToStorageKey(), Connection: connection))
             .GroupBy(item => item.Key, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First().Connection, StringComparer.Ordinal);
+            .Select(group => (Key: group.Key, Connection: group.First().Connection)).ToArray();
 
-        var currentUdp = sample.Where(IsTrackableUdpEndpoint)
+        var udpCandidates = sample.Where(IsTrackableUdpEndpoint)
             .Where(connection => !excluded.Contains(connection.ProcessName ?? "unknown"))
-            .Take(MaximumConnections)
             .Select(connection => (Key: ConnectionKey.From(connection).ToStorageKey(), Connection: connection))
             .GroupBy(item => item.Key, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First().Connection, StringComparer.Ordinal);
+            .Select(group => (Key: group.Key, Connection: group.First().Connection)).ToArray();
+        var tcpTruncated = (batch?.TcpTruncated ?? false) || tcpCandidates.Length > MaximumConnections;
+        var udpTruncated = (batch?.UdpTruncated ?? false) || udpCandidates.Length > MaximumConnections;
+        var currentTcp = tcpCandidates.OrderBy(item => item.Key, StringComparer.Ordinal).Take(MaximumConnections)
+            .ToDictionary(item => item.Key, item => item.Connection, StringComparer.Ordinal);
+        var currentUdp = udpCandidates.OrderBy(item => item.Key, StringComparer.Ordinal).Take(MaximumConnections)
+            .ToDictionary(item => item.Key, item => item.Connection, StringComparer.Ordinal);
 
         if (knownConnections is null || knownUdpEndpoints is null)
         {
@@ -109,7 +133,7 @@ public sealed class TcpConnectionSnapshotMonitor
             {
                 try
                 {
-                    await store.CommitNetworkMonitorChangesAsync([], currentTcp.Keys.Concat(currentUdp.Keys).ToArray(), [], cancellationToken);
+                    await store.CommitNetworkMonitorChangesAsync([], currentTcp.Keys.Concat(currentUdp.Keys).ToArray(), [], cancellationToken, tcpTruncated, udpTruncated);
                 }
                 catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
                 {
@@ -118,18 +142,26 @@ public sealed class TcpConnectionSnapshotMonitor
                 }
                 knownConnections = currentTcp.Keys.ToHashSet(StringComparer.Ordinal);
                 knownUdpEndpoints = currentUdp.Keys.ToHashSet(StringComparer.Ordinal);
+                knownTcpTruncated = tcpTruncated;
+                knownUdpTruncated = udpTruncated;
                 State = $"Ciągła migawka TCP/UDP działa; baza początkowa: {currentTcp.Count} połączeń TCP i {currentUdp.Count} endpointów UDP. Krótkie połączenia TCP mogą zostać pominięte; endpoint UDP nie potwierdza wysłania datagramu.";
+                if (tcpTruncated || udpTruncated)
+                    State += " Osiągnięto limit tabeli; alerty z niepełnej próbki są wstrzymane.";
                 return 0;
             }
             knownConnections = snapshot.EndpointKeys.Where(key => key.StartsWith("TCP:", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
             knownUdpEndpoints = snapshot.EndpointKeys.Where(key => key.StartsWith("UDP:", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
+            knownTcpTruncated = snapshot.TcpTruncated;
+            knownUdpTruncated = snapshot.UdpTruncated;
         }
 
         var currentTcpKeys = currentTcp.Keys.ToHashSet(StringComparer.Ordinal);
         var currentUdpKeys = currentUdp.Keys.ToHashSet(StringComparer.Ordinal);
-        var newConnections = currentTcpKeys.Except(knownConnections, StringComparer.Ordinal)
+        var previousTcpTruncated = knownTcpTruncated;
+        var previousUdpTruncated = knownUdpTruncated;
+        var newConnections = (knownTcpTruncated || tcpTruncated) ? [] : currentTcpKeys.Except(knownConnections, StringComparer.Ordinal)
             .Select(key => (Key: key, Connection: currentTcp[key])).ToArray();
-        var newUdpEndpoints = currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)
+        var newUdpEndpoints = (knownUdpTruncated || udpTruncated) ? [] : currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)
             .Select(key => (Key: key, Connection: currentUdp[key])).ToArray();
         var candidates = newConnections.Select(item => (item.Key, item.Connection, IsUdp: false))
             .Concat(newUdpEndpoints.Select(item => (item.Key, item.Connection, IsUdp: true))).ToArray();
@@ -158,7 +190,8 @@ public sealed class TcpConnectionSnapshotMonitor
                 EvidenceCodes: [item.IsUdp ? "network.udp.local-endpoint-seen" : "network.tcp.connection-snapshot"]);
         }).ToArray();
 
-        if (events.Length > 0)
+        var truncationChanged = knownTcpTruncated != tcpTruncated || knownUdpTruncated != udpTruncated;
+        if (events.Length > 0 || truncationChanged)
         {
             try
             {
@@ -166,7 +199,7 @@ public sealed class TcpConnectionSnapshotMonitor
                     .Concat(knownUdpEndpoints.Except(currentUdpKeys, StringComparer.Ordinal)).ToArray();
                 var addedKeys = currentTcpKeys.Except(knownConnections, StringComparer.Ordinal)
                     .Concat(currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)).ToArray();
-                await store.CommitNetworkMonitorChangesAsync(events, addedKeys, removedKeys, cancellationToken);
+                await store.CommitNetworkMonitorChangesAsync(events, addedKeys, removedKeys, cancellationToken, tcpTruncated, udpTruncated);
             }
             catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
             {
@@ -180,9 +213,9 @@ public sealed class TcpConnectionSnapshotMonitor
                 .Concat(knownUdpEndpoints.Except(currentUdpKeys, StringComparer.Ordinal)).ToArray();
             var addedKeys = currentTcpKeys.Except(knownConnections, StringComparer.Ordinal)
                 .Concat(currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)).ToArray();
-            if (addedKeys.Length > 0 || removedKeys.Length > 0)
+            if (addedKeys.Length > 0 || removedKeys.Length > 0 || truncationChanged)
             {
-                try { await store.CommitNetworkMonitorChangesAsync([], addedKeys, removedKeys, cancellationToken); }
+                try { await store.CommitNetworkMonitorChangesAsync([], addedKeys, removedKeys, cancellationToken, tcpTruncated, udpTruncated); }
                 catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
                 {
                     State = "Nie można zaktualizować trwałej migawki TCP/UDP: baza osiągnęła limit lub brakuje miejsca.";
@@ -192,8 +225,14 @@ public sealed class TcpConnectionSnapshotMonitor
         }
         knownConnections = currentTcpKeys;
         knownUdpEndpoints = currentUdpKeys;
+        knownTcpTruncated = tcpTruncated;
+        knownUdpTruncated = udpTruncated;
         droppedEvents += newlyDroppedEvents;
         State = $"Ciągła migawka TCP/UDP działa; {currentTcp.Count} połączeń TCP i {currentUdp.Count} endpointów UDP, {events.Length} nowych zdarzeń, pominięto łącznie {droppedEvents}. Krótkie połączenia TCP mogą zostać pominięte; endpoint UDP nie potwierdza datagramu.";
+        if (tcpTruncated || udpTruncated)
+            State += " Osiągnięto limit tabeli; alerty z niepełnej próbki są wstrzymane.";
+        else if (previousTcpTruncated || previousUdpTruncated)
+            State += " Poprzednia próbka była niepełna; alerty wznowią się po kolejnej pełnej próbce.";
         return events.Length;
     }
 

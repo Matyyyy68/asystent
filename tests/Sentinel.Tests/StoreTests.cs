@@ -95,7 +95,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -256,6 +256,26 @@ public sealed class StoreTests : IDisposable
         Assert.True(snapshot.Initialized);
         Assert.False(snapshot.Truncated);
         Assert.Equal("synthetic", snapshot.Processes[512]);
+    }
+    [Fact] public async Task NetworkSnapshotTruncationMetadataMigratesFromV14WithoutLosingBaseline()
+    {
+        var store = await Store();
+        await store.CommitNetworkMonitorChangesAsync([], ["TCP:synthetic", "UDP:synthetic"], [], tcpTruncated: true, udpTruncated: true);
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE network_monitor_metadata DROP COLUMN tcp_truncated; ALTER TABLE network_monitor_metadata DROP COLUMN udp_truncated; PRAGMA user_version=14;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        var snapshot = await store.ReadNetworkMonitorSnapshotAsync();
+        Assert.True(snapshot.Initialized);
+        Assert.False(snapshot.TcpTruncated);
+        Assert.False(snapshot.UdpTruncated);
+        Assert.Contains("TCP:synthetic", snapshot.EndpointKeys);
+        Assert.Contains("UDP:synthetic", snapshot.EndpointKeys);
     }
     [Fact] public async Task NewEventsPersistStableIdentityAndProvenance()
     {
@@ -522,7 +542,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -541,7 +561,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(14L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
