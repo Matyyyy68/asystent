@@ -26,7 +26,8 @@ public sealed record BrowserResponse([property: JsonPropertyName("id")] string I
     [property: JsonPropertyName("uncertainty")] string Uncertainty,
     [property: JsonIgnore] string? HistoryKey = null,
     [property: JsonIgnore] string? Explanation = null,
-    [property: JsonIgnore] string? CorrelationDomain = null);
+    [property: JsonIgnore] string? CorrelationDomain = null,
+    [property: JsonIgnore] string? SignalHash = null);
 
 public sealed class UrlRequestProcessor
 {
@@ -61,6 +62,7 @@ public sealed class UrlRequestProcessor
             result.Risk >= RiskLevel.Moderate && result.Indicators.Count != 0,
             result.Indicators.Select(i => new BrowserIndicator(i.Id, i.Description)).ToArray(),
             result.Uncertainties.FirstOrDefault() ?? "Wynik nie potwierdza bezpieczeństwa adresu.", historyKey, result.Explanation,
-            analysis.RegistrableDomain ?? analysis.Host);
+            analysis.RegistrableDomain ?? analysis.Host,
+            result.Indicators.Any(indicator => indicator.Id == "reputation.cert") ? LocalStore.CreateHostSignalHash(analysis.Host) : null);
     }
 }

@@ -34,6 +34,69 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(eventId, saved.EventId);
         Assert.Equal("test.retry", saved.Source);
     }
+    [Fact] public async Task CERTDetectionsFromDifferentSourcesMergeAndKeepEveryObservation()
+    {
+        var store = await Store();
+        var signal = LocalStore.CreateHostSignalHash("login.example.com");
+        Assert.NotNull(signal);
+        var observedAt = DateTimeOffset.UtcNow;
+        var browserId = Guid.NewGuid();
+        var dnsId = Guid.NewGuid();
+        var browser = new SecurityEvent(0, observedAt, RiskLevel.High, "URL", "Browser", "CERT feed match", "Review", EventStatus.New,
+            EventId: browserId, Source: "browser-extension", EvidenceCodes: ["reputation.cert"], SignalHash: signal);
+        var dns = browser with { EventId = dnsId, Source = "dns-cache", Timestamp = observedAt.AddSeconds(8),
+            EvidenceCodes = ["dns.windows-cache-entry", "reputation.cert.current-feed-match"] };
+
+        var canonicalId = await store.AddLocalOnlyAsync(browser);
+        await store.InitializeAsync(); // Opening a current v16 database must retain its insert trigger.
+        Assert.Equal(canonicalId, await store.AddLocalOnlyAsync(dns));
+        var repeatedBrowser = await store.AddLocalOnlyAsync(browser with { EventId = Guid.NewGuid(), Timestamp = observedAt.AddSeconds(12) });
+        Assert.NotEqual(canonicalId, repeatedBrowser); // A previously seen source is never absorbed into the cross-source merge.
+
+        Assert.Equal(2, await store.CountEventsAsync());
+        var saved = (await store.ReadAsync()).Single(eventItem => eventItem.Id == canonicalId);
+        var observations = saved.Observations!;
+        Assert.Equal(browserId, saved.EventId);
+        Assert.Equal(new[] { "browser-extension", "dns-cache" }, observations.Select(observation => observation.Source));
+        Assert.Contains(dnsId, observations.Select(observation => observation.EventId));
+        Assert.Contains("reputation.cert.current-feed-match", observations.Single(observation => observation.EventId == dnsId).EvidenceCodes);
+    }
+    [Fact] public async Task CERTDetectionDeduplicationRequiresDistinctSourceAndSameRiskAndWindow()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var hash = LocalStore.CreateHostSignalHash("login.example.com");
+        var basis = new SecurityEvent(0, at, RiskLevel.High, "URL", "Synthetic", "CERT feed match", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "browser-extension", EvidenceCodes: ["reputation.cert"], SignalHash: hash);
+        await store.AddLocalOnlyAsync(basis);
+        await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid() }); // Same source remains a separate observation.
+        await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid(), Source = "dns-cache", Risk = RiskLevel.Moderate });
+        await store.AddLocalOnlyAsync(basis with { EventId = Guid.NewGuid(), Source = "dns-cache", Timestamp = at.AddMinutes(2) });
+
+        Assert.Equal(4, await store.CountEventsAsync());
+    }
+    [Fact] public async Task BackupRestorePreservesMergedCERTObservations()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var first = new SecurityEvent(0, at, RiskLevel.High, "URL", "Browser", "CERT match", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "browser-extension", EvidenceCodes: ["reputation.cert"], SignalHash: LocalStore.CreateHostSignalHash("login.example.com"));
+        await store.AddLocalOnlyAsync(first);
+        await store.AddLocalOnlyAsync(first with { EventId = Guid.NewGuid(), Source = "dns-cache", Timestamp = at.AddSeconds(3),
+            EvidenceCodes = ["reputation.cert.current-feed-match"] });
+        var backup = Path.Combine(Path.GetTempPath(), "sentinel-backup-" + Guid.NewGuid() + ".db");
+        try
+        {
+            await store.BackupAsync(backup);
+            var target = new LocalStore(Path.Combine(Path.GetTempPath(), "sentinel-restore-" + Guid.NewGuid()));
+            await target.InitializeAsync();
+            Assert.Equal(1, await target.RestoreAsync(backup));
+            var restored = Assert.Single(await target.ReadAsync());
+            Assert.Equal(2, restored.Observations!.Count);
+            Assert.Contains("dns-cache", restored.Observations.Select(observation => observation.Source));
+        }
+        finally { File.Delete(backup); }
+    }
     [Fact] public async Task DomainCorrelationsShareRegistrableDomainAndExpireAfterSlidingWindow()
     {
         var store = await Store();
@@ -110,7 +173,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(16L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -579,7 +642,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(16L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -598,7 +661,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(15L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(16L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {

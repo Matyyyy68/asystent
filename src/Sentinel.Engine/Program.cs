@@ -284,7 +284,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                                     "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New,
                                     EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                                     CorrelationId: correlationId,
-                                    EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"]), "url", "reputation.cert");
+                                    EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"],
+                                    SignalHash: LocalStore.CreateHostSignalHash(name)), "url", "reputation.cert");
                                 detections.Add(name!);
                             }
                         }
@@ -483,7 +484,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                         string.Join(" ", assessment.Recommendations), EventStatus.New,
                         EventId: Guid.NewGuid(), Source: "manual-analysis", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                         CorrelationId: correlationId,
-                        EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray()),
+                        EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
+                        SignalHash: assessment.Indicators.Any(indicator => indicator.Id == "reputation.cert")
+                            ? LocalStore.CreateHostSignalHash(urlAnalysis?.Host) : null),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
                         "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
                 }

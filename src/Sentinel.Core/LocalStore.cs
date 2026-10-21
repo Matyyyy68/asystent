@@ -16,6 +16,18 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     private readonly string connectionString;
     private readonly long maximumDatabaseBytes;
     public string DatabasePath { get; }
+    /// <summary>Returns a stable, privacy-preserving hash for an exact DNS host.</summary>
+    public static string? CreateHostSignalHash(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host) || IPAddress.TryParse(host.Trim('[', ']'), out _)) return null;
+        try
+        {
+            var ascii = DomainNames.Ascii(host);
+            if (ascii.Length is 0 or > 253 || ascii.Split('.').Any(label => label.Length is 0 or > 63)) return null;
+            return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ascii)));
+        }
+        catch (ArgumentException) { return null; }
+    }
     public Task<DatabaseStorageMetrics> GetStorageMetricsAsync(CancellationToken cancellationToken = default) =>
         DatabaseStorageMetricsReader.ReadAsync(DatabasePath, "SELECT COUNT(*) FROM events", cancellationToken);
     public LocalStore(string directory, long maximumDatabaseBytes = DefaultMaximumDatabaseBytes)
@@ -34,6 +46,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         try
         {
             await c.OpenAsync(ct);
+            using (var foreignKeys = c.CreateCommand()) { foreignKeys.CommandText = "PRAGMA foreign_keys=ON"; await foreignKeys.ExecuteNonQueryAsync(ct); }
             using var pageSize = c.CreateCommand(); pageSize.CommandText = "PRAGMA page_size";
             var pageBytes = Convert.ToInt64(await pageSize.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
             var maximumPages = Math.Max(1, maximumDatabaseBytes / pageBytes);
@@ -68,7 +81,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 15) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 16) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -173,6 +186,40 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 await EnsureColumnAsync(c, "network_monitor_metadata", "tcp_truncated", "INTEGER NOT NULL DEFAULT 0 CHECK(tcp_truncated IN (0,1))", ct);
                 await EnsureColumnAsync(c, "network_monitor_metadata", "udp_truncated", "INTEGER NOT NULL DEFAULT 0 CHECK(udp_truncated IN (0,1))", ct);
                 await Execute(c, "PRAGMA user_version=15; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 16)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                // Legacy test/repair fixtures may retain the v16 trigger after rolling back columns.
+                await Execute(c, "DROP TRIGGER IF EXISTS trg_events_add_observation", ct);
+                await EnsureColumnAsync(c, "events", "signal_hash", "TEXT NULL CHECK(signal_hash IS NULL OR length(signal_hash)=64)", ct);
+                await EnsureColumnAsync(c, "events", "event_id", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "events", "source", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "events", "evidence_codes", "TEXT NOT NULL DEFAULT '[]' CHECK(length(evidence_codes)<=4096)", ct);
+                await Execute(c, """
+                    CREATE TABLE IF NOT EXISTS event_observations(
+                      event_id TEXT PRIMARY KEY CHECK(length(event_id)=36),
+                      event_row_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                      observed_at TEXT NOT NULL,
+                      source TEXT NOT NULL CHECK(length(source) BETWEEN 1 AND 100),
+                      evidence_codes TEXT NOT NULL CHECK(length(evidence_codes)<=4096));
+                    CREATE INDEX IF NOT EXISTS ix_event_observations_row ON event_observations(event_row_id);
+                    INSERT OR IGNORE INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes)
+                      SELECT event_id,id,timestamp,COALESCE(NULLIF(source,''),'unknown'),COALESCE(evidence_codes,'[]')
+                      FROM events WHERE event_id IS NOT NULL;
+                    CREATE TRIGGER IF NOT EXISTS trg_events_add_observation AFTER INSERT ON events
+                    WHEN NEW.event_id IS NOT NULL
+                    BEGIN
+                      INSERT OR IGNORE INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes)
+                      VALUES(NEW.event_id,NEW.id,NEW.timestamp,COALESCE(NULLIF(NEW.source,''),'unknown'),'[]');
+                    END;
+                    PRAGMA user_version=16;
+                    COMMIT;
+                    """, ct);
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
@@ -326,7 +373,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (item, (eventId, source)) in validated)
         {
             using var command = c.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes)";
+            command.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash)";
             AddEventParameters(command, item, eventId, source);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -387,7 +434,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (item, (eventId, source)) in validated)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash)";
             AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
         }
         foreach (var processId in removedProcessIds)
@@ -467,7 +514,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (detectedEvent is not null)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash)";
             AddEventParameters(insert, detectedEvent, metadata.EventId, metadata.Source); await insert.ExecuteNonQueryAsync(ct);
         }
         await UpsertDownloadedFileAsync(c, transaction, file, ct);
@@ -526,7 +573,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (item, (eventId, source)) in validated)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash)";
             AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
         }
         foreach (var key in removedEndpointKeys)
@@ -554,17 +601,52 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(cancellationToken);
-        using (var insert = c.CreateCommand())
+        using var transaction = c.BeginTransaction();
+        long id;
+        // A retried event id may already be either a canonical event or a merged observation.
+        using (var prior = c.CreateCommand())
         {
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
-            AddEventParameters(insert, item, eventId, source);
-            await insert.ExecuteNonQueryAsync(cancellationToken);
+            prior.Transaction = transaction;
+            prior.CommandText = "SELECT event_row_id FROM event_observations WHERE event_id=$eventId";
+            prior.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+            var priorId = await prior.ExecuteScalarAsync(cancellationToken);
+            if (priorId is not null) id = Convert.ToInt64(priorId, CultureInfo.InvariantCulture);
+            else
+            {
+                var duplicateId = await FindCrossSourceDuplicateAsync(c, transaction, item, source, cancellationToken);
+                if (duplicateId is not null)
+                {
+                    using var observation = c.CreateCommand(); observation.Transaction = transaction;
+                    observation.CommandText = "INSERT INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes) VALUES($eventId,$rowId,$timestamp,$source,$evidence)";
+                    observation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                    observation.Parameters.AddWithValue("$rowId", duplicateId.Value);
+                    observation.Parameters.AddWithValue("$timestamp", item.Timestamp.ToUniversalTime().ToString("O"));
+                    observation.Parameters.AddWithValue("$source", source);
+                    observation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+                    await observation.ExecuteNonQueryAsync(cancellationToken);
+                    id = duplicateId.Value;
+                }
+                else
+                {
+                    using var insert = c.CreateCommand(); insert.Transaction = transaction;
+                    insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
+                    AddEventParameters(insert, item, eventId, source);
+                    await insert.ExecuteNonQueryAsync(cancellationToken);
+                    using var get = c.CreateCommand(); get.Transaction = transaction;
+                    get.CommandText = "SELECT id FROM events WHERE event_id=$eventId";
+                    get.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                    var storedId = await get.ExecuteScalarAsync(cancellationToken);
+                    if (storedId is null) throw new InvalidDataException("Nie udało się odczytać zapisanego zdarzenia.");
+                    id = Convert.ToInt64(storedId, CultureInfo.InvariantCulture);
+                    using var updateObservation = c.CreateCommand(); updateObservation.Transaction = transaction;
+                    updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+                    updateObservation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+                    updateObservation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                    await updateObservation.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
         }
-        using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id FROM events WHERE event_id=$eventId";
-        cmd.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
-        var storedId = await cmd.ExecuteScalarAsync(cancellationToken);
-        if (storedId is null) throw new InvalidDataException("Nie udało się odczytać zapisanego zdarzenia.");
-        var id = Convert.ToInt64(storedId, CultureInfo.InvariantCulture);
+        await transaction.CommitAsync(cancellationToken);
         string? profileJson = null;
         if (enqueueEnterprise)
         {
@@ -580,6 +662,41 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 EnterpriseEventV1Rules.NormalizeSource(source), EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
         }
         return id;
+    }
+    private static bool HasCertEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        string.Equals(code, "reputation.cert", StringComparison.Ordinal) ||
+        code.StartsWith("reputation.cert.", StringComparison.Ordinal)) == true;
+    private static async Task<long?> FindCrossSourceDuplicateAsync(SqliteConnection c, SqliteTransaction transaction,
+        SecurityEvent item, string source, CancellationToken ct)
+    {
+        if (item.SignalHash is null || item.Risk < RiskLevel.Moderate || !HasCertEvidence(item.EvidenceCodes)) return null;
+        var from = item.Timestamp.ToUniversalTime().AddSeconds(-60).ToString("O");
+        var to = item.Timestamp.ToUniversalTime().AddSeconds(60).ToString("O");
+        using var candidates = c.CreateCommand(); candidates.Transaction = transaction;
+        candidates.CommandText = "SELECT id FROM events WHERE signal_hash=$hash AND risk=$risk AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
+        candidates.Parameters.AddWithValue("$hash", item.SignalHash);
+        candidates.Parameters.AddWithValue("$risk", (int)item.Risk);
+        candidates.Parameters.AddWithValue("$from", from); candidates.Parameters.AddWithValue("$to", to);
+        candidates.Parameters.AddWithValue("$timestamp", item.Timestamp.ToUniversalTime().ToString("O"));
+        var ids = new List<long>();
+        await using (var reader = await candidates.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) ids.Add(reader.GetInt64(0));
+        foreach (var id in ids)
+        {
+            using var observations = c.CreateCommand(); observations.Transaction = transaction;
+            observations.CommandText = "SELECT source,evidence_codes FROM event_observations WHERE event_row_id=$id";
+            observations.Parameters.AddWithValue("$id", id);
+            await using var reader = await observations.ExecuteReaderAsync(ct);
+            var hasCertFromOtherSource = false;
+            var hasCertFromSameSource = false;
+            while (await reader.ReadAsync(ct))
+            {
+                if (!HasCertEvidence(ParseEvidenceCodes(reader.GetString(1)))) continue;
+                if (string.Equals(reader.GetString(0), source, StringComparison.Ordinal)) hasCertFromSameSource = true;
+                else hasCertFromOtherSource = true;
+            }
+            if (!hasCertFromSameSource && hasCertFromOtherSource) return id;
+        }
+        return null;
     }
     private static string MapEnterpriseCategory(SecurityEvent item, string source)
     {
@@ -622,6 +739,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 code.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))) == true ||
             item.EvidenceCodes is not null && item.EvidenceCodes.Distinct(StringComparer.Ordinal).Count() != item.EvidenceCodes.Count)
             throw new ArgumentException("Nieprawidłowe pochodzenie zdarzenia.");
+        if (item.SignalHash is { } hash && (hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character))))
+            throw new ArgumentException("Nieprawidłowy skrót sygnału.");
         return (eventId, source);
     }
     private static IReadOnlyList<string> ParseEvidenceCodes(string? json)
@@ -652,6 +771,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         command.Parameters.AddWithValue("$processName", (object?)item.ProcessName ?? DBNull.Value);
         command.Parameters.AddWithValue("$correlationId", (object?)item.CorrelationId?.ToString("D") ?? DBNull.Value);
         command.Parameters.AddWithValue("$evidenceCodes", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+        command.Parameters.AddWithValue("$signalHash", (object?)item.SignalHash?.ToUpperInvariant() ?? DBNull.Value);
     }
     public async Task<IReadOnlyList<PendingEnterpriseEvent>> ReadPendingEnterpriseEventsAsync(int limit = 100, CancellationToken ct = default)
     {
@@ -729,14 +849,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default)
     {
         await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes FROM events ORDER BY id DESC LIMIT 500";
+        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash FROM events ORDER BY id DESC LIMIT 500";
         using var r = await cmd.ExecuteReaderAsync(cancellationToken); var rows = new List<SecurityEvent>();
         while (await r.ReadAsync(cancellationToken)) rows.Add(new(r.GetInt64(0), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture),
             (RiskLevel)r.GetInt32(2), r.GetString(3), r.GetString(4), r.GetString(5), r.GetString(6), (EventStatus)r.GetInt32(7),
             r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
             r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
-            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16))));
-        return rows;
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17)));
+        await r.DisposeAsync();
+        return await AttachObservationsAsync(c, rows, cancellationToken);
     }
     public async Task<int> CountEventsAsync(CancellationToken cancellationToken = default)
     {
@@ -769,24 +890,45 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var rows = await ReadAllEventsForExportAsync(ct);
         await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await using var writer = new StreamWriter(file, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        await writer.WriteLineAsync("id,timestamp_utc,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes");
+        await writer.WriteLineAsync("id,timestamp_utc,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,observations");
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
-            var values = new string?[] { row.Id.ToString(CultureInfo.InvariantCulture), row.Timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.Risk.ToString(), row.Category, row.Application, row.Explanation, row.Recommendation, row.Status.ToString(), row.EventId?.ToString("D"), row.Source, row.RuleVersion, row.Confidence?.ToString(CultureInfo.InvariantCulture), row.SchemaVersion.ToString(CultureInfo.InvariantCulture), row.ProcessId?.ToString(CultureInfo.InvariantCulture), row.ProcessName, row.CorrelationId?.ToString("D"), string.Join('|', row.EvidenceCodes ?? []) };
+            var values = new string?[] { row.Id.ToString(CultureInfo.InvariantCulture), row.Timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.Risk.ToString(), row.Category, row.Application, row.Explanation, row.Recommendation, row.Status.ToString(), row.EventId?.ToString("D"), row.Source, row.RuleVersion, row.Confidence?.ToString(CultureInfo.InvariantCulture), row.SchemaVersion.ToString(CultureInfo.InvariantCulture), row.ProcessId?.ToString(CultureInfo.InvariantCulture), row.ProcessName, row.CorrelationId?.ToString("D"), string.Join('|', row.EvidenceCodes ?? []), JsonSerializer.Serialize(row.Observations ?? []) };
             await writer.WriteLineAsync(string.Join(',', values.Select(CsvField)));
         }
     }
     private async Task<List<SecurityEvent>> ReadAllEventsForExportAsync(CancellationToken ct)
     {
         // Export all retained rows, independent of the UI's 500-row limit.
-        await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes FROM events ORDER BY id";
+        await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash FROM events ORDER BY id";
         using var r = await cmd.ExecuteReaderAsync(ct); var rows = new List<SecurityEvent>();
         while (await r.ReadAsync(ct)) rows.Add(new(r.GetInt64(0),DateTimeOffset.Parse(r.GetString(1),CultureInfo.InvariantCulture),(RiskLevel)r.GetInt32(2),r.GetString(3),r.GetString(4),r.GetString(5),r.GetString(6),(EventStatus)r.GetInt32(7),
             r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
             r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
-            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16))));
-        return rows;
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17)));
+        await r.DisposeAsync();
+        return await AttachObservationsAsync(c, rows, ct);
+    }
+    private static async Task<List<SecurityEvent>> AttachObservationsAsync(SqliteConnection connection, List<SecurityEvent> rows, CancellationToken ct)
+    {
+        var byId = new Dictionary<long, List<EventObservation>>();
+        // SQLite limits bound parameters, so read observations in small batches.
+        foreach (var batch in rows.Select(row => row.Id).Chunk(400))
+        {
+            using var command = connection.CreateCommand();
+            var parameters = batch.Select((id, index) => { var name = "$id" + index; command.Parameters.AddWithValue(name, id); return name; });
+            command.CommandText = $"SELECT event_row_id,event_id,observed_at,source,evidence_codes FROM event_observations WHERE event_row_id IN ({string.Join(',', parameters)}) ORDER BY observed_at,event_id";
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var rowId = reader.GetInt64(0);
+                if (!byId.TryGetValue(rowId, out var observations)) byId[rowId] = observations = [];
+                observations.Add(new(Guid.Parse(reader.GetString(1)), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture),
+                    reader.GetString(3), ParseEvidenceCodes(reader.GetString(4))));
+            }
+        }
+        return rows.Select(row => row with { Observations = byId.GetValueOrDefault(row.Id) ?? [] }).ToList();
     }
     private static string CsvField(string? value)
     {
@@ -804,7 +946,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v15 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v16 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -822,7 +964,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -830,13 +972,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 : backupVersion == 7
                     ? "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata')"
                     : "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile')";
-            if (backupVersion is 9 or 10 or 11 or 12 or 13 or 14 or 15)
+            if (backupVersion is 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16)
             {
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata')";
             }
-            if (backupVersion is 13 or 14 or 15)
+            if (backupVersion is 13 or 14 or 15 or 16)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation')";
-            var expectedTables = backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            if (backupVersion == 16)
+                required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations')";
+            var expectedTables = backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
@@ -865,14 +1009,18 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             var queueRestore = backupVersion >= 10
                 ? "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent,source,rule_version,schema_version) SELECT event_id,occurred_at,category,risk_level,rule_code,sent,source,rule_version,schema_version FROM restore_source.enterprise_event_queue;"
                 : "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent) SELECT event_id,occurred_at,category,risk_level,rule_code,sent FROM restore_source.enterprise_event_queue;";
-            var eventRestore = backupVersion >= 12
+            var eventRestore = backupVersion == 16
+                ? "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash FROM restore_source.events;"
+                : backupVersion >= 12
                 ? "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes FROM restore_source.events;"
                 : backupVersion >= 11
                     ? "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,'[]' FROM restore_source.events;"
                     : "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,NULL,'[]' FROM restore_source.events;";
             command.CommandText = """
                 DELETE FROM events;
-                """ + eventRestore + """
+                """ + eventRestore + (backupVersion == 16
+                    ? "INSERT OR REPLACE INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes) SELECT event_id,event_row_id,observed_at,source,evidence_codes FROM restore_source.event_observations;"
+                    : "") + """
                 DELETE FROM settings;
                 INSERT INTO settings(id,json) SELECT id,json FROM restore_source.settings;
                 DELETE FROM enterprise_event_queue;
