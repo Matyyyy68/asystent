@@ -669,6 +669,31 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(restoredSettings, await target.LoadSettingsAsync());
         Assert.Equal(Sentinel.Core.Configuration.ProductVariant.User, (await target.GetInstallationProfileAsync()).Variant);
     }
+    [Fact] public async Task RestorePreservesDeferredEnterpriseEvents()
+    {
+        var sourceDirectory = Path.Combine(dir, "deferred-backup-source"); Directory.CreateDirectory(sourceDirectory);
+        var source = new LocalStore(sourceDirectory);
+        await source.InitializeAsync(new Sentinel.Core.Configuration.InstalledProductProfile(Sentinel.Core.Configuration.ProductVariant.EnterpriseClient,
+            "https://sentinel.example", ShareSecurityMetadata: true));
+        await using (var c = new SqliteConnection($"Data Source={source.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var seed = c.CreateCommand();
+            seed.CommandText = "WITH RECURSIVE seq(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM seq WHERE x<10000) INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code) SELECT lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),'url',3,'local.url' FROM seq";
+            await seed.ExecuteNonQueryAsync();
+        }
+        var deferred = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url");
+        Assert.False(await source.EnqueueEnterpriseEventAsync(deferred));
+        var backupPath = Path.Combine(dir, "deferred-backup.db"); await source.BackupAsync(backupPath);
+
+        var target = await Store();
+        Assert.Equal(0, await target.RestoreAsync(backupPath));
+        Assert.Equal(10001, await target.CountPendingEnterpriseEventsAsync());
+        await using var restored = new SqliteConnection($"Data Source={target.DatabasePath};Pooling=False");
+        await restored.OpenAsync(); using var verify = restored.CreateCommand();
+        verify.CommandText = "SELECT COUNT(*) FROM enterprise_event_deferred WHERE event_id=$id";
+        verify.Parameters.AddWithValue("$id", deferred.EventId.ToString("D"));
+        Assert.Equal(1L, await verify.ExecuteScalarAsync());
+    }
     [Theory] [InlineData(6)] [InlineData(7)]
     public async Task RestoreAcceptsLegacyV6AndV7Backups(int version)
     {
