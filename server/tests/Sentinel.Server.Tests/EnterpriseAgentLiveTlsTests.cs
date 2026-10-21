@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -40,8 +41,8 @@ public sealed class EnterpriseAgentLiveTlsTests
         var server = $"https://127.0.0.1:{port}";
         const string adminUsername = "tls-e2e-admin";
         const string adminPassword = "Tls-e2e-admin-password-42!";
-        Task<string> stderrTask = Task.FromResult(string.Empty);
-        Task<string> stdoutTask = Task.FromResult(string.Empty);
+        var stderrLines = new ConcurrentQueue<string>();
+        var stdoutLines = new ConcurrentQueue<string>();
         Process? process = null;
 
         Process StartServer()
@@ -65,9 +66,12 @@ public sealed class EnterpriseAgentLiveTlsTests
             instance.StartInfo.Environment["Sentinel__DataDirectory"] = databasePath;
             instance.StartInfo.Environment["Sentinel__BootstrapAdminUsername"] = adminUsername;
             instance.StartInfo.Environment["Sentinel__BootstrapAdminPassword"] = adminPassword;
+            instance.StartInfo.Environment["Logging__EventLog__LogLevel__Default"] = "None";
+            instance.OutputDataReceived += (_, args) => { if (args.Data is not null) stdoutLines.Enqueue(args.Data); };
+            instance.ErrorDataReceived += (_, args) => { if (args.Data is not null) stderrLines.Enqueue(args.Data); };
             Assert.True(instance.Start());
-            stdoutTask = instance.StandardOutput.ReadToEndAsync();
-            stderrTask = instance.StandardError.ReadToEndAsync();
+            instance.BeginOutputReadLine();
+            instance.BeginErrorReadLine();
             return instance;
         }
 
@@ -76,6 +80,7 @@ public sealed class EnterpriseAgentLiveTlsTests
             process = StartServer();
             using var handler = new HttpClientHandler
             {
+                UseProxy = false,
                 ServerCertificateCustomValidationCallback = (_, presented, _, errors) =>
                     presented is not null
                     && presented.GetCertHashString(HashAlgorithmName.SHA256).Equals(certificate.GetCertHashString(HashAlgorithmName.SHA256), StringComparison.OrdinalIgnoreCase)
@@ -83,9 +88,9 @@ public sealed class EnterpriseAgentLiveTlsTests
                     && presented.NotBefore.ToUniversalTime() <= DateTime.UtcNow
                     && presented.NotAfter.ToUniversalTime() > DateTime.UtcNow,
             };
-            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
-            await WaitForReadyAsync(http, server, process, stdoutTask, stderrTask, timeout.Token);
+            await WaitForReadyAsync(http, server, process, stdoutLines, stderrLines, timeout.Token);
 
             var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
                 new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
@@ -123,7 +128,7 @@ public sealed class EnterpriseAgentLiveTlsTests
                 EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token));
             Assert.NotNull(outage);
             process = StartServer();
-            await WaitForReadyAsync(http, server, process, stdoutTask, stderrTask, timeout.Token);
+            await WaitForReadyAsync(http, server, process, stdoutLines, stderrLines, timeout.Token);
             var firstBatch = await agent.SendEventsAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token);
             var replayedBatch = await agent.SendEventsAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, [item], timeout.Token);
             Assert.Equal(1, firstBatch.Accepted);
@@ -187,8 +192,8 @@ public sealed class EnterpriseAgentLiveTlsTests
         var server = $"https://127.0.0.1:{port}";
         const string adminUsername = "engine-retry-admin";
         const string adminPassword = "Engine-retry-admin-password-42!";
-        Task<string> stderrTask = Task.FromResult(string.Empty);
-        Task<string> stdoutTask = Task.FromResult(string.Empty);
+        var stderrLines = new ConcurrentQueue<string>();
+        var stdoutLines = new ConcurrentQueue<string>();
         Process? apiProcess = null;
 
         Process StartServer()
@@ -212,9 +217,12 @@ public sealed class EnterpriseAgentLiveTlsTests
             instance.StartInfo.Environment["Sentinel__DataDirectory"] = databasePath;
             instance.StartInfo.Environment["Sentinel__BootstrapAdminUsername"] = adminUsername;
             instance.StartInfo.Environment["Sentinel__BootstrapAdminPassword"] = adminPassword;
+            instance.StartInfo.Environment["Logging__EventLog__LogLevel__Default"] = "None";
+            instance.OutputDataReceived += (_, args) => { if (args.Data is not null) stdoutLines.Enqueue(args.Data); };
+            instance.ErrorDataReceived += (_, args) => { if (args.Data is not null) stderrLines.Enqueue(args.Data); };
             Assert.True(instance.Start());
-            stdoutTask = instance.StandardOutput.ReadToEndAsync();
-            stderrTask = instance.StandardError.ReadToEndAsync();
+            instance.BeginOutputReadLine();
+            instance.BeginErrorReadLine();
             return instance;
         }
 
@@ -224,6 +232,7 @@ public sealed class EnterpriseAgentLiveTlsTests
             using var handler = new HttpClientHandler
             {
                 AllowAutoRedirect = false,
+                UseProxy = false,
                 ServerCertificateCustomValidationCallback = (_, presented, _, errors) =>
                     presented is not null
                     && presented.GetCertHashString(HashAlgorithmName.SHA256).Equals(certificate.GetCertHashString(HashAlgorithmName.SHA256), StringComparison.OrdinalIgnoreCase)
@@ -231,9 +240,9 @@ public sealed class EnterpriseAgentLiveTlsTests
                     && presented.NotBefore.ToUniversalTime() <= DateTime.UtcNow
                     && presented.NotAfter.ToUniversalTime() > DateTime.UtcNow,
             };
-            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            await WaitForReadyAsync(http, server, apiProcess, stdoutTask, stderrTask, timeout.Token);
+            await WaitForReadyAsync(http, server, apiProcess, stdoutLines, stderrLines, timeout.Token);
 
             var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
                 new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
@@ -282,7 +291,7 @@ public sealed class EnterpriseAgentLiveTlsTests
             Assert.Equal(1, offlineStatus.RootElement.GetProperty("result").GetProperty("enterprise").GetProperty("queuedEvents").GetInt32());
 
             apiProcess = StartServer();
-            await WaitForReadyAsync(http, server, apiProcess, stdoutTask, stderrTask, timeout.Token);
+            await WaitForReadyAsync(http, server, apiProcess, stdoutLines, stderrLines, timeout.Token);
             await Task.Delay(TimeSpan.FromSeconds(31), timeout.Token);
             using var automaticRetry = await engine.CallAsync("collect");
             Assert.Equal(1, automaticRetry.RootElement.GetProperty("result").GetProperty("enterpriseSync").GetProperty("synchronized").GetInt32());
@@ -324,15 +333,20 @@ public sealed class EnterpriseAgentLiveTlsTests
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
     }
 
-    private static async Task WaitForReadyAsync(HttpClient http, string server, Process process, Task<string> stdout, Task<string> stderr, CancellationToken cancellationToken)
+    private static async Task WaitForReadyAsync(HttpClient http, string server, Process process,
+        ConcurrentQueue<string> stdout, ConcurrentQueue<string> stderr, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (process.HasExited) throw new InvalidOperationException("Live TLS server exited before readiness. stdout: " + await stdout + " stderr: " + await stderr);
+            if (process.HasExited) throw new InvalidOperationException("Live TLS server exited before readiness. stdout: " + string.Join(Environment.NewLine, stdout) + " stderr: " + string.Join(Environment.NewLine, stderr));
             try
             {
                 using var response = await http.GetAsync(server + "/readyz", cancellationToken);
                 if (response.IsSuccessStatusCode) return;
+            }
+            catch (TaskCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException("Live TLS server did not become ready. stdout: " + string.Join(Environment.NewLine, stdout) + " stderr: " + string.Join(Environment.NewLine, stderr));
             }
             catch (HttpRequestException) { }
             catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { }
