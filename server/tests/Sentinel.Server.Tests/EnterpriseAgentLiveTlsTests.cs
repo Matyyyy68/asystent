@@ -238,6 +238,11 @@ public sealed class EnterpriseAgentLiveTlsTests
             var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
                 new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
             var adminToken = adminLogin!["accessToken"]!.GetValue<string>();
+            var globalPolicy = await SendJsonAsync(http, server, "/api/v1/admin/policies/global", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var globalVersion = globalPolicy!["version"]!.GetValue<long>();
+            await SendJsonAsync(http, server, "/api/v1/admin/policies/global", HttpMethod.Put,
+                new { policy = new { syncIntervalSeconds = 30 }, expectedVersion = globalVersion }, adminToken, HttpStatusCode.NoContent, timeout.Token);
             var group = await SendJsonAsync(http, server, "/api/v1/admin/groups", HttpMethod.Post,
                 new { name = "Engine Retry E2E" }, adminToken, HttpStatusCode.Created, timeout.Token);
             var invitation = await SendJsonAsync(http, server, "/api/v1/admin/invitations", HttpMethod.Post,
@@ -258,11 +263,14 @@ public sealed class EnterpriseAgentLiveTlsTests
             await localStore.AddLocalOnlyAsync(new SecurityEvent(0, occurredAt, RiskLevel.High, "Syntetyczne wykrycie", "Active Engine retry",
                 "sekret-treści-do-zachowania-lokalnie", "wyjaśnienie nie może trafić do serwera", EventStatus.New,
                 EventId: eventId, Source: "manual-analysis", RuleVersion: "2026.10.1"));
-            Assert.True(await localStore.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, occurredAt, "url", 3,
-                "url.suspicious_domain", "manual-analysis", "2026.10.1")));
             await new WindowsDpapiCredentialStore(clientDatabase).WriteAsync(enrollment.DeviceToken);
 
             await using var engine = await EngineProcess.StartAsync(engineDll, repository, clientRoot, downloads, certificatePath);
+            using var initialSync = await engine.CallAsync("enterpriseSync");
+            Assert.Equal(0, initialSync.RootElement.GetProperty("result").GetProperty("synchronized").GetInt32());
+            Assert.Equal(30, initialSync.RootElement.GetProperty("result").GetProperty("syncIntervalSeconds").GetInt32());
+            Assert.True(await localStore.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, occurredAt, "url", 3,
+                "url.suspicious_domain", "manual-analysis", "2026.10.1")));
             apiProcess.Kill(entireProcessTree: true);
             await apiProcess.WaitForExitAsync(timeout.Token);
             apiProcess.Dispose();
@@ -275,8 +283,9 @@ public sealed class EnterpriseAgentLiveTlsTests
 
             apiProcess = StartServer();
             await WaitForReadyAsync(http, server, apiProcess, stdoutTask, stderrTask, timeout.Token);
-            using var retry = await engine.CallAsync("enterpriseSync");
-            Assert.Equal(1, retry.RootElement.GetProperty("result").GetProperty("synchronized").GetInt32());
+            await Task.Delay(TimeSpan.FromSeconds(31), timeout.Token);
+            using var automaticRetry = await engine.CallAsync("collect");
+            Assert.Equal(1, automaticRetry.RootElement.GetProperty("result").GetProperty("enterpriseSync").GetProperty("synchronized").GetInt32());
             using var syncedStatus = await engine.CallAsync("status");
             Assert.Equal(0, syncedStatus.RootElement.GetProperty("result").GetProperty("enterprise").GetProperty("queuedEvents").GetInt32());
 
