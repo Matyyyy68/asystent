@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- SQLite v16 łączy potwierdzone wykrycia CERT dla tego samego hosta oraz zgodne dopasowania lokalnego SHA-256 pliku między Downloads i ręczną analizą. Scalanie wymaga tego samego rodzaju sygnału, ryzyka, okna 60 s i nowego źródła; każda obserwacja zachowuje własny identyfikator, czas, źródło i dowody. Alert Downloads nie zapisuje nazwy pliku, a hash pozostaje lokalnie i nie trafia do JSON/CSV ani Enterprise. Testy .NET 223/223, desktop 9/9, DNS/TCP/UDP + Engine IPC, produkcyjny UI build i autotest instalatora PASS; Windows CI dla tego zakresu oczekuje na zakończenie.
+
 - Doprecyzowano opisy pauzy: silnik nadal pobiera co sekundę PID i nazwy procesów oraz aktualizuje lokalny baseline, ale nie zapisuje zdarzeń z tego monitora. Diagnostyka pokazuje teraz ten stan wprost; test sprawdza komunikat i zachowanie baseline'u.
 
 - URL z częścią przed `@` podnosi teraz ryzyko z niskiego do umiarkowanego, bo może ukryć właściwy host przed użytkownikiem. Wersja reguł wzrosła do `2026.10.2`. Korpus regresyjny obejmuje 25 ręcznie przygotowanych scenariuszy, w tym `https://paypal.com@attacker.test/login`: TP=13, FP=0, TN=12, FN=0 przy progu Moderate. Test Browser Host potwierdza ostrzeżenie i brak ujawnienia domeny w odpowiedzi. To test syntetyczny, nie reprezentatywny pomiar skuteczności produkcyjnej.
