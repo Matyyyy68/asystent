@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Net.Security;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
@@ -47,13 +49,32 @@ using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
 var deduplicator = new NotificationDeduplicator();
-using var enterpriseHttpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+using var enterpriseHttpClient = CreateEnterpriseHttpClient();
 var enterpriseAgent = new EnterpriseAgentClient(enterpriseHttpClient);
 var enterpriseCredentialRotator = new EnterpriseCredentialRotator(enterpriseAgent, deviceCredentials);
 DateTimeOffset? lastEnterpriseSyncAttempt = null;
 DateTimeOffset? lastEnterpriseSync = null;
 string? enterpriseError = null;
 var enterpriseSyncIntervalSeconds = 60;
+HttpClient CreateEnterpriseHttpClient()
+{
+    var handler = new HttpClientHandler { AllowAutoRedirect = false };
+#if DEBUG
+    // Test-only exact leaf pin for loopback E2E. Release builds never read this setting.
+    var testCertificatePath = Environment.GetEnvironmentVariable("SENTINEL_TEST_TLS_CERT_PATH");
+    if (!string.IsNullOrWhiteSpace(testCertificatePath))
+    {
+        using var testCertificate = X509CertificateLoader.LoadCertificateFromFile(testCertificatePath);
+        var expectedHash = testCertificate.GetCertHashString(HashAlgorithmName.SHA256);
+        handler.ServerCertificateCustomValidationCallback = (request, presented, _, errors) =>
+            request?.RequestUri?.IsLoopback == true && presented is not null &&
+            errors is SslPolicyErrors.None or SslPolicyErrors.RemoteCertificateChainErrors &&
+            presented.GetCertHashString(HashAlgorithmName.SHA256).Equals(expectedHash, StringComparison.OrdinalIgnoreCase) &&
+            presented.NotBefore.ToUniversalTime() <= DateTime.UtcNow && presented.NotAfter.ToUniversalTime() > DateTime.UtcNow;
+    }
+#endif
+    return new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+}
 async Task<bool> IsMalwareBazaarConfiguredAsync()
 {
     try { return await malwareBazaarCredentials.ReadAsync() is not null; }

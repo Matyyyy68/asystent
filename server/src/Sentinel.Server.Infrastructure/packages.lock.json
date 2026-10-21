@@ -21,6 +21,11 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "PdfPig": {
+        "type": "Transitive",
+        "resolved": "0.1.16",
+        "contentHash": "qQcbsNMYVY+K5ELptax2S8thNMk0+rSQq3H/KdYj3LLcko8yTCz8y5KIvsKxIyAuTN0ZYNnfsZkM+0EvxTwHVA=="
+      },
       "SQLitePCLRaw.bundle_e_sqlite3": {
         "type": "Transitive",
         "resolved": "2.1.13",
@@ -55,13 +60,14 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "Sentinel.Contracts": "[0.15.32, )"
+          "PdfPig": "[0.1.16, )",
+          "Sentinel.Contracts": "[0.15.38, )"
         }
       },
       "sentinel.server.core": {
         "type": "Project",
         "dependencies": {
-          "Sentinel.Contracts": "[0.15.32, )"
+          "Sentinel.Contracts": "[0.15.38, )"
         }
       }
     },

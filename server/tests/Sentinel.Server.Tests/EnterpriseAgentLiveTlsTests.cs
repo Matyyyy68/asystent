@@ -6,7 +6,10 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using Sentinel.Core;
+using Sentinel.Core.Configuration;
 using Sentinel.Core.Enterprise;
 using Xunit;
 
@@ -154,6 +157,150 @@ public sealed class EnterpriseAgentLiveTlsTests
         }
     }
 
+    [WindowsDpapiFact]
+    public async Task ActiveEngineRetriesQueuedEventsAfterLiveTlsApiReturns()
+    {
+        var repository = FindRepositoryRoot();
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Release";
+        var serverDll = Path.Combine(repository, "server", "src", "Sentinel.Server.Api", "bin", configuration, "net10.0", "Sentinel.Server.Api.dll");
+        var engineDll = Path.Combine(repository, "src", "Sentinel.Engine", "bin", "Debug", "net10.0", "Sentinel.Engine.dll");
+        Assert.True(File.Exists(serverDll), $"Server API was not built: {serverDll}");
+        Assert.True(File.Exists(engineDll), $"Debug Engine was not built: {engineDll}");
+
+        var temp = Path.Combine(Path.GetTempPath(), "sentinel-engine-live-retry-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        var pfxPath = Path.Combine(temp, "loopback.pfx");
+        var certificatePath = Path.Combine(temp, "loopback.cer");
+        var databasePath = Path.Combine(temp, "server-database");
+        var clientRoot = Path.Combine(temp, "client");
+        var downloads = Path.Combine(temp, "Downloads");
+        Directory.CreateDirectory(downloads);
+        var pfxPassword = Convert.ToHexString(RandomNumberGenerator.GetBytes(24));
+        using var certificate = CreateLoopbackCertificate();
+        await File.WriteAllBytesAsync(pfxPath, certificate.Export(X509ContentType.Pfx, pfxPassword));
+        await File.WriteAllBytesAsync(certificatePath, certificate.Export(X509ContentType.Cert));
+
+        using var portLease = new TcpListener(IPAddress.Loopback, 0);
+        portLease.Start();
+        var port = ((IPEndPoint)portLease.LocalEndpoint).Port;
+        portLease.Stop();
+        var server = $"https://127.0.0.1:{port}";
+        const string adminUsername = "engine-retry-admin";
+        const string adminPassword = "Engine-retry-admin-password-42!";
+        Task<string> stderrTask = Task.FromResult(string.Empty);
+        Task<string> stdoutTask = Task.FromResult(string.Empty);
+        Process? apiProcess = null;
+
+        Process StartServer()
+        {
+            var instance = new Process
+            {
+                StartInfo = new ProcessStartInfo("dotnet")
+                {
+                    FileName = "dotnet",
+                    Arguments = $"\"{serverDll}\"",
+                    WorkingDirectory = repository,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                }
+            };
+            instance.StartInfo.Environment["ASPNETCORE_URLS"] = server;
+            instance.StartInfo.Environment["ASPNETCORE_Kestrel__Certificates__Default__Path"] = pfxPath;
+            instance.StartInfo.Environment["ASPNETCORE_Kestrel__Certificates__Default__Password"] = pfxPassword;
+            instance.StartInfo.Environment["Sentinel__DataDirectory"] = databasePath;
+            instance.StartInfo.Environment["Sentinel__BootstrapAdminUsername"] = adminUsername;
+            instance.StartInfo.Environment["Sentinel__BootstrapAdminPassword"] = adminPassword;
+            Assert.True(instance.Start());
+            stdoutTask = instance.StandardOutput.ReadToEndAsync();
+            stderrTask = instance.StandardError.ReadToEndAsync();
+            return instance;
+        }
+
+        try
+        {
+            apiProcess = StartServer();
+            using var handler = new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                ServerCertificateCustomValidationCallback = (_, presented, _, errors) =>
+                    presented is not null
+                    && presented.GetCertHashString(HashAlgorithmName.SHA256).Equals(certificate.GetCertHashString(HashAlgorithmName.SHA256), StringComparison.OrdinalIgnoreCase)
+                    && (errors & SslPolicyErrors.RemoteCertificateNameMismatch) == 0
+                    && presented.NotBefore.ToUniversalTime() <= DateTime.UtcNow
+                    && presented.NotAfter.ToUniversalTime() > DateTime.UtcNow,
+            };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            await WaitForReadyAsync(http, server, apiProcess, stdoutTask, stderrTask, timeout.Token);
+
+            var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
+                new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var adminToken = adminLogin!["accessToken"]!.GetValue<string>();
+            var group = await SendJsonAsync(http, server, "/api/v1/admin/groups", HttpMethod.Post,
+                new { name = "Engine Retry E2E" }, adminToken, HttpStatusCode.Created, timeout.Token);
+            var invitation = await SendJsonAsync(http, server, "/api/v1/admin/invitations", HttpMethod.Post,
+                new { group = group!["name"]!.GetValue<string>(), expiresAt = DateTimeOffset.UtcNow.AddMinutes(5), maximumRegistrations = 1, requiresApproval = true },
+                adminToken, HttpStatusCode.Created, timeout.Token);
+            var agent = new EnterpriseAgentClient(http);
+            var enrollment = await agent.EnrollAsync(EnterpriseAgentClient.ValidateServer(server),
+                invitation!["registrationCode"]!.GetValue<string>(), "ENGINE-RETRY-DEVICE",
+                typeof(EnterpriseAgentClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", timeout.Token);
+            await SendJsonAsync(http, server, $"/api/v1/admin/devices/{Uri.EscapeDataString(enrollment.DeviceId)}/approval",
+                HttpMethod.Put, new { approved = true }, adminToken, HttpStatusCode.NoContent, timeout.Token);
+
+            var clientDatabase = Path.Combine(clientRoot, "data");
+            var localStore = new LocalStore(clientDatabase);
+            await localStore.InitializeAsync(new InstalledProductProfile(ProductVariant.EnterpriseClient, server, ShareSecurityMetadata: true));
+            var eventId = Guid.NewGuid();
+            var occurredAt = DateTimeOffset.UtcNow;
+            await localStore.AddLocalOnlyAsync(new SecurityEvent(0, occurredAt, RiskLevel.High, "Syntetyczne wykrycie", "Active Engine retry",
+                "sekret-treści-do-zachowania-lokalnie", "wyjaśnienie nie może trafić do serwera", EventStatus.New,
+                EventId: eventId, Source: "manual-analysis", RuleVersion: "2026.10.1"));
+            Assert.True(await localStore.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(eventId, occurredAt, "url", 3,
+                "url.suspicious_domain", "manual-analysis", "2026.10.1")));
+            await new WindowsDpapiCredentialStore(clientDatabase).WriteAsync(enrollment.DeviceToken);
+
+            await using var engine = await EngineProcess.StartAsync(engineDll, repository, clientRoot, downloads, certificatePath);
+            apiProcess.Kill(entireProcessTree: true);
+            await apiProcess.WaitForExitAsync(timeout.Token);
+            apiProcess.Dispose();
+            apiProcess = null;
+
+            using var offlineSync = await engine.CallAsync("enterpriseSync");
+            Assert.Equal("sync_failed", offlineSync.RootElement.GetProperty("result").GetProperty("reason").GetString());
+            using var offlineStatus = await engine.CallAsync("status");
+            Assert.Equal(1, offlineStatus.RootElement.GetProperty("result").GetProperty("enterprise").GetProperty("queuedEvents").GetInt32());
+
+            apiProcess = StartServer();
+            await WaitForReadyAsync(http, server, apiProcess, stdoutTask, stderrTask, timeout.Token);
+            using var retry = await engine.CallAsync("enterpriseSync");
+            Assert.Equal(1, retry.RootElement.GetProperty("result").GetProperty("synchronized").GetInt32());
+            using var syncedStatus = await engine.CallAsync("status");
+            Assert.Equal(0, syncedStatus.RootElement.GetProperty("result").GetProperty("enterprise").GetProperty("queuedEvents").GetInt32());
+
+            var refreshedLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
+                new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var events = await SendJsonAsync(http, server, $"/api/v1/admin/events?deviceId={Uri.EscapeDataString(enrollment.DeviceId)}",
+                HttpMethod.Get, token: refreshedLogin!["accessToken"]!.GetValue<string>(), expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.NotNull(events);
+            Assert.Contains(eventId.ToString(), events!.ToJsonString(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("sekret-treści-do-zachowania-lokalnie", events.ToJsonString());
+            Assert.DoesNotContain("wyjaśnienie nie może trafić do serwera", events.ToJsonString());
+        }
+        finally
+        {
+            if (apiProcess is not null && !apiProcess.HasExited)
+            {
+                apiProcess.Kill(entireProcessTree: true);
+                await apiProcess.WaitForExitAsync();
+            }
+            apiProcess?.Dispose();
+            try { Directory.Delete(temp, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static X509Certificate2 CreateLoopbackCertificate()
     {
         using var rsa = RSA.Create(2048);
@@ -204,6 +351,67 @@ public sealed class EnterpriseAgentLiveTlsTests
         public Task<string?> ReadAsync(CancellationToken cancellationToken = default) => Task.FromResult(Value);
         public Task WriteAsync(string token, CancellationToken cancellationToken = default) { Value = token; return Task.CompletedTask; }
         public Task DeleteAsync(CancellationToken cancellationToken = default) { Value = null; return Task.CompletedTask; }
+    }
+
+    private sealed class WindowsDpapiFactAttribute : FactAttribute
+    {
+        public WindowsDpapiFactAttribute()
+        {
+            if (!OperatingSystem.IsWindows()) Skip = "Active Engine retry requires Windows DPAPI.";
+            else
+            {
+                try
+                {
+                    var directory = Path.Combine(Path.GetTempPath(), "sentinel-enterprise-dpapi-probe-" + Guid.NewGuid().ToString("N"));
+                    try { new WindowsDpapiCredentialStore(directory).WriteAsync("dpapi-probe-0123456789012345678901234567890123456789").GetAwaiter().GetResult(); }
+                    finally { if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true); }
+                }
+                catch (CryptographicException) { Skip = "Active Engine retry requires an available current-user DPAPI profile."; }
+            }
+        }
+    }
+
+    private sealed class EngineProcess(Process process, Task<string> stderr) : IAsyncDisposable
+    {
+        private readonly StreamWriter input = process.StandardInput;
+        private readonly StreamReader output = process.StandardOutput;
+        private int requestId;
+
+        public static Task<EngineProcess> StartAsync(string engineDll, string repository, string root, string downloads, string testCertificatePath)
+        {
+            var start = new ProcessStartInfo("dotnet")
+            {
+                Arguments = $"\"{engineDll}\"", WorkingDirectory = repository, UseShellExecute = false,
+                RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true
+            };
+            start.Environment["SENTINEL_DATA_ROOT"] = root;
+            start.Environment["SENTINEL_DOWNLOADS_PATH"] = downloads;
+            start.Environment["SENTINEL_TEST_TLS_CERT_PATH"] = testCertificatePath;
+            var child = Process.Start(start) ?? throw new IOException("Could not start Sentinel Engine test process.");
+            return Task.FromResult(new EngineProcess(child, child.StandardError.ReadToEndAsync()));
+        }
+
+        public async Task<JsonDocument> CallAsync(string method)
+        {
+            var id = Interlocked.Increment(ref requestId).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await input.WriteLineAsync(JsonSerializer.Serialize(new { id, version = 1, method }));
+            await input.FlushAsync();
+            var line = await output.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(20));
+            if (line is null) throw new InvalidOperationException("Engine exited before replying: " + await stderr);
+            var response = JsonDocument.Parse(line);
+            Assert.Equal(id, response.RootElement.GetProperty("id").GetString());
+            Assert.True(response.RootElement.GetProperty("ok").GetBoolean(), response.RootElement.TryGetProperty("error", out var error) ? error.GetString() : line);
+            return response;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            input.Close();
+            try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)); }
+            catch (TimeoutException) { process.Kill(entireProcessTree: true); await process.WaitForExitAsync(); }
+            if (process.ExitCode != 0) throw new InvalidOperationException("Engine test process failed: " + await stderr);
+            process.Dispose();
+        }
     }
 
     private static string FindRepositoryRoot()

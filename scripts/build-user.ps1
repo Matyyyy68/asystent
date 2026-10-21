@@ -5,6 +5,8 @@ Push-Location $repo
 try {
   node scripts/check-product.cjs
   if ($LASTEXITCODE) { throw 'Product consistency check failed' }
+  dotnet build src/Sentinel.Engine/Sentinel.Engine.csproj -c Debug
+  if ($LASTEXITCODE) { throw 'Debug Engine build failed' }
   dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release
   if ($LASTEXITCODE) { throw 'Tests failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {
