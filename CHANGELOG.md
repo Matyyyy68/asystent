@@ -357,3 +357,4 @@
 - WFP, blokowanie, pełna reputacja URL/IP, klasyfikacja plików i integracja AI w nowym UI nie istnieją. Witryna nie jest opublikowana. Ustalić licencję projektu i usunąć archiwum WPF po przeniesieniu funkcji.
 
 Szczegóły i kroki testowe: `docs/KNOWN-LIMITATIONS.md` oraz `docs/USER-VALIDATION.md`.
+- SQLite v17 naprawia przepełnienie Enterprise outboxa: po zapełnieniu kolejki do 10 000 wpisów nowe wykrycia zapisują się atomowo w trwałym magazynie odroczonym, a Engine przenosi je do kolejki po zwolnieniu miejsca. Backup/restore, cofnięcie zgody i retencja obejmują także odroczone wpisy. Test sprawdza pełną kolejkę, zachowanie wykrycia i późniejsze przeniesienie wpisu do kolejki.

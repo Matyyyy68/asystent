@@ -48,7 +48,7 @@ public sealed class StoreTests : IDisposable
             EvidenceCodes = ["dns.windows-cache-entry", "reputation.cert.current-feed-match"] };
 
         var canonicalId = await store.AddLocalOnlyAsync(browser);
-        await store.InitializeAsync(); // Opening a current v16 database must retain its insert trigger.
+        await store.InitializeAsync(); // Opening a current v17 database must retain its insert trigger.
         Assert.Equal(canonicalId, await store.AddLocalOnlyAsync(dns));
         var repeatedBrowser = await store.AddLocalOnlyAsync(browser with { EventId = Guid.NewGuid(), Timestamp = observedAt.AddSeconds(12) });
         Assert.NotEqual(canonicalId, repeatedBrowser); // A previously seen source is never absorbed into the cross-source merge.
@@ -197,7 +197,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(16L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(17L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -584,14 +584,33 @@ public sealed class StoreTests : IDisposable
         await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"))
         {
             await c.OpenAsync(); using var seed = c.CreateCommand();
-            seed.CommandText = "WITH RECURSIVE seq(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM seq WHERE x<10000) INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code) SELECT lower(hex(randomblob(16))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),'url',3,'local.url' FROM seq";
+            seed.CommandText = "WITH RECURSIVE seq(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM seq WHERE x<10000) INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code) SELECT lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),'url',3,'local.url' FROM seq";
             await seed.ExecuteNonQueryAsync();
         }
         Assert.False(await s.EnqueueEnterpriseEventAsync(new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "local.url")));
         var localDetection = Event() with { Risk = RiskLevel.High, EventId = Guid.NewGuid(), Source = "manual-analysis" };
         Assert.True(await s.AddWithEnterpriseMetadataAsync(localDetection, "url", "local.url"));
-        Assert.Equal(10000, await s.CountPendingEnterpriseEventsAsync());
+        Assert.Equal(10002, await s.CountPendingEnterpriseEventsAsync());
         Assert.Equal(localDetection.EventId, Assert.Single(await s.ReadAsync()).EventId);
+        await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var deferred = c.CreateCommand(); deferred.CommandText = "SELECT COUNT(*) FROM enterprise_event_deferred";
+            Assert.Equal(2L, await deferred.ExecuteScalarAsync());
+        }
+        var batch = await s.ReadPendingEnterpriseEventsAsync();
+        await s.MarkEnterpriseEventsSentAsync(batch.Select(item => item.EventId));
+        await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var sent = c.CreateCommand(); sent.CommandText = "SELECT COUNT(*) FROM enterprise_event_queue WHERE sent=1";
+            Assert.True(Convert.ToInt32(await sent.ExecuteScalarAsync()) > 0);
+        }
+        await s.ReadPendingEnterpriseEventsAsync(); // Frees sent slots and refills them from durable deferred storage.
+        await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var promoted = c.CreateCommand(); promoted.CommandText = "SELECT COUNT(*) FROM enterprise_event_queue WHERE event_id=$id";
+            promoted.Parameters.AddWithValue("$id", localDetection.EventId!.Value.ToString("D"));
+            Assert.Equal(1L, await promoted.ExecuteScalarAsync());
+        }
     }
     [Fact] public async Task RevokingEnterpriseConsentClearsPendingMetadataWithoutDeletingLocalHistory()
     {
@@ -701,7 +720,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(16L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(17L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -720,7 +739,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(16L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(17L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
