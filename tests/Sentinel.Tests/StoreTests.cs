@@ -623,6 +623,34 @@ public sealed class StoreTests : IDisposable
         Assert.Empty(await s.ReadPendingEnterpriseEventsAsync());
         Assert.Equal("private local evidence", Assert.Single(await s.ReadAsync()).Explanation);
     }
+    [Fact] public async Task RevokingEnterpriseConsentAtomicallyClearsDeferredEvents()
+    {
+        var s = await Store(); await s.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: true);
+        await using (var c = new SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var seed = c.CreateCommand();
+            seed.CommandText = "WITH RECURSIVE seq(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM seq WHERE x<10000) INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code) SELECT lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(2)))||'-'||lower(hex(randomblob(6))),strftime('%Y-%m-%dT%H:%M:%fZ','now'),'url',3,'local.url' FROM seq";
+            await seed.ExecuteNonQueryAsync();
+            using var trigger = c.CreateCommand(); trigger.CommandText = "CREATE TRIGGER fail_deferred_delete BEFORE DELETE ON enterprise_event_deferred BEGIN SELECT RAISE(ABORT,'simulated revoke failure'); END";
+            await trigger.ExecuteNonQueryAsync();
+        }
+        var detection = Event() with { Risk = RiskLevel.High, EventId = Guid.NewGuid(), Source = "manual-analysis" };
+        Assert.True(await s.AddWithEnterpriseMetadataAsync(detection, "url", "local.url"));
+        Assert.Equal(10001, await s.CountPendingEnterpriseEventsAsync());
+
+        await Assert.ThrowsAsync<SqliteException>(() => s.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: false));
+        Assert.True((await s.GetInstallationProfileAsync()).ShareSecurityMetadata);
+        Assert.Equal(10001, await s.CountPendingEnterpriseEventsAsync());
+        await using (var c = new SqliteConnection($"Data Source={s.DatabasePath};Pooling=False"))
+        {
+            await c.OpenAsync(); using var drop = c.CreateCommand(); drop.CommandText = "DROP TRIGGER fail_deferred_delete";
+            await drop.ExecuteNonQueryAsync();
+        }
+        await s.SetEnterpriseProfileAsync("https://sentinel.example", shareSecurityMetadata: false);
+        Assert.False((await s.GetInstallationProfileAsync()).ShareSecurityMetadata);
+        Assert.Equal(0, await s.CountPendingEnterpriseEventsAsync());
+        Assert.Equal(detection.EventId, Assert.Single(await s.ReadAsync()).EventId);
+    }
     [Fact] public async Task RetentionRemovesOnlyOldEvents() { var s = await Store(); await s.AddAsync(Event(DateTimeOffset.UtcNow.AddDays(-60))); await s.AddAsync(Event()); await s.ApplyRetentionAsync(30); Assert.Single(await s.ReadAsync()); }
     [Fact] public async Task InvalidRetentionRejected() { var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(0))); }
     [Fact] public async Task BackupCanReopenAndExportIsValid() { var s = await Store(); await s.AddAsync(Event()); var export = Path.Combine(dir,"events.json"); await s.ExportAsync(export); Assert.Contains("Synthetic",await File.ReadAllTextAsync(export)); var backupDir = Path.Combine(dir,"backup"); Directory.CreateDirectory(backupDir); await s.BackupAsync(Path.Combine(backupDir,"sentinel.db")); var backup = new LocalStore(backupDir); await backup.InitializeAsync(); Assert.Single(await backup.ReadAsync()); }

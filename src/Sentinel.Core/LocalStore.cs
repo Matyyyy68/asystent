@@ -257,6 +257,12 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         using var write = c.CreateCommand(); write.Transaction = transaction; write.CommandText = "UPDATE installation_profile SET json=$json WHERE id=1";
         write.Parameters.AddWithValue("$json", JsonSerializer.Serialize(server));
         if (await write.ExecuteNonQueryAsync(ct) != 1) throw new InvalidDataException("Brak profilu instalacji.");
+        if (!shareSecurityMetadata)
+        {
+            using var clear = c.CreateCommand(); clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM enterprise_event_queue; DELETE FROM enterprise_event_deferred";
+            await clear.ExecuteNonQueryAsync(ct);
+        }
         await transaction.CommitAsync(ct);
     }
     public async Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default)

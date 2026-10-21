@@ -428,7 +428,6 @@ while (await Console.In.ReadLineAsync() is { } line)
                     throw new InvalidOperationException("Brak poświadczenia urządzenia; sparuj je ponownie przed włączeniem synchronizacji.");
                 await store.SetEnterpriseProfileAsync(installationProfile.EnterpriseServerUri, shareMetadata);
                 installationProfile = await store.GetInstallationProfileAsync();
-                if (!shareMetadata) await store.ClearEnterpriseEventQueueAsync();
                 result = new { sharingMetadata = shareMetadata, queuedEvents = await store.CountPendingEnterpriseEventsAsync() };
                 break;
             case "enterpriseSync": result = await SyncEnterpriseAsync(force: true); break;
