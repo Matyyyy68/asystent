@@ -24,7 +24,7 @@ public sealed class TcpConnectionSnapshotMonitor
 {
     private const int MaximumConnections = 10_000;
     private const int MaximumEventsPerSample = 100;
-    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
     private readonly Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture;
     private readonly Func<int, string?, DateTimeOffset, Guid?> wasRecentlyObservedStart;
     private readonly TimeProvider timeProvider;

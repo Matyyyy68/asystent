@@ -45,7 +45,10 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
             Connection(53) with { Protocol = "UDP" }, Connection(22) with { State = "Listen" }, Connection(25, process: "excluded-app")];
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, "excluded-app"));
         Assert.Equal(1, captures);
-        clock.Advance(TimeSpan.FromSeconds(10));
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, "excluded-app"));
+        Assert.Equal(1, captures);
+        clock.Advance(TimeSpan.FromMilliseconds(500));
         Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, "excluded-app"));
 
         var item = Assert.Single(await store.ReadAsync());

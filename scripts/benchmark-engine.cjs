@@ -56,7 +56,7 @@ function finish(code) { if (finished) return; finished = true; clearTimeout(time
     const finalStatus = await call('status');
     const history = tcpMonitor ? await call('history') : null;
     if (tcpMonitor) {
-      if (!finalStatus.tcpConnections.includes('Ciągła migawka TCP działa')) throw new Error(`TCP observer was not healthy: ${finalStatus.tcpConnections}`);
+      if (!finalStatus.tcpConnections.includes('Ciągła migawka TCP/UDP działa')) throw new Error(`TCP observer was not healthy: ${finalStatus.tcpConnections}`);
       if (!history.some(event => event.source === 'tcp-connection-snapshot' && event.explanation.includes(tcpTarget)))
         throw new Error(`The controlled TCP connection ${tcpTarget} was not recorded.`);
     }
