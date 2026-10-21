@@ -188,7 +188,9 @@ async Task<object> ReadAuthenticodeSignatureAsync(string path, CancellationToken
     process.StartInfo.Environment["SENTINEL_FILE_TO_VERIFY"] = path;
     process.StartInfo.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
     process.Start();
-    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromSeconds(10));
+    // Windows PowerShell can take longer to cold-start on a loaded runner or first-use profile.
+    // Keep the signature check bounded without treating a slow host as an unsigned file.
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); timeout.CancelAfter(TimeSpan.FromSeconds(30));
     var output = process.StandardOutput.ReadToEndAsync(timeout.Token);
     var errors = process.StandardError.ReadToEndAsync(timeout.Token);
     try
