@@ -9,7 +9,10 @@ const root = mkdtempSync(path.join(tmpdir(), 'sentinel-engine-benchmark-'));
 const durationArgument = process.argv.find(argument => argument.startsWith('--duration='));
 const durationSeconds = durationArgument ? Number(durationArgument.slice('--duration='.length)) : 30;
 if (!Number.isInteger(durationSeconds) || durationSeconds < 30 || durationSeconds > 900) throw new Error('Use --duration=SECONDS in range 30–900.');
-const sampleCount = Math.floor(durationSeconds / 5);
+const intervalArgument = process.argv.find(argument => argument.startsWith('--interval-ms='));
+const intervalMs = intervalArgument ? Number(intervalArgument.slice('--interval-ms='.length)) : 5000;
+if (!Number.isInteger(intervalMs) || intervalMs < 250 || intervalMs > 60000) throw new Error('Use --interval-ms=MILLISECONDS in range 250–60000.');
+const sampleCount = Math.floor(durationSeconds * 1000 / intervalMs);
 const tcpMonitor = process.argv.includes('--tcp-monitor');
 let tcpServer, tcpClient, tcpTarget;
 const child = spawn(path.resolve('artifacts/engine/Sentinel.Engine.exe'), [], { windowsHide: true,
@@ -40,7 +43,7 @@ function finish(code) { if (finished) return; finished = true; clearTimeout(time
     const observations = [], latencies = [];
     const start = performance.now();
     for (let index = 1; index <= sampleCount; index++) {
-      const due = start + index * 5000;
+      const due = start + index * intervalMs;
       await new Promise(resolve => setTimeout(resolve, Math.max(0, due - performance.now())));
       const before = performance.now(); await call('collect'); latencies.push(performance.now() - before);
       observations.push((await call('status')).runtime);
@@ -64,7 +67,7 @@ function finish(code) { if (finished) return; finished = true; clearTimeout(time
       collectLatencyMs: { median: +sorted[Math.floor(sorted.length / 2)].toFixed(1), max: +Math.max(...sorted).toFixed(1) },
       processSource: finalStatus.processes,
       ...(tcpMonitor ? { tcpObserver: finalStatus.tcpConnections, tcpEventsRecorded: history.filter(event => event.source === 'tcp-connection-snapshot').length, controlledConnection: tcpTarget } : {}),
-      note: `Single local Windows session; ${durationSeconds}-second profile with 5-second collect intervals${tcpMonitor ? ' and an opt-in controlled TCP connection' : ''}; not a fleet or long-duration performance guarantee.`
+      note: `Single local Windows session; ${durationSeconds}-second profile with ${intervalMs}-ms collect intervals${tcpMonitor ? ' and an opt-in controlled TCP connection' : ''}; not a fleet or long-duration performance guarantee.`
     }, null, 2));
     finish(0);
   } catch (error) { console.error(error); finish(1); }

@@ -9,6 +9,8 @@
 
 Pakiet diagnostyczny zawiera stan hosta: allowlistowany status, sanitowany kod zakończenia i flagę stderr bez treści. Test IPC potwierdza wynik i filtrowanie. Pełny lokalny build oraz Windows CI `39625685631` PASS.
 
+Przy aktywnej obserwacji procesy są teraz próbkowane co około 1 s (wcześniej co 5 s), aby zmniejszyć okno pomijania krótkich procesów. Benchmark kontrolowany 30 s: CPU 0,377% mocy logicznych procesorów i working set maks. 56 MiB przy interwale 1 s; przy 5 s: 0,130% i 51 MiB. Wynik jest wstępny, z jednej lokalnej sesji; event stream nadal nie działa z powodu odmowy dostępu ETW/WMI.
+
 **Następny krok:** kontynuować PLAN-001/PLAN-004 przez analizę bezpiecznej drogi do niezawodnych zdarzeń procesu i korelacji źródeł. Na maszynie audytu ETW/WMI odmawia dostępu; nie nadawać uprawnień ani nie zmieniać audytu systemowego bez jawnego, kontrolowanego testu. Wykonalne prace kodowe i testy offline mają pierwszeństwo, a wynik ma pozostać oznaczony jako polling, dopóki nie ma dowodu na event stream.
 
 **Weryfikacja Enterprise:** aktywny Engine przechowuje kolejkę po błędzie TLS API, a po restarcie tego samego API automatycznie wysyła ją przez zwykłe `collect` po skonfigurowanym interwale. Windows DPAPI/live TLS test, testy serwera 22/22 PASS. Certyfikat testowy jest przypięty wyłącznie w pamięci Debug Engine; magazyny Windows nie są zmieniane. Zapis API potwierdza, że treść i wyjaśnienie pozostają lokalne. Osobny live TLS E2E potwierdza idempotencję, rotację i revoke.

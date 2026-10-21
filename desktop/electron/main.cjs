@@ -95,7 +95,7 @@ app.whenReady().then(() => {
         new Notification({ title: 'Sentinel AI — ostrzeżenie DNS', body: 'W cache DNS wykryto domenę z listy CERT Polska. Ruch nie został zablokowany.' }).show();
     } catch { tray?.setToolTip('Sentinel AI — silnik niedostępny'); }
     finally { collecting = false; }
-  }, 5000);
+  }, 1000);
   app.on('before-quit', () => { clearInterval(collector); engine.dispose(); });
   if (process.argv.includes('--minimized')) win.hide();
   const icon = nativeImage.createFromPath(path.join(__dirname, "../assets/icon-32.png"));

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Gdy obserwacja działa, procesy są teraz próbkowane co około 1 s zamiast co 5 s, by ograniczyć pomijanie krótkich zdarzeń. Profil lokalny 30 s: CPU 0,377% całkowitej mocy procesorów i working set maks. 56 MiB przy 1 s; punkt odniesienia 5 s: 0,130% i 51 MiB. To krótka sesja na jednej maszynie; procesy krótsze od próbki nadal mogą zostać pominięte.
+
 - Pakiet diagnostyczny do pomocy technicznej zawiera teraz stan procesu .NET, ograniczony kod zakończenia i samą flagę obecności stderr. Status jest allowlistowany, kod jest filtrowany do ASCII alfanumerycznych/`-_` i 40 znaków; treść stderr nie trafia do eksportu. Test IPC sprawdza eksport i oczyszczenie kodu; Windows CI `39625685631` PASS.
 
 - Czytnik TCP/UDP wybiera teraz deterministyczne 800 połączeń i 200 endpointów UDP oraz przekazuje do monitora informację o obcięciu tabel. SQLite v15 utrwala osobne flagi TCP/UDP; monitor wstrzymuje alerty podczas niepełnej próbki i po restarcie, a wznawia je po kolejnej pełnej próbce. Dodano testy stabilnego limitera, zmian składu, restartu i migracji v14→v15. Windows CI `39625685631` PASS dla połączonej rewizji: .NET 214/214, installer self-test, testy serwera 22/22 i API smoke.
