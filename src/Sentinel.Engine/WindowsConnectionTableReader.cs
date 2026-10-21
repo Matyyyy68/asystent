@@ -34,9 +34,19 @@ public static class WindowsConnectionTableReader
             .Concat(ReadRows<UdpRowOwnerPidV6>(ReadUdpV6).Select(row => new ConnectionSnapshot("UDP", Address(row.LocalAddress), Port(row.LocalPort), null, null, "Endpoint",
                 unchecked((int)row.OwningPid), Name(row.OwningPid, processNames))))
             .OrderBy(ConnectionOrder, StringComparer.Ordinal).ToArray();
-        var tcpTruncated = tcp.Length > maximumTcp;
-        var udpTruncated = udp.Length > maximumUdp;
-        return new(tcp.Take(maximumTcp).Concat(udp.Take(maximumUdp)).ToArray(), tcpTruncated, udpTruncated);
+        return LimitSnapshot(tcp.Concat(udp).ToArray(), maximumTcp, maximumUdp);
+    }
+
+    public static ConnectionSnapshotBatch LimitSnapshot(IReadOnlyCollection<ConnectionSnapshot> connections,
+        int maximumTcp = 800, int maximumUdp = 200)
+    {
+        ArgumentNullException.ThrowIfNull(connections);
+        if (maximumTcp is < 1 or > 10_000 || maximumUdp is < 1 or > 10_000) throw new ArgumentOutOfRangeException();
+        var tcp = connections.Where(connection => string.Equals(connection.Protocol, "TCP", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(ConnectionOrder, StringComparer.Ordinal).ToArray();
+        var udp = connections.Where(connection => string.Equals(connection.Protocol, "UDP", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(ConnectionOrder, StringComparer.Ordinal).ToArray();
+        return new(tcp.Take(maximumTcp).Concat(udp.Take(maximumUdp)).ToArray(), tcp.Length > maximumTcp, udp.Length > maximumUdp);
     }
 
     private static string ConnectionOrder(ConnectionSnapshot row) =>

@@ -10,6 +10,24 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         new("TCP", "192.0.2.10", 50_000 + port, remote, port, "Established", processId, process);
 
     [Fact]
+    public void WindowsReaderSelectsStableProtocolLimitsAndReportsTruncation()
+    {
+        var tcp443 = Connection(443);
+        var tcp8443 = Connection(8443);
+        var udp53 = new ConnectionSnapshot("UDP", "192.0.2.10", 53, null, null, "Endpoint", 53, "dns-client");
+        var udp5353 = udp53 with { LocalPort = 5353 };
+
+        var first = WindowsConnectionTableReader.LimitSnapshot([tcp8443, udp5353, tcp443, udp53], maximumTcp: 1, maximumUdp: 1);
+        var shuffled = WindowsConnectionTableReader.LimitSnapshot([udp53, tcp443, udp5353, tcp8443], maximumTcp: 1, maximumUdp: 1);
+
+        Assert.Equal(first.Connections, shuffled.Connections);
+        Assert.Equal(tcp443, Assert.Single(first.Connections, connection => connection.Protocol == "TCP"));
+        Assert.Equal(udp53, Assert.Single(first.Connections, connection => connection.Protocol == "UDP"));
+        Assert.True(first.TcpTruncated);
+        Assert.True(first.UdpTruncated);
+    }
+
+    [Fact]
     public async Task RequiresOptInUsesBaselineAndRecordsOnlyNewExternalTcpMetadata()
     {
         var store = new LocalStore(directory); await store.InitializeAsync();
