@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Pakiet diagnostyczny do pomocy technicznej zawiera teraz stan procesu .NET, ograniczony kod zakończenia i samą flagę obecności stderr. Status jest allowlistowany, kod jest filtrowany do ASCII alfanumerycznych/`-_` i 40 znaków; treść stderr nie trafia do eksportu. Test IPC sprawdza eksport i oczyszczenie kodu.
+- Pakiet diagnostyczny do pomocy technicznej zawiera teraz stan procesu .NET, ograniczony kod zakończenia i samą flagę obecności stderr. Status jest allowlistowany, kod jest filtrowany do ASCII alfanumerycznych/`-_` i 40 znaków; treść stderr nie trafia do eksportu. Test IPC sprawdza eksport i oczyszczenie kodu; Windows CI `39625685631` PASS.
 
 - Czytnik TCP/UDP wybiera teraz deterministyczne 800 połączeń i 200 endpointów UDP oraz przekazuje do monitora informację o obcięciu tabel. SQLite v15 utrwala osobne flagi TCP/UDP; monitor wstrzymuje alerty podczas niepełnej próbki i po restarcie, a wznawia je po kolejnej pełnej próbce. Dodano testy stabilnego limitera, zmian składu, restartu i migracji v14→v15. Windows CI `39625685631` PASS dla połączonej rewizji: .NET 214/214, installer self-test, testy serwera 22/22 i API smoke.
 
