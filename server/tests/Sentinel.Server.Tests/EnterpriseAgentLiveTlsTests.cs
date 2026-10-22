@@ -47,6 +47,7 @@ public sealed class EnterpriseAgentLiveTlsTests
 
         Process StartServer()
         {
+            EnsureTestCertificateIsLoadable(pfxPath, pfxPassword);
             var instance = new Process
             {
                 StartInfo = new ProcessStartInfo("dotnet")
@@ -198,6 +199,7 @@ public sealed class EnterpriseAgentLiveTlsTests
 
         Process StartServer()
         {
+            EnsureTestCertificateIsLoadable(pfxPath, pfxPassword);
             var instance = new Process
             {
                 StartInfo = new ProcessStartInfo("dotnet")
@@ -331,6 +333,23 @@ public sealed class EnterpriseAgentLiveTlsTests
         var usages = new OidCollection { new("1.3.6.1.5.5.7.3.1") };
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(usages, false));
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+    }
+
+    private static void EnsureTestCertificateIsLoadable(string path, string password)
+    {
+        if (!File.Exists(path))
+            throw new InvalidOperationException("The temporary TLS certificate file does not exist; the API child process was not started.");
+
+        try
+        {
+            using var imported = X509CertificateLoader.LoadPkcs12FromFile(path, password, X509KeyStorageFlags.DefaultKeySet);
+            if (!imported.HasPrivateKey)
+                throw new InvalidOperationException("The temporary TLS certificate has no private key; the API child process was not started.");
+        }
+        catch (CryptographicException exception)
+        {
+            throw new InvalidOperationException("The temporary TLS certificate cannot be imported in the test process; the API child process was not started.", exception);
+        }
     }
 
     private static async Task WaitForReadyAsync(HttpClient http, string server, Process process,

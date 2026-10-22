@@ -22,7 +22,7 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 
 ## Enterprise, dane i prywatność
 
-- Monitoring autostartu Windows jest opt-in i obejmuje wyłącznie HKCU Run/RunOnce oraz bezpośrednie pliki w Startup bieżącego użytkownika. Trwały, zredagowany baseline wykrywa różnicę istniejącą przy kolejnym uruchomieniu, ale nie wykryje wpisu dodanego i usuniętego podczas zamknięcia; cichy baseline nie alarmuje o stanie zastanym przy pierwszym włączeniu. HKLM i Scheduled Tasks nie są monitorowane. Zdarzenia nie zawierają komendy ani pełnej ścieżki; reguła lokalizacji jest heurystyczna.
+- Monitoring autostartu Windows jest opt-in i obejmuje HKCU i HKLM Run/RunOnce (widoki 32/64-bit) oraz bezpośrednie pliki Startup użytkownika i wspólnego Startup. Trwały, zredagowany baseline wykrywa różnicę istniejącą przy kolejnym uruchomieniu, ale nie wykryje wpisu dodanego i usuniętego podczas zamknięcia; cichy baseline nie alarmuje o stanie zastanym przy pierwszym włączeniu. Scheduled Tasks nie są monitorowane. Zdarzenia nie zawierają komendy ani pełnej ścieżki; reguła lokalizacji jest heurystyczna.
 
 - Serwer Enterprise jest osobnym projektem. Wdrożenie poza loopback wymaga HTTPS z certyfikatem zaufanym przez Windows; repozytorium nie dostarcza publicznego serwera ani zaufanego certyfikatu. Instalator serwera nie konfiguruje TLS ani zapory.
 - Klient przesyła metadane zdarzeń wyłącznie po jawnej zgodzie. Nie obejmują one treści, pełnych URL-i, zawartości plików, nazw aplikacji ani lokalnych wyjaśnień. Podczas rejestracji serwer otrzymuje kod zaproszenia, nazwę komputera i wersję klienta. Szczegóły opisuje [konfiguracja klienta Enterprise](ENTERPRISE-CLIENT-SETUP.md).

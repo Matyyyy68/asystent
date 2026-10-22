@@ -67,7 +67,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         try { snapshot = capture(); }
         catch (Exception exception)
         {
-            State = "Źródła autostartu bieżącego użytkownika niedostępne: " + exception.GetType().Name;
+            State = "Źródła autostartu Windows niedostępne: " + exception.GetType().Name;
             return 0;
         }
 
@@ -110,15 +110,32 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var source = change.Current?.Source ?? change.Previous!.Source;
             var sourceName = source switch
             {
-                "registry.run" => "HKCU Run",
-                "registry.runonce" => "HKCU RunOnce",
-                "startup.folder" => "folder Startup użytkownika",
-                _ => "autostart bieżącego użytkownika"
+                "registry.user.run" => "HKCU Run",
+                "registry.user.runonce" => "HKCU RunOnce",
+                "registry.machine64.run" => "HKLM Run (64-bit)",
+                "registry.machine64.runonce" => "HKLM RunOnce (64-bit)",
+                "registry.machine32.run" => "HKLM Run (32-bit)",
+                "registry.machine32.runonce" => "HKLM RunOnce (32-bit)",
+                "startup.user" => "folder Startup użytkownika",
+                "startup.common" => "wspólny folder Startup",
+                _ => "autostart Windows"
             };
-            var evidence = new List<string> { "persistence.user." + source.Split('.')[1] + "." + change.Kind.ToString().ToLowerInvariant() };
+            var evidenceScope = source switch
+            {
+                "registry.user.run" => "user.run",
+                "registry.user.runonce" => "user.runonce",
+                "registry.machine64.run" => "machine64.run",
+                "registry.machine64.runonce" => "machine64.runonce",
+                "registry.machine32.run" => "machine32.run",
+                "registry.machine32.runonce" => "machine32.runonce",
+                "startup.user" => "user.startup",
+                "startup.common" => "common.startup",
+                _ => "unknown"
+            };
+            var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
             if (suspicious) evidence.Add("persistence.target.user-writable-location");
             var item = new SecurityEvent(0, now, suspicious ? RiskLevel.Low : RiskLevel.Information,
-                "Zmiana autostartu Windows", "Autostart bieżącego użytkownika · " + sourceName,
+                "Zmiana autostartu Windows", "Autostart Windows · " + sourceName,
                 $"Wykryto, że {verb} wpis autostartu. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
                 "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów.",
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
@@ -144,7 +161,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var pending = GetChanges(baseline, snapshot).Count;
         State = pending > 0
             ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu."
-            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów bieżącego użytkownika, zapisano {recorded} zmian.";
+            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian.";
         return recorded;
     }
 
@@ -174,39 +191,46 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private static IReadOnlyDictionary<string, PersistenceSnapshotEntry> CaptureUserPersistence()
     {
         var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
-        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", "registry.run", entries);
-        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "registry.runonce", entries);
-
-        var startup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
-        if (!string.IsNullOrWhiteSpace(startup) && Directory.Exists(startup))
+        var runPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+        var runOncePath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
+        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
+        var views = Environment.Is64BitOperatingSystem
+            ? new[] { (RegistryView.Registry64, "machine64"), (RegistryView.Registry32, "machine32") }
+            : new[] { (RegistryView.Default, "machine32") };
+        foreach (var (view, sourcePrefix) in views)
         {
-            var inspected = 0;
-            foreach (var path in Directory.EnumerateFileSystemEntries(startup).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
-            {
-                if (++inspected > MaximumEntries)
-                {
-                    entries["!overflow"] = new("overflow", "", false);
-                    break;
-                }
-                try
-                {
-                    var attributes = File.GetAttributes(path);
-                    if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) continue;
-                    var info = new FileInfo(path);
-                    var key = CreateKey("startup.folder", Path.GetFileName(path));
-                    var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{info.Length}:{info.LastWriteTimeUtc.Ticks}")));
-                    if (!entries.ContainsKey(key) && entries.Count >= MaximumEntries)
-                    {
-                        entries["!overflow"] = new("overflow", "", false);
-                        break;
-                    }
-                    entries[key] = new("startup.folder", fingerprint, false);
-                }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            }
+            CaptureRunKey(RegistryHive.LocalMachine, view, runPath, $"registry.{sourcePrefix}.run", entries);
+            CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries);
         }
+        CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
+        CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);
         return entries;
+    }
+
+    private static void CaptureStartupFolder(string startup, string source, IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        if (string.IsNullOrWhiteSpace(startup) || !Directory.Exists(startup)) return;
+        var inspected = 0;
+        foreach (var path in Directory.EnumerateFileSystemEntries(startup).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            if (++inspected > MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                break;
+            }
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) continue;
+            var info = new FileInfo(path);
+            var key = CreateKey(source, Path.GetFileName(path));
+            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{info.Length}:{info.LastWriteTimeUtc.Ticks}")));
+            if (!entries.ContainsKey(key) && entries.Count >= MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                break;
+            }
+            entries[key] = new(source, fingerprint, false);
+        }
     }
 
     private static IReadOnlyDictionary<string, PersistenceSnapshotEntry> CaptureSupportedPlatform()
@@ -227,27 +251,22 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 entries["!overflow"] = new("overflow", "", false);
                 break;
             }
-            try
+            var value = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            var command = value switch
             {
-                var value = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
-                var command = value switch
-                {
-                    string text => text,
-                    string[] values => string.Join("\0", values),
-                    _ => null
-                };
-                if (command is null) continue;
-                var keyId = CreateKey(source, name);
-                var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command)));
-                if (!entries.ContainsKey(keyId) && entries.Count >= MaximumEntries)
-                {
-                    entries["!overflow"] = new("overflow", "", false);
-                    break;
-                }
-                entries[keyId] = new(source, fingerprint, LooksLikeWritableLocation(command));
+                string text => text,
+                string[] values => string.Join("\0", values),
+                _ => null
+            };
+            if (command is null) continue;
+            var keyId = CreateKey(source, name);
+            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command)));
+            if (!entries.ContainsKey(keyId) && entries.Count >= MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                break;
             }
-            catch (System.Security.SecurityException) { }
-            catch (IOException) { }
+            entries[keyId] = new(source, fingerprint, LooksLikeWritableLocation(command));
         }
     }
 
