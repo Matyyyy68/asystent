@@ -52,6 +52,67 @@ public sealed class AIProviderTests
         Assert.Contains("Q4_K_M", model.DisplayName);
     }
 
+    [Fact]
+    public async Task EmbeddingsUseOnlyLoopbackAndValidateBatchShape()
+    {
+        HttpRequestMessage? captured = null;
+        using var client = new HttpClient(new DelegateHandler(async request =>
+        {
+            captured = request;
+            return Json("""{"embeddings":[[1,0],[0,1]]}""");
+        }));
+        var provider = new OllamaLocalProvider(client);
+        var vectors = await provider.EmbedAsync("http://127.0.0.1:11434", "synthetic-embed", ["query", "document"]);
+        Assert.Equal("/api/embed", captured!.RequestUri!.AbsolutePath);
+        Assert.Equal(2, vectors.Count);
+        Assert.Equal(new[] { 1f, 0f }, vectors[0]);
+
+        using var invalidClient = new HttpClient(new DelegateHandler(_ => Task.FromResult(Json("""{"embeddings":[[1,0],[0,1,2]]}"""))));
+        var invalidProvider = new OllamaLocalProvider(invalidClient);
+        await Assert.ThrowsAsync<InvalidDataException>(() => invalidProvider.EmbedAsync("http://localhost:11434", "synthetic-embed", ["query", "document"]));
+    }
+
+    [Fact]
+    public async Task EmbeddingRerankingMovesTheMostSimilarLexicalCandidateIntoAIContext()
+    {
+        string? chatRequest = null;
+        using var client = new HttpClient(new DelegateHandler(async request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/embed")
+                return Json("""{"embeddings":[[1,0],[0,1],[1,0]]}""");
+            chatRequest = await request.Content!.ReadAsStringAsync();
+            return Json("""{"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"High\",\"indicators\":[{\"description\":\"Zweryfikuj zasady\",\"sourceReferences\":[1]}],\"uncertainties\":[],\"recommendations\":[],\"explanation\":\"Źródło opisuje weryfikację zgłoszenia.\"}"}}""");
+        }));
+        var provider = new OllamaLocalProvider(client);
+        var candidates = new TestKnowledgeProvider(
+        [
+            new KnowledgeHit("doc-a", "lexical-first.txt", 0, "payment transfer details", -2.0),
+            new KnowledgeHit("doc-b", "semantic-match.txt", 0, "verify identity through the official support channel", -1.0)
+        ]);
+        var orchestrator = new AnalysisOrchestrator(new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames())), provider, candidates);
+        var result = await orchestrator.AnalyzeAsync(new AnalysisContext("Synthetic", "Review this payment transfer request.", DateTimeOffset.UtcNow),
+            true, "http://127.0.0.1:11434", "synthetic-chat", "synthetic-embed");
+
+        Assert.Equal(RiskLevel.High, result.Risk);
+        Assert.NotNull(chatRequest);
+        using var sent = JsonDocument.Parse(chatRequest);
+        var context = sent.RootElement.GetProperty("messages")[1].GetProperty("content").GetString();
+        Assert.Contains("Źródło 1: semantic-match.txt", context, StringComparison.Ordinal);
+        Assert.Contains(result.Uncertainties, text => text.Contains("semantic-match.txt", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task LongAnalysisTextUsesBoundedKnowledgeQueryAndStillReachesLocalModel()
+    {
+        using var client = new HttpClient(new DelegateHandler(_ => Task.FromResult(Json(ValidResponse))));
+        var knowledge = new TestKnowledgeProvider([]);
+        var orchestrator = new AnalysisOrchestrator(new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames())),
+            new OllamaLocalProvider(client), knowledge);
+        await orchestrator.AnalyzeAsync(new AnalysisContext("Synthetic", string.Concat(Enumerable.Repeat("ordinary words ", 400)), DateTimeOffset.UtcNow),
+            true, "http://127.0.0.1:11434", "synthetic-chat");
+        Assert.Equal(4000, knowledge.LastQuery?.Length);
+    }
+
     [Theory]
     [InlineData("https://model.example")]
     [InlineData("http://192.0.2.10:11434")]
@@ -155,6 +216,21 @@ public sealed class AIProviderTests
     }
 
     private static HttpResponseMessage Json(string content) => new(HttpStatusCode.OK) { Content = new StringContent(content, Encoding.UTF8, "application/json") };
+
+    private sealed class TestKnowledgeProvider(IReadOnlyList<KnowledgeHit> hits) : IKnowledgeBaseProvider
+    {
+        public string? LastQuery { get; private set; }
+        public Task<IReadOnlyList<KnowledgeDocument>> ListAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<KnowledgeDocument>>([]);
+        public Task<KnowledgeDocument> ImportAsync(string filePath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<KnowledgeHit>> SearchAsync(string query, int limit = 5, CancellationToken cancellationToken = default)
+        {
+            LastQuery = query;
+            return Task.FromResult<IReadOnlyList<KnowledgeHit>>(hits.Take(limit).ToArray());
+        }
+        public Task<bool> DeleteAsync(string documentId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task BackupAsync(string destination, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<int> RestoreAsync(string backupPath, CancellationToken cancellationToken = default) => Task.FromResult(0);
+    }
 
     private sealed class DelegateHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> execute) : HttpMessageHandler
     {

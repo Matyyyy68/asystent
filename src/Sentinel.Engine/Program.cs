@@ -511,6 +511,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var aiSettings = settings with { UseLocalAI = request.GetProperty("useLocalAI").GetBoolean(),
                     LocalAIEndpoint = request.GetProperty("endpoint").GetString() ?? "",
                     LocalAIModel = request.GetProperty("model").GetString() ?? "",
+                    LocalAIEmbeddingModel = request.TryGetProperty("embeddingModel", out var embeddingModelElement) && embeddingModelElement.ValueKind == JsonValueKind.String
+                        ? embeddingModelElement.GetString() ?? "" : settings.LocalAIEmbeddingModel,
                     LocalAITimeoutSeconds = request.TryGetProperty("timeoutSeconds", out var timeoutSeconds) ? timeoutSeconds.GetInt32() : settings.LocalAITimeoutSeconds };
                 await store.SaveSettingsAsync(aiSettings);
                 settings = aiSettings;
@@ -585,7 +587,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var context = new AnalysisContext("Ręczna analiza", text, observedAt,
                     string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url));
                 var assessment = await orchestrator.AnalyzeAsync(context, settings.UseLocalAI, settings.LocalAIEndpoint,
-                    settings.LocalAIModel, settings.LocalAITimeoutSeconds);
+                    settings.LocalAIModel, settings.LocalAIEmbeddingModel, settings.LocalAITimeoutSeconds);
                 if (Uri.TryCreate(url, UriKind.Absolute, out var target) && target.Scheme is "http" or "https" && reputation.Contains(target.IdnHost, DateTimeOffset.UtcNow))
                     assessment = assessment with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
                         Indicators = assessment.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray(),

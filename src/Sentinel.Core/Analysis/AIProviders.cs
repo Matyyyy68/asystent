@@ -30,8 +30,14 @@ public interface IAIProvider
         IReadOnlyList<KnowledgeHit> sources, CancellationToken cancellationToken = default);
 }
 
+public interface ITextEmbeddingProvider
+{
+    Task<IReadOnlyList<float[]>> EmbedAsync(string endpoint, string model, IReadOnlyList<string> inputs,
+        CancellationToken cancellationToken = default);
+}
+
 /// <summary>Ollama chat client restricted to loopback. It never follows remote endpoints or executes model tools.</summary>
-public sealed class OllamaLocalProvider(HttpClient httpClient) : IAIProvider
+public sealed class OllamaLocalProvider(HttpClient httpClient) : IAIProvider, ITextEmbeddingProvider
 {
     private const int MaxResponseBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -62,6 +68,44 @@ public sealed class OllamaLocalProvider(HttpClient httpClient) : IAIProvider
             long? size = item.TryGetProperty("size", out var sizeElement) && sizeElement.TryGetInt64(out var sizeValue) ? sizeValue : null;
             string? ReadDetail(string property) => item.TryGetProperty("details", out var details) && details.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
             result.Add(new(name, size, ReadDetail("family"), ReadDetail("parameter_size"), ReadDetail("quantization_level")));
+        }
+        return result;
+    }
+
+    public async Task<IReadOnlyList<float[]>> EmbedAsync(string endpoint, string model, IReadOnlyList<string> inputs,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+        var baseUri = ValidateEndpoint(endpoint);
+        if (string.IsNullOrWhiteSpace(model) || model.Length > 160 || model.Any(char.IsControl))
+            throw new ArgumentException("Wybierz nazwę lokalnego modelu embeddingów.", nameof(model));
+        if (inputs.Count is < 1 or > 21 || inputs.Any(text => text is null || text.Length > 4000 || text.Any(char.IsControl)) ||
+            inputs.Sum(text => text.Length) > 40_000)
+            throw new ArgumentException("Liczba lub rozmiar tekstów do osadzenia przekracza limit.", nameof(inputs));
+
+        using var response = await httpClient.PostAsJsonAsync(new Uri(baseUri, "api/embed"), new { model, input = inputs }, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var json = await ReadBoundedAsync(response, MaxResponseBytes, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        if (!document.RootElement.TryGetProperty("embeddings", out var vectors) || vectors.ValueKind != JsonValueKind.Array || vectors.GetArrayLength() != inputs.Count)
+            throw new InvalidDataException("Lokalny model embeddingów zwrócił nieprawidłową liczbę wektorów.");
+        var result = new List<float[]>(inputs.Count);
+        int? dimensions = null;
+        foreach (var vectorElement in vectors.EnumerateArray())
+        {
+            if (vectorElement.ValueKind != JsonValueKind.Array || vectorElement.GetArrayLength() is < 1 or > 4096 ||
+                dimensions is { } expected && vectorElement.GetArrayLength() != expected)
+                throw new InvalidDataException("Lokalny model embeddingów zwrócił niezgodne wymiary wektorów.");
+            dimensions ??= vectorElement.GetArrayLength();
+            var vector = new float[vectorElement.GetArrayLength()];
+            var index = 0;
+            foreach (var component in vectorElement.EnumerateArray())
+            {
+                if (!component.TryGetSingle(out var value) || !float.IsFinite(value))
+                    throw new InvalidDataException("Lokalny model embeddingów zwrócił niefinitywną składową.");
+                vector[index++] = value;
+            }
+            result.Add(vector);
         }
         return result;
     }
@@ -168,6 +212,10 @@ public sealed class AnalysisOrchestrator(ThreatAnalysisEngine rules, IAIProvider
 {
     public async Task<ThreatAssessment> AnalyzeAsync(AnalysisContext context, bool useLocalAI, string endpoint, string model,
         int timeoutSeconds = 30, CancellationToken cancellationToken = default)
+        => await AnalyzeAsync(context, useLocalAI, endpoint, model, embeddingModel: null, timeoutSeconds, cancellationToken);
+
+    public async Task<ThreatAssessment> AnalyzeAsync(AnalysisContext context, bool useLocalAI, string endpoint, string model,
+        string? embeddingModel, int timeoutSeconds = 30, CancellationToken cancellationToken = default)
     {
         var ruleResult = rules.Analyze(context);
         if (!useLocalAI || string.IsNullOrWhiteSpace(model)) return ruleResult;
@@ -177,7 +225,28 @@ public sealed class AnalysisOrchestrator(ThreatAnalysisEngine rules, IAIProvider
         try
         {
             var searchText = PrivacyFilter.Redact(context.Text);
-            var sources = await knowledge.SearchAsync(searchText, 5, timeout.Token);
+            if (searchText.Length > 4000) searchText = searchText[..4000];
+            var candidates = await knowledge.SearchAsync(searchText, string.IsNullOrWhiteSpace(embeddingModel) ? 5 : 20, timeout.Token);
+            var semanticFallback = false;
+            IReadOnlyList<KnowledgeHit> sources = candidates.Take(5).ToArray();
+            if (!string.IsNullOrWhiteSpace(embeddingModel) && candidates.Count > 0)
+            {
+                if (provider is ITextEmbeddingProvider embeddings)
+                {
+                    try
+                    {
+                        var inputs = new[] { searchText }.Concat(candidates.Select(hit => hit.Excerpt)).ToArray();
+                        var vectors = await embeddings.EmbedAsync(endpoint, embeddingModel, inputs, timeout.Token);
+                        sources = candidates.Select((hit, index) => (Hit: hit, Score: CosineSimilarity(vectors[0], vectors[index + 1])))
+                            .OrderByDescending(item => item.Score).ThenBy(item => item.Hit.Rank).Take(5).Select(item => item.Hit).ToArray();
+                    }
+                    catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or InvalidDataException or ArgumentException or System.Text.Json.JsonException)
+                    {
+                        semanticFallback = true;
+                    }
+                }
+                else semanticFallback = true;
+            }
             var conclusion = await provider.AnalyzeAsync(endpoint, model, context, sources, timeout.Token);
             var indicators = ruleResult.Indicators.Concat(conclusion.Indicators.Select((indicator, index) =>
                 new ThreatIndicator($"ai.context.{index}", PrivacyFilter.Redact(indicator.Description), 0, conclusion.Category,
@@ -188,6 +257,8 @@ public sealed class AnalysisOrchestrator(ThreatAnalysisEngine rules, IAIProvider
             var category = ruleResult.Risk >= RiskLevel.Moderate ? ruleResult.Category : conclusion.Category;
             var uncertainties = ruleResult.Uncertainties.Concat(conclusion.Uncertainties.Select(PrivacyFilter.Redact))
                 .Append("Wynik lokalnego modelu nie jest skalibrowanym prawdopodobieństwem; system nie potwierdza bezpieczeństwa.").Distinct().Take(12).ToArray();
+            if (semanticFallback)
+                uncertainties = uncertainties.Append("Semantyczne porządkowanie lokalnych źródeł było niedostępne; użyto dopasowania leksykalnego.").Distinct().Take(12).ToArray();
             var recommendations = ruleResult.Recommendations.Concat(conclusion.Recommendations.Select(PrivacyFilter.Redact)).Distinct().Take(8).ToArray();
             var explanation = string.Join(" ", new[] { ruleResult.Explanation, PrivacyFilter.Redact(conclusion.Explanation) }.Where(text => !string.IsNullOrWhiteSpace(text)));
             if (sources.Count > 0) uncertainties = uncertainties.Append($"Lokalne źródła wiedzy: {string.Join(", ", sources.Select(source => PrivacyFilter.Redact(source.SourceName)).Distinct().Take(5))}.").ToArray();
@@ -198,5 +269,19 @@ public sealed class AnalysisOrchestrator(ThreatAnalysisEngine rules, IAIProvider
         {
             return ruleResult with { Uncertainties = ruleResult.Uncertainties.Append("Lokalny model AI jest niedostępny lub zwrócił nieprawidłową odpowiedź; użyto wyłącznie reguł.").ToArray() };
         }
+    }
+
+    private static double CosineSimilarity(IReadOnlyList<float> left, IReadOnlyList<float> right)
+    {
+        if (left.Count == 0 || left.Count != right.Count) throw new InvalidDataException("Wymiary embeddingów nie są zgodne.");
+        double dot = 0, leftSquared = 0, rightSquared = 0;
+        for (var index = 0; index < left.Count; index++)
+        {
+            dot += left[index] * right[index];
+            leftSquared += left[index] * left[index];
+            rightSquared += right[index] * right[index];
+        }
+        if (leftSquared <= 0 || rightSquared <= 0) return 0;
+        return dot / Math.Sqrt(leftSquared * rightSquared);
     }
 }

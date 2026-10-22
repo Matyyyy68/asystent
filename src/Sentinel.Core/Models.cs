@@ -32,7 +32,8 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     int DnsPollIntervalSeconds = 15,
     bool MonitorNetworkConnections = false,
     bool MonitorDownloadedFiles = false,
-    bool MonitorPersistenceChanges = false);
+    bool MonitorPersistenceChanges = false,
+    string LocalAIEmbeddingModel = "");
 public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys,
     bool TcpTruncated = false, bool UdpTruncated = false);
 public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false);
