@@ -787,6 +787,8 @@ internal sealed class SetupWizard : Form
         startMenu.Location = new Point(36, 185); desktop.Location = new Point(36, 223); start.Location = new Point(36, 261);
         launchAfter.Location = new Point(36, 299); summary.Location = new Point(34, 178);
         Controls.AddRange([heading, step, intro, pathLabel, folder, browse, spaceInfo, startMenu, desktop, start, launchAfter, summary, status, errorDetails, progress, illustration, back, next, cancel, openLog]);
+        AcceptButton = next;
+        CancelButton = cancel;
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); RefreshSpaceInfo(); } };
         next.Click += async (_, _) => await MoveNextAsync();
         back.Click += (_, _) => MoveBack();
@@ -1041,6 +1043,8 @@ internal sealed class SetupWizard : Form
     internal static void ValidateVisualStates()
     {
         using var wizard = new SetupWizard();
+        if (!ReferenceEquals(wizard.AcceptButton, wizard.next) || !ReferenceEquals(wizard.CancelButton, wizard.cancel))
+            throw new InvalidDataException("Kreator nie udostępnia klawiaturowych przycisków Dalej i Anuluj.");
         wizard.lastError = "Kontrolowany błąd testowy instalatora.";
         foreach (var page in Enum.GetValues<WizardPage>())
         {
