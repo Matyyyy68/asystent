@@ -30,6 +30,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.enterprise.variant, 'User');
   assert.equal(initialStatus.result.enterprise.paired, false);
   assert.equal(initialStatus.result.settings.monitorNetworkConnections, false, 'continuous TCP monitoring must default to off');
+  assert.deepEqual(initialStatus.result.ipReputation, { networkCount: 0, importedAt: null }, 'IP reputation must start empty and local');
   assert.equal(initialStatus.result.settings.monitorDownloadedFiles, false, 'Downloads monitoring must default to off');
   assert.equal(initialStatus.result.settings.monitorPersistenceChanges, false, 'Windows persistence monitoring must default to off');
   assert.equal(initialStatus.result.persistence, 'Monitor zmian autostartu jest wyłączony.');
@@ -73,6 +74,17 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(matchedFile.ok, true, matchedFile.error); assert.equal(matchedFile.result.reputation.feedImported, true);
   assert.equal(matchedFile.result.reputation.match, true);
   assert.match(matchedFile.result.reputation.explanation, /nie zostało niezależnie zweryfikowane/);
+  const ipFeedPath = path.join(root, 'ip-addresses.txt');
+  writeFileSync(ipFeedPath, '192.0.2.17\n198.51.100.0/24 # TEST-NET fixture\n2001:db8::/32\n');
+  const importedIpFeed = await call('ipReputationImport', { path: ipFeedPath });
+  assert.equal(importedIpFeed.ok, true, importedIpFeed.error);
+  assert.equal(importedIpFeed.result.networkCount, 3);
+  assert.ok(Number.isFinite(Date.parse(importedIpFeed.result.importedAt)));
+  const invalidIpFeedPath = path.join(root, 'invalid-ip-addresses.txt'); writeFileSync(invalidIpFeedPath, '198.51.100.0/129\n');
+  assert.equal((await call('ipReputationImport', { path: invalidIpFeedPath })).ok, false,
+    'invalid IP/CIDR import must be rejected through Engine IPC');
+  assert.equal((await call('status')).result.ipReputation.networkCount, 3,
+    'rejected IP/CIDR import must preserve the last accepted feed');
   assert.equal((await call('aiSettings', { useLocalAI: true, endpoint: 'http://example.com:11434', model: 'remote' })).ok, false);
   assert.equal((await call('status')).result.settings.useLocalAI, false);
   ollamaServer = createServer((request, response) => {
@@ -158,6 +170,9 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   if (process.argv.includes('--tcp-live')) {
     const address = Object.values(os.networkInterfaces()).flat().find(item => item.family === 'IPv4' && !item.internal && !item.address.startsWith('169.254.'))?.address;
     assert.ok(address, 'a non-loopback IPv4 interface is required for the controlled TCP monitor test');
+    const liveIpFeedPath = path.join(root, 'live-ip-address.txt'); writeFileSync(liveIpFeedPath, `${address}/32\n`);
+    const liveIpFeed = await call('ipReputationImport', { path: liveIpFeedPath });
+    assert.equal(liveIpFeed.ok, true, liveIpFeed.error);
     tcpMonitorServer = net.createServer(socket => socket.on('data', () => {}));
     await new Promise((resolve, reject) => { tcpMonitorServer.once('error', reject); tcpMonitorServer.listen(0, address, resolve); });
     tcpMonitorClient = net.createConnection({ host: address, port: tcpMonitorServer.address().port });
@@ -165,10 +180,13 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     await new Promise(resolve => setTimeout(resolve, 10_500));
     const tcpDelta = await call('collect'); assert.equal(tcpDelta.ok, true, tcpDelta.error);
     const tcpHistory = (await call('history')).result;
-    assert.ok(tcpHistory.some(event => event.source === 'tcp-connection-snapshot' && event.explanation.includes(address)),
+    const matchedTcpEvent = tcpHistory.find(event => event.source === 'tcp-connection-snapshot' && event.explanation.includes(address));
+    assert.ok(matchedTcpEvent,
       'enabled monitor must persist the controlled non-loopback TCP connection with its remote IP');
+    assert.equal(matchedTcpEvent.risk, 'High', 'new TCP connection matching the imported feed must raise a local high-risk alert');
+    assert.ok(matchedTcpEvent.evidenceCodes.includes('reputation.ip-feed.match'));
     tcpMonitorClient.end(); await new Promise(resolve => tcpMonitorServer.close(resolve)); tcpMonitorClient = null; tcpMonitorServer = null;
-    console.log('PASS: opt-in TCP connection delta recorded the controlled non-loopback listener');
+    console.log('PASS: opt-in TCP monitor matched the controlled non-loopback connection against the imported local IP feed');
   }
   await call('pause', { paused: true });
   const tcpPaused = await call('collect'); assert.equal(tcpPaused.ok, true, tcpPaused.error);
