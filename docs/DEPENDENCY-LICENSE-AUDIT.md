@@ -1,8 +1,10 @@
 # Inwentaryzacja deklaracji licencji zależności
 
-Stan na 2026-10-22. .NET: lista pochodzi z plików `project.assets.json` bieżącego checkoutu dla klienta, serwera, instalatora i testów; sprawdzono lokalne metadane NuGet (`.nuspec`). JavaScript: sprawdzono `package.json` zainstalowanych zależności w `desktop/node_modules` i `website/node_modules`. Wyniki są deklaracjami wydawców, nie opinią prawną ani pełną oceną warunków redystrybucji.
+Stan na 2026-10-22. .NET: lista pochodzi z plików `project.assets.json` bieżącego checkoutu dla klienta, serwera, instalatora i testów; sprawdzono lokalne metadane NuGet (`.nuspec`). JavaScript: lista par pakiet/wydanie i deklaracji pochodzi z `desktop/package-lock.json` oraz `website/package-lock.json`; obecność na dysku sprawdzono względem odpowiadających im ścieżek w `node_modules`. Wyniki są deklaracjami wydawców, nie opinią prawną ani pełną oceną warunków redystrybucji.
 
-Zebrano deklaracje dla 263 unikalnych par pakiet/wydanie: 23 NuGet oraz 240 zainstalowanych npm. Lockfile npm zawierają 290 unikalnych par pakiet/wydanie; 50 nie jest zainstalowanych w bieżących folderach `node_modules` (m.in. warianty platformowe) i ich deklaracje nie są w tym raporcie zweryfikowane. Wszystkie 240 zainstalowanych pakietów npm mają pole licencji w manifeście. Raport nie obejmuje treści całych paczek binarnych, narzędzi CI ani transitive system runtimes.
+Raport npm można odtworzyć poleceniem `pwsh -File scripts/audit-dependency-licenses.ps1`; skrypt zachowuje wiersze NuGet z istniejącego CSV, wykrywa brakujące i sprzeczne deklaracje oraz odróżnia wpisy lockfile od obecnych lokalnie pakietów.
+
+Zebrano deklaracje dla 313 unikalnych par pakiet/wydanie: 23 NuGet oraz 290 npm zapisanych w lockfile. Wszystkie 290 wpisów lockfile zawierają deklarację licencji; 240 par odpowiada paczkom obecnym lokalnie w `node_modules`, a 50 nie jest zainstalowanych w bieżącym środowisku (m.in. warianty platformowe). CSV oznacza te dwa stany osobno. Raport nie obejmuje treści całych paczek binarnych, narzędzi CI ani transitive system runtimes.
 
 ## npm / Electron
 
@@ -53,4 +55,4 @@ Deklaracje inne niż MIT/ISC/Apache-2.0/BSD wymagają ręcznego przeglądu warun
 
 - `xunit.abstractions 2.0.3` — nuspec wskazuje [plik licencji projektu XUnit](https://raw.githubusercontent.com/xunit/xunit/master/license.txt), a nie wyrażenie SPDX. Plik opisuje Apache-2.0 jako licencję ogólną i zawiera wyjątki MIT dla dwóch importowanych komponentów.
 
-Właściciel nie wskazał jeszcze licencji samego Sentinel AI. Nie dodano pliku `LICENSE`; decyzja produktu i zgodność całego zestawu źródeł/redystrybucji pozostają otwarte. Pozostają ręczny przegląd deklaracji nietypowych, 49 npm pakietów zapisanych w lockfile, ale nieobecnych lokalnie, oraz dołączonych narzędzi.
+Właściciel nie wskazał jeszcze licencji samego Sentinel AI. Nie dodano pliku `LICENSE`; decyzja produktu i zgodność całego zestawu źródeł/redystrybucji pozostają otwarte. Pozostają ręczny przegląd deklaracji nietypowych, warunków redystrybucji 50 pakietów npm nieobecnych lokalnie oraz dołączonych narzędzi.

@@ -28,7 +28,7 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 - Token Enterprise jest chroniony Windows DPAPI; nowszy kod `main` odnawia go automatycznie po 90 dniach przy aktywnej zgodzie i synchronizacji. Ta funkcja nie znajduje się jeszcze w publicznym instalatorze v0.15.38.
 - Bazy SQLite nie są szyfrowane. Historia nie zapisuje surowej treści ani pełnych URL-i, ale lokalne metadane, ustawienia i ścieżki monitorowanych plików mogą być dostępne dla konta użytkownika.
 - W repozytorium nie ma pliku LICENSE. Właściciel musi wskazać licencję źródeł i warunki redystrybucji; nie zostały ustalone w jego imieniu.
-- Inwentaryzacja deklaracji licencji obejmuje 23 pary NuGet i 240 zainstalowanych npm. Lockfile zawierają jeszcze 50 npm par pakiet/wydanie nieobecnych lokalnie; deklaracje nietypowe wymagają ręcznego przeglądu, a pełna zgodność redystrybucji nie została ustalona. Szczegóły i CSV: [inwentaryzacja licencji zależności](DEPENDENCY-LICENSE-AUDIT.md).
+- Inwentaryzacja obejmuje 23 pary NuGet oraz wszystkie 290 par npm z lockfile; 240 jest zainstalowanych lokalnie, a 50 lockfile-only. Każdy wpis npm ma deklarację w lockfile, ale warunki redystrybucji 50 pakietów niedostępnych lokalnie i deklaracje nietypowe wymagają ręcznego przeglądu. Pełna zgodność redystrybucji nie została ustalona. Szczegóły i CSV: [inwentaryzacja licencji zależności](DEPENDENCY-LICENSE-AUDIT.md).
 
 ## Ostatnia walidacja źródła
 
