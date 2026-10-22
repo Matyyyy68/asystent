@@ -17,6 +17,8 @@ try {
   if ($LASTEXITCODE) { throw 'Application build failed.' }
   node.exe ../scripts/build-npm-third-party-notices.mjs
   if ($LASTEXITCODE) { throw 'Generating npm third-party notices failed.' }
+  pwsh -NoProfile -File ../scripts/build-nuget-third-party-notices.ps1
+  if ($LASTEXITCODE) { throw 'Generating NuGet and .NET third-party notices failed.' }
   foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel')) {
     if (!(Test-Path (Join-Path $repo "desktop/dist/media/illustrations/installer/$asset.png"))) {
       throw "Brak ilustracji instalatora w paczce aplikacji: $asset.png"
@@ -30,6 +32,13 @@ try {
       !(Select-String -Path $npmNotices -Pattern 'ISC License' -Quiet) -or
       !(Select-String -Path $npmNotices -Pattern 'MIT License' -Quiet)) {
     throw 'npm runtime license notices are missing from the packaged application.'
+  }
+  $nugetNotices = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/nuget-runtime.txt'
+  $dotnetNotices = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/dotnet/ThirdPartyNotices.txt'
+  if (!(Test-Path $nugetNotices) -or !(Select-String -Path $nugetNotices -Pattern 'Microsoft.Data.Sqlite 10.0.13' -Quiet) -or
+      !(Select-String -Path $nugetNotices -Pattern 'SQLitePCLRaw.lib.e_sqlite3 2.1.13' -Quiet) -or
+      !(Test-Path $dotnetNotices) -or !(Select-String -Path $dotnetNotices -Pattern 'License notice for Unicode data' -Quiet)) {
+    throw '.NET runtime or NuGet license notices are missing from the packaged application.'
   }
   $pdfPigLicense = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/PdfPig-LICENSE.txt'
   if (!(Test-Path $pdfPigLicense) -or !(Select-String -Path $pdfPigLicense -Pattern 'Apache License' -Quiet)) {
