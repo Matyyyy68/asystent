@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Monitor TCP po restarcie silnika odtwarza korelację procesu z lokalnych startów z ostatnich 60 s; pauza czyści mapę. Test regresyjny sprawdza restart między startem procesu a połączeniem. Commit `2417f24`: lokalne testy .NET 233/233 bez pominięć, Engine IPC, Windows DNS/TCP/UDP, desktop 10/10, `npm audit` 0, UI production build i installer self-test PASS. Nieopublikowany instalator v0.15.38: SHA-256 `3DA6DADE0E90801785517D3C55540334116EC0A1EF361357F347CA39983C9E91`; Windows CI `39775921333` nadal w toku.
+
 - Monitor start zdarzenia zapisuje dostępny lokalnie obraz pliku. Ograniczona kolejka (32) oblicza SHA-256 plików do 256 MiB, sprawdza Authenticode i porównuje digest z lokalnym feedem; oczekujące inspekcje wracają po restarcie. UI pokazuje wynik, a ścieżki i hashe pozostają poza eksportami JSON/CSV i Enterprise.
 - Ręczna analiza i rozszerzenie przeglądarki scalają teraz powtarzające się ostrzeżenia URL tylko przy zgodnym hashu hosta, identycznych kodach reguł URL, poziomie ryzyka i oknie 60 s. Każde źródło zachowuje własne ID, czas i dowody; surowy host i skrót pozostają poza eksportem. Testy Store i BrowserIntegration potwierdzają wymagane warunki i redakcję. Pełny `scripts/build-user.ps1 -Installer` PASS: .NET 230/230, Electron 10/10, `npm audit` 0, Engine IPC, Windows DNS/TCP/UDP, UI produkcyjny i installer self-test. Lokalny, nieopublikowany v0.15.38: 281241465 B, SHA-256 `4A4C233C20F1BDE7A3624D78B68415F7B1A0F8820B340DA8C2EE29A4FDEF775A`.
 
