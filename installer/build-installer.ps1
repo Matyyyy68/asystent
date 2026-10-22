@@ -15,6 +15,8 @@ Push-Location (Join-Path $repo 'desktop')
 try {
   npm.cmd run build
   if ($LASTEXITCODE) { throw 'Application build failed.' }
+  node.exe ../scripts/build-npm-third-party-notices.mjs
+  if ($LASTEXITCODE) { throw 'Generating npm third-party notices failed.' }
   foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel')) {
     if (!(Test-Path (Join-Path $repo "desktop/dist/media/illustrations/installer/$asset.png"))) {
       throw "Brak ilustracji instalatora w paczce aplikacji: $asset.png"
@@ -22,6 +24,13 @@ try {
   }
   npx.cmd electron-builder --win dir
   if ($LASTEXITCODE) { throw 'Electron packaging failed.' }
+  $npmNotices = Join-Path $unpacked 'resources/ThirdPartyNotices/npm-runtime.txt'
+  if (!(Test-Path $npmNotices) -or !(Select-String -Path $npmNotices -Pattern 'lucide-react@' -Quiet) -or
+      !(Select-String -Path $npmNotices -Pattern 'react-dom@' -Quiet) -or
+      !(Select-String -Path $npmNotices -Pattern 'ISC License' -Quiet) -or
+      !(Select-String -Path $npmNotices -Pattern 'MIT License' -Quiet)) {
+    throw 'npm runtime license notices are missing from the packaged application.'
+  }
   $pdfPigLicense = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/PdfPig-LICENSE.txt'
   if (!(Test-Path $pdfPigLicense) -or !(Select-String -Path $pdfPigLicense -Pattern 'Apache License' -Quiet)) {
     throw 'PdfPig license notice is missing from the packaged application.'

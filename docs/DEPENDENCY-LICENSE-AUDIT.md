@@ -24,6 +24,12 @@ Zebrano deklaracje dla 313 unikalnych par pakiet/wydanie: 23 NuGet oraz 290 npm 
 
 Deklaracje inne niż MIT/ISC/Apache-2.0/BSD wymagają ręcznego przeglądu warunków, zwłaszcza przy redystrybucji: `chownr@3.0.0`, `isexe@3.1.5` i `4.0.0`, `minimatch@10.2.6`, `minipass@7.1.3`, `sax@1.6.1`, `tar@7.5.22`, `yallist@5.0.0` (BlueOak); `utf8-byte-length@1.0.5` (WTFPL OR MIT); `tslib@2.8.1` (0BSD); `argparse@2.0.1` (Python-2.0); `truncate-utf8-bytes@1.0.2` (WTFPL); `sanitize-filename@1.6.4` (WTFPL OR ISC). Zestaw deklaracji zależności zainstalowanych jest dostępny w [CSV](dependency-license-inventory.csv).
 
+### Zawartość instalatora Windows
+
+Inwentarz 290 wpisów npm łączy aplikację z narzędziami deweloperskimi i buildowymi strony. Porównanie `desktop/package-lock.json` z polem `dev` wykazało cztery zależności npm aplikacji oznaczone jako produkcyjne: `lucide-react@0.468.0` (ISC), `react@19.3.1` (MIT), `react-dom@19.3.1` (MIT) i `scheduler@0.28.0` (MIT). Ich kod trafia do zbudowanego UI. `scripts/build-npm-third-party-notices.mjs` odczytuje bieżący lockfile i pliki licencji pakietów, a instalator dołącza pełne teksty do `resources/ThirdPartyNotices/npm-runtime.txt`; budowa kończy się błędem, jeśli nie może potwierdzić wersji lub znaleźć dokładnie jednego pliku licencji dla zależności runtime.
+
+Electron jest zależnością buildową w npm, lecz jego runtime jest osadzany przez electron-builder. W gotowym katalogu Windows zweryfikowano `LICENSE.electron.txt` i `LICENSES.chromium.html`. Silnik zawiera osobny tekst licencji PdfPig w `resources/engine/THIRD-PARTY-LICENSES/`; nagłówki licencyjne Mozilla Public Suffix List pozostają w danych PSL. Pozostałe pakiety npm z lockfile nie są z tego powodu automatycznie traktowane jako redystrybuowane. Raport zakresu instalatora nadal nie zastępuje przeglądu pełnego self-contained .NET runtime, wszystkich transitive NuGet zależności ani licencji samego produktu.
+
 ## MIT
 
 - `Microsoft.CodeCoverage 18.11.0`
@@ -55,4 +61,4 @@ Deklaracje inne niż MIT/ISC/Apache-2.0/BSD wymagają ręcznego przeglądu warun
 
 - `xunit.abstractions 2.0.3` — nuspec wskazuje [plik licencji projektu XUnit](https://raw.githubusercontent.com/xunit/xunit/master/license.txt), a nie wyrażenie SPDX. Plik opisuje Apache-2.0 jako licencję ogólną i zawiera wyjątki MIT dla dwóch importowanych komponentów.
 
-Właściciel nie wskazał jeszcze licencji samego Sentinel AI. Nie dodano pliku `LICENSE`; decyzja produktu i zgodność całego zestawu źródeł/redystrybucji pozostają otwarte. Pozostają ręczny przegląd deklaracji nietypowych, warunków redystrybucji 50 pakietów npm nieobecnych lokalnie oraz dołączonych narzędzi.
+Właściciel nie wskazał jeszcze licencji samego Sentinel AI. Nie dodano pliku `LICENSE`; decyzja produktu i zgodność całego zestawu źródeł/redystrybucji pozostają otwarte. Pozostają ręczny przegląd deklaracji nietypowych, faktycznie redystrybuowanych zależności NuGet/.NET i dołączonych narzędzi. 50 wpisów npm nieobecnych lokalnie wymaga dalszego sprawdzenia tylko wtedy, gdy dany pakiet trafia do konkretnego artefaktu; sam brak katalogu w `node_modules` nie dowodzi redystrybucji.

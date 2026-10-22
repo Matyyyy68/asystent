@@ -47,6 +47,10 @@
       {
         "from": "../browser-extension",
         "to": "BrowserExtension"
+      },
+      {
+        "from": "../artifacts/third-party-notices.txt",
+        "to": "ThirdPartyNotices/npm-runtime.txt"
       }
     ],
     "win": {
