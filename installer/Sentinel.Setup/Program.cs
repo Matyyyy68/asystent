@@ -21,6 +21,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase)) return IntegrationTest();
         if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase)) return SelfTest();
         if (args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase))
         {
@@ -32,6 +33,76 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         Application.Run(new SetupWizard());
         return 0;
+    }
+
+    private static int IntegrationTest()
+    {
+        if (!OperatingSystem.IsWindows()) return 2;
+        ApplicationConfiguration.Initialize();
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs", ".SentinelAI-Integration-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var uninstallKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI");
+            using (uninstallKey)
+                if (uninstallKey is not null) throw new InvalidOperationException("Integration test refused: a Sentinel AI installation is already registered.");
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
+                throw new InvalidOperationException("Integration test refused: a Sentinel AI autostart value already exists.");
+            foreach (var keyPath in new[]
+            {
+                @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck",
+                @"Software\Microsoft\Edge\NativeMessagingHosts\com.sentinelai.urlcheck"
+            })
+                using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+                    if (key is not null) throw new InvalidOperationException($"Integration test refused: Native Messaging key already exists ({keyPath}).");
+            var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
+            var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
+            if (File.Exists(startMenuLink) || File.Exists(desktopLink))
+                throw new InvalidOperationException("Integration test refused: a Sentinel AI shortcut already exists.");
+            if (Directory.Exists(root)) throw new IOException("Generated integration-test folder unexpectedly already exists.");
+
+            Log($"INTEGRATION_TEST_START target={root}");
+            Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
+                (_, _) => { }, CancellationToken.None);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            Uninstall(root);
+
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI") is not null)
+                throw new InvalidDataException("Uninstall registration remained after integration-test cleanup.");
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
+                throw new InvalidDataException("Autostart remained after integration-test cleanup.");
+            foreach (var keyPath in new[]
+            {
+                @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck",
+                @"Software\Microsoft\Edge\NativeMessagingHosts\com.sentinelai.urlcheck"
+            })
+                using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+                    if (key is not null) throw new InvalidDataException($"Native Messaging registration remained after cleanup ({keyPath}).");
+            if (File.Exists(startMenuLink) || File.Exists(desktopLink))
+                throw new InvalidDataException("A Sentinel AI shortcut remained after integration-test cleanup.");
+            using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
+            using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
+                foreach (var entry in archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)))
+                {
+                    var installedPath = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
+                    if (File.Exists(installedPath)) throw new InvalidDataException($"Uninstall left an application file: {entry.FullName}.");
+                }
+
+            Log("INTEGRATION_TEST_SUCCESS install=true verification=true uninstall=true registry=true nativeMessaging=true shortcuts=false autostart=false");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Log($"INTEGRATION_TEST_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
+            try
+            {
+                var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+                if (Directory.Exists(root) && string.Equals(Path.GetFullPath(registered ?? string.Empty), root, StringComparison.OrdinalIgnoreCase))
+                    Uninstall(root);
+            }
+            catch (Exception cleanupError) { Log($"INTEGRATION_TEST_CLEANUP_FAILED type={cleanupError.GetType().Name} message={Clean(cleanupError.Message)}"); }
+            return 1;
+        }
     }
 
     private static bool VerifyPayload(bool showErrors)
