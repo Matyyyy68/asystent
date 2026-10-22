@@ -39,7 +39,8 @@ public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionar
 public sealed record DownloadFileFingerprint(string Path, long Length, long LastWriteTicks);
 public sealed record DownloadMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, DownloadFileFingerprint> Files);
 public sealed record WindowsPersistenceFingerprint(string Key, string Source, string Fingerprint, bool WritableLocation);
-public sealed record WindowsPersistenceMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, WindowsPersistenceFingerprint> Entries);
+public sealed record WindowsPersistenceMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, WindowsPersistenceFingerprint> Entries,
+    bool ScheduledTasksInitialized = false);
 public interface IEventRepository
 {
     Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);

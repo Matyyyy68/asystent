@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Opt-in monitor trwałości Windows obejmuje teraz zaplanowane zadania odczytane przez `schtasks /query /xml`. XML, nazwy i komendy zostają w pamięci; SQLite v21 zapisuje hashowane ID/odciski oraz oddzielny stan cichego baseline'u. Przy odmowie źródła zachowuje poprzedni baseline i nadal przetwarza pozostałe źródła. Testy monitora 15/15 i live read-only przepływ dla 175 zadań PASS. Pełny build/installer PASS: .NET 254/254, Engine IPC, DNS/TCP/UDP, Electron 14/14, `npm audit` 0, UI i autotest instalatora. Testowy instalator nie jest wydaniem; SHA-256 `6306806E779C34BE695E0079D2B028212EE55A830748050ABEED4960C442D725`.
 - Reguły URL `2026.10.3` dodają umiarkowany sygnał, gdy ścieżka logowania/weryfikacji/płatności występuje razem ze złożonym URL. Ewaluacja offline 235 795 adresów PhiUSIIL (URL-only, bez otwierania adresów) zmieniła TP/FN z 117/100 828 do 2 068/98 877 przy 14 FP w obu pomiarach; recall nadal wynosi tylko 2,05% i nie jest to wynik produkcyjny. Zestaw nie jest dołączony; skrypt i ograniczenia opisuje `docs/DETECTION-EVALUATION.md`.
 - Dodatkowa walidacja Enterprise dla bieżącego kodu: `dotnet test server/Sentinel.Server.sln -c Release` 22/22, Release build bez ostrzeżeń, HTTP smoke na loopback PASS. Smoke objął auth/RBAC, polityki, konfigurację AI i zgodę, bazę wiedzy, zaproszenia/enrollment, heartbeat, audit i revoke.
 

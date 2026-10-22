@@ -222,6 +222,97 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task ScheduledTaskChangesAreDetectedWithoutPersistingNamesOrCommands()
+    {
+        var store = await CreateStore();
+        var registry = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
+        var taskXml = ScheduledTaskXml("\\Sentinel\\Updater", @"C:\Program Files\Sentinel\Updater.exe", "--initial");
+        var taskEntries = WindowsScheduledTaskSnapshotReader.ParseXml(taskXml);
+        Assert.Single(taskEntries);
+        Task<ScheduledTaskSnapshotCapture> CaptureTasks(CancellationToken _) => Task.FromResult(new ScheduledTaskSnapshotCapture(true, taskEntries, "odczytano 1 zadanie"));
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => registry, CaptureTasks, TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var initial = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(initial.ScheduledTasksInitialized, monitor.State);
+        Assert.Empty(await store.ReadAsync());
+
+        taskEntries = WindowsScheduledTaskSnapshotReader.ParseXml(ScheduledTaskXml("\\Sentinel\\Updater", @"C:\Users\Mateusz\AppData\Local\Temp\updater.exe", "--credential=secret-value"));
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var events = await store.ReadAsync();
+        var item = Assert.Single(events);
+        Assert.Equal("Zmiana zaplanowanego zadania Windows", item.Category);
+        Assert.Equal(RiskLevel.Low, item.Risk);
+        Assert.Contains("persistence.scheduled-task.changed", item.EvidenceCodes!);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = events, Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("Sentinel\\Updater", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("C:\\Users\\Mateusz", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("credential=secret-value", persisted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ScheduledTaskReadFailurePreservesItsBaselineAndStillDetectsOtherSources()
+    {
+        var store = await CreateStore();
+        var registry = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["registry-id"] = Entry("registry.user.run", "registry-before", false)
+        };
+        var taskEntries = WindowsScheduledTaskSnapshotReader.ParseXml(ScheduledTaskXml("\\Sentinel\\Task", @"C:\Program Files\Sentinel\Task.exe", ""));
+        var tasksAvailable = true;
+        Task<ScheduledTaskSnapshotCapture> CaptureTasks(CancellationToken _) => Task.FromResult(tasksAvailable
+            ? new ScheduledTaskSnapshotCapture(true, taskEntries, "odczytano 1 zadanie")
+            : new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "odmowa lub błąd źródła (kod 1)"));
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => registry, CaptureTasks, TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        tasksAvailable = false;
+        registry["registry-id"] = Entry("registry.user.run", "registry-after", false);
+        var recorded = await monitor.CollectAsync(store, enabled: true, paused: false);
+        Assert.True(recorded == 1, monitor.State);
+        var events = await store.ReadAsync();
+        Assert.Single(events);
+        Assert.Contains("persistence.user.run.changed", events[0].EvidenceCodes!);
+        Assert.DoesNotContain(events, item => item.EvidenceCodes!.Any(code => code.Contains("scheduled-task.removed", StringComparison.Ordinal)));
+        var snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Contains(snapshot.Entries.Values, item => item.Source == "scheduled.task");
+        Assert.Contains("odmowa lub błąd źródła", monitor.State, StringComparison.OrdinalIgnoreCase);
+
+        tasksAvailable = true;
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task ScheduledTaskReaderRejectsExternalEntityXml()
+    {
+        var xml = "<!DOCTYPE Tasks [<!ENTITY secret SYSTEM 'file:///C:/Windows/win.ini'>]><Task><RegistrationInfo><URI>&secret;</URI></RegistrationInfo></Task>";
+        Assert.Throws<System.Xml.XmlException>(() => WindowsScheduledTaskSnapshotReader.ParseXml(xml));
+    }
+
+    [Fact]
+    public async Task LiveReadOnlyScheduledTaskEnumerationWhenExplicitlyEnabled()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("SENTINEL_LIVE_TASKS"), "1", StringComparison.Ordinal)) return;
+        var result = await WindowsScheduledTaskSnapshotReader.CaptureAsync();
+        Assert.True(result.Available, result.Status);
+        Assert.InRange(result.Entries.Count, 1, 256);
+        var store = await CreateStore();
+        using var monitor = new WindowsPersistenceSnapshotMonitor(
+            () => new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+            WindowsScheduledTaskSnapshotReader.CaptureAsync, TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var baseline = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(baseline.ScheduledTasksInitialized);
+        Assert.Equal(result.Entries.Count, baseline.Entries.Values.Count(entry => entry.Source == "scheduled.task"));
+        Assert.All(baseline.Entries.Values.Where(entry => entry.Source == "scheduled.task"), entry =>
+        {
+            Assert.Matches("^scheduled\\.task:[A-F0-9]{64}$", entry.Key);
+            Assert.Matches("^[A-F0-9]{64}$", entry.Fingerprint);
+        });
+    }
+
+    [Fact]
     public async Task SchemaV19BaselineMigratesToExpandedSourceAllowlist()
     {
         var store = await CreateStore();
@@ -244,6 +335,9 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
 
     private static PersistenceSnapshotEntry Entry(string source, string value, bool writable)
         => new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))), writable);
+
+    private static string ScheduledTaskXml(string uri, string command, string arguments)
+        => $"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Task xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"><RegistrationInfo><URI>{System.Security.SecurityElement.Escape(uri)}</URI></RegistrationInfo><Actions><Exec><Command>{System.Security.SecurityElement.Escape(command)}</Command><Arguments>{System.Security.SecurityElement.Escape(arguments)}</Arguments></Exec></Actions></Task>";
 
     private async Task<LocalStore> CreateStore()
     {

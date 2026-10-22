@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Runtime.Versioning;
 using System.Text;
@@ -13,20 +14,29 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private const int MaximumEntries = 256;
     private const int MaximumEventsPerSample = 32;
     private readonly Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture;
+    private readonly Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks;
     private readonly TimeSpan minimumInterval;
-    private DateTimeOffset? lastAttempt;
+    private long? lastAttemptTimestamp;
     private bool? wasEnabled;
 
     public string State { get; private set; } = "Monitor zmian autostartu jest wyłączony.";
 
     public WindowsPersistenceSnapshotMonitor(TimeSpan? minimumInterval = null)
-        : this(CaptureSupportedPlatform, minimumInterval) { }
+        : this(CaptureSupportedPlatform, WindowsScheduledTaskSnapshotReader.CaptureAsync, minimumInterval) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
         TimeSpan? minimumInterval = null)
+        : this(capture, _ => Task.FromResult(new ScheduledTaskSnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "syntetyczne źródło bez zadań")), minimumInterval) { }
+
+    public WindowsPersistenceSnapshotMonitor(
+        Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
+        Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
+        TimeSpan? minimumInterval = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
+        this.captureScheduledTasks = captureScheduledTasks ?? throw new ArgumentNullException(nameof(captureScheduledTasks));
         this.minimumInterval = minimumInterval ?? TimeSpan.FromSeconds(30);
         if (this.minimumInterval < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minimumInterval));
     }
@@ -46,7 +56,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     return 0;
                 }
             }
-            lastAttempt = null;
+            lastAttemptTimestamp = null;
             wasEnabled = false;
             State = paused ? "Monitor zmian autostartu wstrzymany." : "Monitor zmian autostartu jest wyłączony.";
             return 0;
@@ -58,20 +68,19 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             return 0;
         }
 
-        var now = DateTimeOffset.UtcNow;
-        if (wasEnabled == true && lastAttempt is { } previous && now - previous < minimumInterval) return 0;
+        if (wasEnabled == true && lastAttemptTimestamp is { } previous && Stopwatch.GetElapsedTime(previous) < minimumInterval) return 0;
         wasEnabled = true;
-        lastAttempt = now;
+        lastAttemptTimestamp = Stopwatch.GetTimestamp();
 
-        IReadOnlyDictionary<string, PersistenceSnapshotEntry> snapshot;
-        try { snapshot = capture(); }
+        IReadOnlyDictionary<string, PersistenceSnapshotEntry> baseSnapshot;
+        try { baseSnapshot = capture(); }
         catch (Exception exception)
         {
             State = "Źródła autostartu Windows niedostępne: " + exception.GetType().Name;
             return 0;
         }
 
-        if (snapshot.Count > MaximumEntries)
+        if (baseSnapshot.Count > MaximumEntries)
         {
             State = $"Snapshot autostartu przekracza limit {MaximumEntries}; zmiany pominięto do następnej próbki.";
             return 0;
@@ -84,17 +93,72 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             State = "Nie można odczytać lokalnego baseline'u autostartu: " + exception.GetType().Name;
             return 0;
         }
+
+        ScheduledTaskSnapshotCapture scheduledTasks;
+        try { scheduledTasks = await captureScheduledTasks(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            scheduledTasks = new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                "źródło niedostępne (" + exception.GetType().Name + ")");
+        }
+        var currentSnapshot = baseSnapshot.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        var scheduledTaskStatus = scheduledTasks.Status;
+        if (scheduledTasks.Available)
+        {
+            var invalidTaskEntries = scheduledTasks.Entries.Any(pair => pair.Value.Source != "scheduled.task" || !pair.Key.StartsWith("scheduled.task:", StringComparison.Ordinal));
+            if (invalidTaskEntries || currentSnapshot.Count + scheduledTasks.Entries.Count > MaximumEntries)
+            {
+                scheduledTasks = new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                    invalidTaskEntries ? "snapshot ma nieprawidłowy format" : $"liczba źródeł przekracza limit {MaximumEntries}");
+                scheduledTaskStatus = scheduledTasks.Status;
+            }
+            else if (!stored.ScheduledTasksInitialized && stored.Initialized)
+            {
+                try
+                {
+                    await store.InitializeWindowsScheduledTaskSnapshotAsync(scheduledTasks.Entries
+                        .Select(pair => new WindowsPersistenceFingerprint(pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation)).ToArray(), cancellationToken).ConfigureAwait(false);
+                    stored = await store.ReadWindowsPersistenceMonitorSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    scheduledTasks = new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                        "nie można ustawić baseline'u (" + exception.GetType().Name + ")");
+                    scheduledTaskStatus = scheduledTasks.Status;
+                }
+            }
+        }
+
+        if (scheduledTasks.Available)
+        {
+            foreach (var pair in scheduledTasks.Entries) currentSnapshot[pair.Key] = pair.Value;
+        }
+        else
+        {
+            // A permission or source failure must not look like every scheduled task was removed.
+            foreach (var pair in stored.Entries.Where(pair => pair.Value.Source == "scheduled.task"))
+                currentSnapshot[pair.Key] = new(pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation);
+        }
+
+        var snapshot = (IReadOnlyDictionary<string, PersistenceSnapshotEntry>)currentSnapshot;
+        if (snapshot.Count > MaximumEntries)
+        {
+            State = $"Snapshot autostartu przekracza limit {MaximumEntries}; zmiany pominięto do następnej próbki.";
+            return 0;
+        }
+        var now = DateTimeOffset.UtcNow;
         var current = snapshot.ToDictionary(pair => pair.Key,
             pair => new WindowsPersistenceFingerprint(pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation), StringComparer.Ordinal);
         if (!stored.Initialized)
         {
-            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), cancellationToken); }
+            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), scheduledTasks.Available, cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 State = "Nie można ustawić lokalnego baseline'u autostartu: " + exception.GetType().Name;
                 return 0;
             }
-            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów.";
+            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}.";
             return 0;
         }
         var baseline = stored.Entries.ToDictionary(pair => pair.Key,
@@ -118,8 +182,13 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.runonce" => "HKLM RunOnce (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
+                "scheduled.task" => "zaplanowane zadanie Windows",
                 _ => "autostart Windows"
             };
+            var eventApplication = source == "scheduled.task" ? "Trwałość Windows · zaplanowane zadanie" : "Autostart Windows · " + sourceName;
+            var recommendation = source == "scheduled.task"
+                ? "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań."
+                : "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów.";
             var evidenceScope = source switch
             {
                 "registry.user.run" => "user.run",
@@ -130,14 +199,15 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.runonce" => "machine32.runonce",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
+                "scheduled.task" => "scheduled-task",
                 _ => "unknown"
             };
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
             if (suspicious) evidence.Add("persistence.target.user-writable-location");
             var item = new SecurityEvent(0, now, suspicious ? RiskLevel.Low : RiskLevel.Information,
-                "Zmiana autostartu Windows", "Autostart Windows · " + sourceName,
-                $"Wykryto, że {verb} wpis autostartu. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
-                "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów.",
+                source == "scheduled.task" ? "Zmiana zaplanowanego zadania Windows" : "Zmiana autostartu Windows", eventApplication,
+                $"Wykryto, że {verb} {(source == "scheduled.task" ? "zaplanowane zadanie" : "wpis autostartu")}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
+                recommendation,
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence);
             try { await store.CommitWindowsPersistenceChangeAsync(change.Key, change.Current is null ? null : current[change.Key], item, cancellationToken); }
@@ -160,8 +230,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
         var pending = GetChanges(baseline, snapshot).Count;
         State = pending > 0
-            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu."
-            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian.";
+            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}."
+            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}.";
         return recorded;
     }
 
@@ -292,7 +362,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         return source + ":" + stable;
     }
 
-    public void Dispose() { lastAttempt = null; }
+    public void Dispose() { lastAttemptTimestamp = null; }
 
     private enum PersistenceChangeKind { Added, Changed, Removed }
     private sealed record PersistenceChange(string Key, PersistenceChangeKind Kind,

@@ -96,7 +96,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 20) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 21) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -263,6 +263,17 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (v < 20)
         {
             await Execute(c, "BEGIN IMMEDIATE; CREATE TABLE windows_persistence_snapshot_v20(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','startup.user','startup.common')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v20(entry_key,source,fingerprint,writable_location) SELECT entry_key,CASE source WHEN 'registry.run' THEN 'registry.user.run' WHEN 'registry.runonce' THEN 'registry.user.runonce' WHEN 'startup.folder' THEN 'startup.user' END,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v20 RENAME TO windows_persistence_snapshot; PRAGMA user_version=20; COMMIT;", ct);
+        }
+        if (v < 21)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v21(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','startup.user','startup.common','scheduled.task')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v21(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v21 RENAME TO windows_persistence_snapshot;", ct);
+                await EnsureColumnAsync(c, "windows_persistence_monitor_metadata", "scheduled_tasks_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(scheduled_tasks_initialized IN (0,1))", ct);
+                await Execute(c, "PRAGMA user_version=21; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
@@ -617,8 +628,14 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<WindowsPersistenceMonitorSnapshot> ReadWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
     {
         await using var c = await Open(ct);
-        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized FROM windows_persistence_monitor_metadata WHERE id=1";
-        var initialized = Convert.ToInt32(await metadata.ExecuteScalarAsync(ct) ?? 0, CultureInfo.InvariantCulture) == 1;
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,scheduled_tasks_initialized FROM windows_persistence_monitor_metadata WHERE id=1";
+        bool initialized; bool scheduledTasksInitialized;
+        using (var metadataReader = await metadata.ExecuteReaderAsync(ct))
+        {
+            if (!await metadataReader.ReadAsync(ct)) return new(false, new Dictionary<string, WindowsPersistenceFingerprint>(StringComparer.Ordinal));
+            initialized = metadataReader.GetInt32(0) == 1;
+            scheduledTasksInitialized = metadataReader.GetInt32(1) == 1;
+        }
         using var query = c.CreateCommand(); query.CommandText = "SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot ORDER BY entry_key LIMIT 256";
         using var reader = await query.ExecuteReaderAsync(ct);
         var entries = new Dictionary<string, WindowsPersistenceFingerprint>(StringComparer.Ordinal);
@@ -628,15 +645,25 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             ValidateWindowsPersistenceFingerprint(entry);
             entries.Add(entry.Key, entry);
         }
-        return new(initialized, entries);
+        return new(initialized, entries, scheduledTasksInitialized);
     }
-    public async Task InitializeWindowsPersistenceMonitorSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, CancellationToken ct = default)
+    public async Task InitializeWindowsPersistenceMonitorSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries,
+        bool scheduledTasksInitialized = false, CancellationToken ct = default)
     {
         ValidateWindowsPersistenceFingerprints(entries);
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using (var clear = c.CreateCommand()) { clear.Transaction = transaction; clear.CommandText = "DELETE FROM windows_persistence_snapshot"; await clear.ExecuteNonQueryAsync(ct); }
         foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
-        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1,scheduled_tasks_initialized=$tasks WHERE id=1"; initialized.Parameters.AddWithValue("$tasks", scheduledTasksInitialized ? 1 : 0); await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task InitializeWindowsScheduledTaskSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, CancellationToken ct = default)
+    {
+        ValidateWindowsPersistenceFingerprints(entries);
+        if (entries.Any(entry => entry.Source != "scheduled.task")) throw new ArgumentException("Migawka zawiera nieprawidłowe źródło zadania.", nameof(entries));
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET scheduled_tasks_initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
         await transaction.CommitAsync(ct);
     }
     public async Task CommitWindowsPersistenceChangeAsync(string key, WindowsPersistenceFingerprint? current, SecurityEvent item, CancellationToken ct = default)
@@ -665,7 +692,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using var command = c.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "DELETE FROM windows_persistence_snapshot; UPDATE windows_persistence_monitor_metadata SET initialized=0 WHERE id=1";
+        command.CommandText = "DELETE FROM windows_persistence_snapshot; UPDATE windows_persistence_monitor_metadata SET initialized=0,scheduled_tasks_initialized=0 WHERE id=1";
         await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
     }
     private static void ValidateWindowsPersistenceFingerprints(IReadOnlyCollection<WindowsPersistenceFingerprint> entries)
@@ -680,7 +707,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         if (string.IsNullOrWhiteSpace(entry.Key) || entry.Key.Length > 100 ||
             entry.Source is not ("registry.user.run" or "registry.user.runonce" or "registry.machine64.run" or "registry.machine64.runonce" or
-                "registry.machine32.run" or "registry.machine32.runonce" or "startup.user" or "startup.common") ||
+                "registry.machine32.run" or "registry.machine32.runonce" or "startup.user" or "startup.common" or "scheduled.task") ||
             entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
             throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
     }
@@ -1240,7 +1267,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20 or 21))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -1256,9 +1283,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation')";
             if (backupVersion is 16 or 17 or 18)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations'" + (backupVersion >= 17 ? ",'enterprise_event_deferred'" : "") + ")";
-            if (backupVersion is 19 or 20)
+            if (backupVersion is 19 or 20 or 21)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata')";
-            var expectedTables = backupVersion is 19 or 20 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            var expectedTables = backupVersion is 19 or 20 or 21 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
