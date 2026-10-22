@@ -38,6 +38,16 @@ public sealed class UrlAnalyzer(DomainNames domains)
             pathAndQuery.Length >= 60 || pathAndQuery.Count(character => character == '/') >= 4;
         if (structurallyComplex && AuthenticationPath.IsMatch(pathAndQuery))
             Add("url.auth_structure", "Adres łączy ścieżkę logowania, weryfikacji lub płatności z dodatkową złożonością URL.", 3);
+
+        var hostLabels = host.Split('.');
+        var queryPairs = uri.Query.Length > 1 ? uri.Query.Count(character => character == '&') + 1 : 0;
+        var structuralDimensions = 0;
+        if (value.Length >= 75) structuralDimensions++;
+        if (host.Length >= 50 || hostLabels.Length >= 5 || host.Count(character => character == '-') >= 3) structuralDimensions++;
+        if (queryPairs >= 4 || pathAndQuery.Count(char.IsAsciiDigit) >= 6) structuralDimensions++;
+        if (uri.AbsolutePath.Count(character => character == '/') >= 4) structuralDimensions++;
+        if (structuralDimensions >= 3)
+            Add("url.structure_combination", "Adres łączy kilka cech złożonej konstrukcji hosta, parametrów lub ścieżki; to sygnał ostrzegawczy, nie dowód złośliwości.", 3);
         if (registered is not null)
         {
             var label = registered.Split('.')[0];

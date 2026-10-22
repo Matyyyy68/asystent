@@ -90,7 +90,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.3", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
@@ -100,7 +100,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", url));
         Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
         Assert.True(result.Risk >= RiskLevel.Moderate);
-        Assert.Equal("2026.10.3", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -111,6 +111,28 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input("", url));
         Assert.DoesNotContain(result.Indicators, item => item.Id == "url.auth_structure");
+        Assert.True(result.Risk < RiskLevel.Moderate);
+    }
+    [Fact]
+    public void ThreeIndependentStructuralDimensionsRaiseOnlyAModerateWarning()
+    {
+        var url = "https://a.b.c.d.e.test/a/b/c/d?a=1&b=2&c=3&d=4";
+        var result = Engine().Analyze(Input("", url));
+
+        Assert.Contains(result.Indicators, item => item.Id == "url.structure_combination");
+        Assert.Equal(RiskLevel.Moderate, result.Risk);
+        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
+        Assert.DoesNotContain(url, result.Explanation);
+    }
+    [Theory]
+    [InlineData("https://example.test/a-very-long-but-ordinary-information-resource-page-with-no-query-data")]
+    [InlineData("https://a.b.c.d.e.example.test/news")]
+    [InlineData("https://example.test/?a=1&b=2&c=3&d=4")]
+    [InlineData("https://example.test/a/b/c/d")]
+    public void OneStructuralDimensionAloneDoesNotRaiseRisk(string url)
+    {
+        var result = Engine().Analyze(Input("", url));
+        Assert.DoesNotContain(result.Indicators, item => item.Id == "url.structure_combination");
         Assert.True(result.Risk < RiskLevel.Moderate);
     }
     [Theory]
@@ -143,7 +165,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.3", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]

@@ -25,6 +25,7 @@ public sealed class DetectionScenarioEvaluationTests
         new("hosted brand name outside official domain", "", "https://login.paypal.com.attacker.test", true),
         new("userinfo masks the actual destination host", "", "https://paypal.com@attacker.test/login", true),
         new("authentication path with long structural URL", "", "https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true),
+        new("several independent URL structure anomalies", "", "https://a.b.c.d.e.test/a/b/c/d?a=1&b=2&c=3&d=4", true),
 
         new("ordinary work urgency", "Pilnie wyślij raport do zespołu przed spotkaniem.", null, false),
         new("routine intranet sign-in", "Zaloguj się do firmowego intranetu, aby sprawdzić grafik.", null, false),
@@ -39,6 +40,10 @@ public sealed class DetectionScenarioEvaluationTests
         new("brand-like but distinct word", "", "https://paypalnews.example", false),
         new("ordinary HTTP site", "", "http://example.test", false),
         new("ordinary long page without authentication path", "", "https://example.test/this-is-a-very-long-but-ordinary-information-page-with-many-segments/without-any-authentication-word", false),
+        new("long ordinary page without other structural signals", "", "https://example.test/a-very-long-but-ordinary-information-resource-page-with-no-query-data", false),
+        new("deep host alone", "", "https://a.b.c.d.e.example.test/news", false),
+        new("query parameters alone", "", "https://example.test/?a=1&b=2&c=3&d=4", false),
+        new("deep path alone", "", "https://example.test/a/b/c/d", false),
     ];
 
     [Fact]
@@ -62,8 +67,8 @@ public sealed class DetectionScenarioEvaluationTests
 
         Assert.True(failures.Count == 0,
             $"Synthetic scenario mismatches (TP={truePositives}, FP={falsePositives}, TN={trueNegatives}, FN={falseNegatives}): {string.Join("; ", failures)}");
-        Assert.Equal(14, truePositives);
-        Assert.Equal(13, trueNegatives);
-        Assert.Equal(27, Scenarios.Length);
+        Assert.Equal(15, truePositives);
+        Assert.Equal(17, trueNegatives);
+        Assert.Equal(32, Scenarios.Length);
     }
 }
