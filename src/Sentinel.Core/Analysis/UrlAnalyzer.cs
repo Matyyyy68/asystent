@@ -15,6 +15,8 @@ public sealed class UrlAnalyzer(DomainNames domains)
         ["paypal"] = ["paypal.com"], ["microsoft"] = ["microsoft.com", "microsoftonline.com", "live.com", "office.com"],
         ["google"] = ["google.com", "google.pl"], ["apple"] = ["apple.com"], ["allegro"] = ["allegro.pl", "allegro.com"]
     };
+    // These ICANN Spec 13 brand TLDs are operated by the corresponding brand owners.
+    private static readonly HashSet<string> BrandTlds = new(StringComparer.Ordinal) { "apple", "google", "microsoft" };
     public UrlAnalysis Analyze(string value)
     {
         var signals = new List<ThreatIndicator>();
@@ -52,16 +54,23 @@ public sealed class UrlAnalyzer(DomainNames domains)
         {
             var label = registered.Split('.')[0];
             var skeleton = Skeleton(label);
+            var brandHostLabels = host.Split('.');
+            var registeredLabelCount = registered.Split('.').Length;
+            var subdomainLabels = brandHostLabels.Take(Math.Max(0, brandHostLabels.Length - registeredLabelCount));
             foreach (var (brand, legitimate) in Brands)
             {
-                if (legitimate.Any(d => DomainNames.Within(host, d))) continue;
-                if (host.Split('.').Contains(brand) || skeleton.Equals(brand, StringComparison.Ordinal) ||
+                if (legitimate.Any(d => DomainNames.Within(host, d)) ||
+                    (BrandTlds.Contains(brand) && DomainNames.Within(host, brand))) continue;
+                if (subdomainLabels.Contains(brand, StringComparer.Ordinal) ||
+                    (!label.Equals(brand, StringComparison.Ordinal) && skeleton.Equals(brand, StringComparison.Ordinal)) ||
                     new[] { "-login", "-secure", "-account", "-sso" }.Any(suffix => label == brand + suffix) ||
-                    (label.Length >= 4 && Distance(label, brand) == 1))
+                    (label.Length >= 4 && !label.Equals(brand, StringComparison.Ordinal) && Distance(label, brand) == 1))
                 {
                     Add("url.brand", "Domena przypomina znaną markę lub umieszcza jej nazwę w mylącej subdomenie.", 4);
                     break;
                 }
+                if (label.Equals(brand, StringComparison.Ordinal))
+                    Add("url.brand_exact", "Domena używa dokładnego słowa znanej marki, ale jej właściciela nie zweryfikowano.", 1);
             }
         }
         // Paths, queries, fragments and userinfo never leave this normalizer.

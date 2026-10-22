@@ -1,7 +1,7 @@
 # Ewaluacja deterministycznej analizy URL
 
 **Data pomiaru:** 2026-10-22  
-**Wersja reguł:** `2026.10.4`
+**Wersja reguł:** `2026.10.5`
 **Zakres:** wyłącznie kolumny `URL` i `label`; żaden adres nie został otwarty, rozwiązany przez DNS ani wysłany do usługi.
 
 ## Zestaw i odtwarzanie
@@ -22,20 +22,20 @@ W pomiarze cztery wiersze zawierały adres, którego aplikacja nie uznała za po
 
 Ewaluator zwraca także `DomainTrain` i `DomainHoldout`: dzieli według SHA-256 ziarna i domeny rejestrowalnej z dołączonej PSL, bez użycia etykiety i niezależnie od kolejności wierszy. Wiersze tej samej domeny pozostają w jednym podziale; niepoprawne URL-e otrzymują grupę opartą na ich lokalnym hashu. Procent holdoutu (domyślnie 30) i ziarno można ustawić parametrami. Test regresyjny sprawdza powtarzalność, brak przecieku subdomen, kompletność macierzy i obsługę niepoprawnego URL-a.
 
-Ten podział usuwa przeciek między subdomenami, ale **nie jest niezależnym wynikiem dla obecnych reguł**: progi `2026.10.4` dobrano wcześniej po obejrzeniu całego tego zbioru. Wyniki `DomainHoldout` są więc diagnostyczne. Przy następnej zmianie F03 należy dobierać reguły tylko na `DomainTrain`, zamrozić je przed odczytem `DomainHoldout` i nadal pozyskać odrębny czasowo zbiór.
+Ten podział usuwa przeciek między subdomenami, ale **nie jest niezależnym wynikiem dla obecnych reguł**: wersję `2026.10.4` rozwijano po obejrzeniu całego zbioru, a `DomainHoldout` metryki ujawniono. Wersja `2026.10.5` zmienia wagę exact-brand i rozpoznaje trzy brandowe TLD na podstawie dokumentacji ICANN/producentów oraz osobnego rankingu Tranco; UCI nie służył do strojenia tej poprawki. Mimo to wyniki `DomainHoldout` są nadal diagnostyczne, nie ślepym testem. Dalsze strojenie powinno używać wyłącznie `DomainTrain`, zamrozić reguły przed odczytem holdoutu i dodać niezależny, czasowo odrębny zbiór.
 
 ## Wynik
 
-Klasyfikator uznaje wynik `Moderate` lub wyższy za alarm. Przed `url.auth_structure` (`2026.10.2`) wynik wynosił TP=117, FP=14, TN=134 836, FN=100 828. Po `url.auth_structure` (`2026.10.3`) było TP=2 068, FP=14, TN=134 836, FN=98 877. Reguła `url.structure_combination` (`2026.10.4`) dodała na tym samym, eksplorowanym zestawie 2 300 wykryć; bieżący wynik to:
+Klasyfikator uznaje wynik `Moderate` lub wyższy za alarm. Przed `url.auth_structure` (`2026.10.2`) wynik wynosił TP=117, FP=14, TN=134 836, FN=100 828. Po `url.auth_structure` (`2026.10.3`) było TP=2 068, FP=14, TN=134 836, FN=98 877. Reguła `url.structure_combination` (`2026.10.4`) dodała na tym samym, eksplorowanym zestawie 2 300 wykryć. Wersja `2026.10.5` obniża dokładną nazwę marki bez weryfikacji do wagi 1, rozpoznaje `.google`, `.apple` i `.microsoft` jako brandowe TLD oraz zachowuje silną wagę dla literówek i brandu w cudzej subdomenie. Bieżący URL-only wynik to:
 
 | Metryka | Wynik |
 |---|---:|
 | Wiersze | 235 795 |
-| TP / FP | 4 368 / 14 |
-| TN / FN | 134 836 / 96 577 |
-| Precision w tym zbiorze | 99,6805% |
-| Recall w tym zbiorze | 4,3271% |
-| False-positive rate wśród etykiet legalnych | 0,0104% |
+| TP / FP | 4 363 / 5 |
+| TN / FN | 134 845 / 96 582 |
+| Precision w tym zbiorze | 99,8855% |
+| Recall w tym zbiorze | 4,3222% |
+| False-positive rate wśród etykiet legalnych | 0,0037% |
 
 `url.structure_combination` daje umiarkowany sygnał, gdy co najmniej 3 z 4 wymiarów występują jednocześnie: URL ma ≥75 znaków; host jest długi (≥50 znaków), głęboki (≥5 etykiet) albo zawiera ≥3 łączniki; część ścieżki i zapytania ma ≥6 cyfr albo ≥4 parametry; ścieżka zawiera ≥4 ukośniki. Same długie adresy, głęboki host, parametry lub ścieżka nie wywołują tego sygnału. Test regresyjny pokrywa wspólny przypadek oraz każdy pojedynczy wymiar osobno.
 
@@ -45,13 +45,19 @@ Od 2026-10-22 `scripts/evaluate-phiusiil.ps1` raportuje również deterministycz
 
 | Część | Domeny | Wiersze | TP | FP | TN | FN | Precision | Recall | FPR |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| DomainTrain | 138 385 | 167 041 | 2 668 | 11 | 94 559 | 69 803 | 99,5894% | 3,6815% | 0,0116% |
-| DomainHoldout | 58 916 | 68 754 | 1 700 | 3 | 40 277 | 26 774 | 99,8238% | 5,9704% | 0,0074% |
+| DomainTrain | 138 385 | 167 041 | 2 665 | 3 | 94 567 | 69 806 | 99,8876% | 3,6773% | 0,0032% |
+| DomainHoldout | 58 916 | 68 754 | 1 698 | 2 | 40 278 | 26 776 | 99,8824% | 5,9633% | 0,0050% |
 
 To potwierdza rozdzielenie domen i daje punkt odniesienia do przyszłego strojenia. **Nie jest niezależnym testem obecnych reguł:** progi `2026.10.4` wybrano po analizie całego zbioru, więc także domeny z tej części były pośrednio widziane podczas rozwoju. Nie zmieniano reguł na podstawie powyższych liczb. Kolejne strojenie powinno używać wyłącznie `DomainTrain`, zamrozić reguły przed odczytem `DomainHoldout` oraz dodać czasowo odrębny zbiór.
 
 Reguła i progi powstały po eksploracji tego samego pełnego zbioru; pomiar v2026.10.4 jest miarą rozwojową, a nie holdoutem ani niezależnym testem. Nie jest to ocena produkcyjna: brak deduplikacji, proporcje etykiet są sztuczne względem ruchu użytkownika, a źródłowe etykiety i adresy nie są niezależnym testem jakości Sentinel. Wysokiej precyzji z tego zestawu nie wolno interpretować jako skalibrowanej pewności. Zbiór zawiera też cechy stron, których Sentinel celowo nie używa; mierzony jest wyłącznie klasyfikator URL.
 
 Reguła `url.auth_structure` nadal łączy token ścieżki taki jak `login`, `verify`, `account`, `password`, `auth`, `payment` lub `wallet` z dodatkową złożonością URL. Obie reguły są lokalne, deterministyczne i nie otwierają adresu. Testy obejmują kontrolowane przykłady, ale nie zastępują niezależnego, czasowo odseparowanego zestawu.
+
+### Sanity-check popularnych domen (bez etykiet bezpieczeństwa)
+
+Osobny snapshot Tranco `746PX`, utworzony 2026-10-21, ma SHA-256 `577EB57D995B85DEBB0EE8462DE1C54B73E1ADB67FDFB47D50C870230D9318A4`. Na pierwszych 100 000 nazw lokalnie analizowano wyłącznie syntetyczne `https://<domena>/`; nie wykonywano DNS ani połączeń. Reguły `2026.10.4` wyemitowały 271 sygnałów `url.brand` o wadze ostrzegawczej. W `2026.10.5` pozostało 6 takich trafień; 213 dokładnych etykiet marki otrzymało osobny, słaby sygnał `url.brand_exact`, a domeny w `.google`, `.apple` i `.microsoft` nie są oznaczane jako podszycie. To pokazuje zmianę zachowania na popularnych nazwach, ale **nie jest pomiarem false-positive rate**: ranking nie jest listą zweryfikowanych bezpiecznych witryn, a syntetyczny adres główny nie odzwierciedla wszystkich ścieżek ani treści. Archiwum pozostało poza repozytorium.
+
+Reguły dla `.google`, `.apple` i `.microsoft` opierają się na [ICANN Spec 13 dla Google](https://www.icann.org/en/registry-agreements/details/google), [Apple](https://www.icann.org/en/registry-agreements/details/apple) i [Microsoft](https://www.icann.org/en/registry-agreements/details/microsoft). Dodatkowe przykłady własności sprawdzono w [liście domen Google](https://www.google.com/supported_domains), dokumentacji Microsoft dla [`cloud.microsoft`](https://learn.microsoft.com/microsoft-365/enterprise/cloud-microsoft-domain) oraz [dokumentacji Apple News](https://developer.apple.com/documentation/applenewsformat/supportedurls). Tranco opisuje [metodologię rankingu](https://tranco-list.eu/methodology); ranking popularności nie nadaje domenom etykiety „bezpieczna”.
 
 Do dalszej walidacji nadal potrzeba reprezentatywnego, deduplikowanego zestawu z wiarygodnym pochodzeniem, oddzielnego holdoutu i kalibracji na realistycznej bazowej częstości ataków. `confidence` pozostaje puste.

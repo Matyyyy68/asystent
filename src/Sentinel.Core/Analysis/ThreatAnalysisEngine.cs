@@ -7,7 +7,7 @@ namespace Sentinel.Core.Analysis;
 /// <summary>Deterministic rules; untrusted content cannot invoke tools or alter the rules.</summary>
 public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
 {
-    public const string RulesVersion = "2026.10.4";
+    public const string RulesVersion = "2026.10.5";
     private readonly object gate = new();
     private readonly Dictionary<string, (DateTimeOffset Seen, DateTimeOffset? UrgencyAt)> sessions = new(StringComparer.Ordinal);
     public ThreatAssessment Analyze(AnalysisContext context)

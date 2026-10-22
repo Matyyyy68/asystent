@@ -71,6 +71,7 @@ public sealed class AnalysisTests
     [InlineData("https://paypa1.test/login")]
     [InlineData("https://paypal-login.test/login")]
     [InlineData("https://раypal.test/login")]
+    [InlineData("https://googll.store/login")]
     public void BrandDeceptionCombinesWithCredentialAndUrgency(string url)
     {
         var result = Engine().Analyze(Input("Pilnie: blokada konta. Zaloguj się, aby potwierdzić dane.", url));
@@ -84,13 +85,30 @@ public sealed class AnalysisTests
     [InlineData("https://apple-pie.example")]
     public void SimilarWordsAndTrustedSubdomainsDoNotTriggerBrandRule(string url) =>
         Assert.DoesNotContain(Urls().Analyze(url).Indicators, i => i.Id == "url.brand");
+    [Theory]
+    [InlineData("https://dns.google/")]
+    [InlineData("https://cloud.microsoft/")]
+    [InlineData("https://safebrowsing.apple/")]
+    public void BrandOwnedTopLevelDomainsAreNotMarkedAsImpersonation(string url) =>
+        Assert.DoesNotContain(Urls().Analyze(url).Indicators, i => i.Id == "url.brand");
+    [Theory]
+    [InlineData("https://google.de/")]
+    [InlineData("https://google.co.uk/")]
+    [InlineData("https://google.com.hk/")]
+    [InlineData("https://apple.news/")]
+    public void ExactBrandDomainLabelsRemainUnverifiedButDoNotAloneRaiseRisk(string url)
+    {
+        var assessment = Engine().Analyze(Input("", url));
+        Assert.Contains(assessment.Indicators, item => item.Id == "url.brand_exact" && item.Weight == 1);
+        Assert.True(assessment.Risk < RiskLevel.Moderate);
+    }
     [Fact]
     public void UserInfoThatMasksTheActualHostRaisesAtLeastAModerateWarning()
     {
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
@@ -100,7 +118,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", url));
         Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
         Assert.True(result.Risk >= RiskLevel.Moderate);
-        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -121,7 +139,7 @@ public sealed class AnalysisTests
 
         Assert.Contains(result.Indicators, item => item.Id == "url.structure_combination");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -165,7 +183,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.4", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]

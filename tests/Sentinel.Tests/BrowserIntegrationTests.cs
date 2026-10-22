@@ -52,7 +52,7 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.NotNull(response);
         Assert.True(response.Available);
         Assert.True(response.ShouldWarn);
-        Assert.Equal("2026.10.4", response.RulesVersion);
+        Assert.Equal("2026.10.5", response.RulesVersion);
         Assert.Equal("Moderate", response.Risk);
         Assert.Contains(response.Indicators, item => item.Id == "url.auth_structure");
         var serialized = JsonSerializer.Serialize(response);
