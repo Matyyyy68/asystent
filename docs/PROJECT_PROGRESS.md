@@ -3,7 +3,7 @@
 **Aktualizacja:** 2026-10-22
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
 
-**Najnowsza pełna bramka (SQLite v21, reguły URL 2026.10.4):** `scripts/build-user.ps1 -Installer` PASS: .NET 259/259 bez pominięć, Engine IPC, Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, UI production build i autotest instalatora. Self-test sprawdza opcję skrótu menu Start, w tym zachowanie obcego skrótu. Enterprise API 22/22, Release build i HTTP smoke PASS w poprzedniej walidacji. Nieopublikowany instalator testowy SHA-256 `BF9890576324E52474C5C171ECBF683811B59B176E8CD1D5250DD822D94E4E3C`.
+**Najnowsza pełna bramka (SQLite v21, reguły URL 2026.10.4):** `scripts/build-user.ps1 -Installer` PASS: .NET 259/259 bez pominięć, Engine IPC, Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, UI production build i autotest instalatora. Self-test sprawdza siedem ekranów kreatora, ilustracje, opcje, dokładną wartość autostartu, manifest Native Messaging i zachowanie obcego skrótu. Enterprise API 22/22, Release build i HTTP smoke PASS w poprzedniej walidacji. Nieopublikowany instalator testowy 281299321 B, SHA-256 `C94BE03F63CD4700E57EFB60B3FA089C24AB051EA11B99D6A336BEABAC7F3E0C`.
 
 **Monitor Scheduled Tasks (SQLite v21):** opt-in odczytuje XML przez `schtasks /query /xml`, ale trwale zapisuje tylko skrócone ID i odciski. Przy odmowie zachowuje poprzedni baseline i nadal sprawdza inne źródła. Monitor 15/15; live read-only przepływ odczyt→parser→baseline tymczasowej bazy potwierdził 175 zadań. Pełna bramka po zmianie PASS; instalator jest artefaktem testowym, nie wydaniem.
 

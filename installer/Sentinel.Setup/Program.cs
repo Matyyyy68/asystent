@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Win32;
 
 namespace Sentinel.Setup;
@@ -80,6 +81,7 @@ internal static class Program
 
     private static int SelfTest()
     {
+        ApplicationConfiguration.Initialize();
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var testId = Guid.NewGuid().ToString("N");
         var root = Path.Combine(localAppData, "Programs", ".SentinelAI-Setup-SelfTest-" + testId);
@@ -100,8 +102,21 @@ internal static class Program
             try { EnsureSufficientFreeSpace(requiredSpace - 1, requiredSpace); }
             catch (IOException ex) when (ex.Message.StartsWith("Za mało wolnego miejsca", StringComparison.Ordinal)) { rejectedLowSpace = true; }
             if (!rejectedLowSpace) throw new InvalidDataException("Kontrola miejsca na dysku nie odrzuciła niewystarczającej przestrzeni.");
+            var expectedRunValue = $"\"{Path.Combine(root, "Sentinel AI.exe")}\" --minimized";
+            if (!AutoStartValueMatches(expectedRunValue, Path.Combine(root, "Sentinel AI.exe"), enabled: true)
+                || AutoStartValueMatches("\"C:\\wrong\\Sentinel AI.exe\" --minimized", Path.Combine(root, "Sentinel AI.exe"), enabled: true)
+                || !AutoStartValueMatches(null, Path.Combine(root, "Sentinel AI.exe"), enabled: false)
+                || AutoStartValueMatches(expectedRunValue, Path.Combine(root, "Sentinel AI.exe"), enabled: false))
+                throw new InvalidDataException("Weryfikacja wartości autostartu nie odróżnia prawidłowej ścieżki od braku lub błędnej wartości.");
 
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
+            SetupWizard.ValidateVisualStates();
+            foreach (var resourceName in new[] { "welcome", "prepare", "configure", "installing", "complete", "error", "cancel" })
+            {
+                using var illustration = Assembly.GetExecutingAssembly().GetManifestResourceStream($"installer-{resourceName}.png");
+                if (illustration is null || illustration.Length == 0)
+                    throw new InvalidDataException($"Brakuje osadzonej ilustracji instalatora: {resourceName}.");
+            }
             var fallbackDirectory = DefaultDirectory;
             if (!ResolveInstallDirectory(root, fallbackDirectory).Equals(Path.GetFullPath(root), StringComparison.OrdinalIgnoreCase)
                 || !ResolveInstallDirectory(Environment.GetFolderPath(Environment.SpecialFolder.System), fallbackDirectory)
@@ -284,6 +299,112 @@ internal static class Program
         return ResolveInstallDirectory(registered, DefaultDirectory);
     }
 
+    internal static string ValidateInstallSelection(string target, string? registeredOverride = null)
+    {
+        target = Path.GetFullPath(target);
+        var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+        if (!target.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Wybierz folder w swoim profilu użytkownika. Instalacja nie wymaga uprawnień administratora.");
+        var registeredInstall = registeredOverride ?? Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+        if (!string.IsNullOrWhiteSpace(registeredInstall) && !Path.GetFullPath(registeredInstall).Equals(target, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Sentinel AI jest już zainstalowany w folderze {registeredInstall}. Użyj tej lokalizacji, aby go zaktualizować lub naprawić.");
+        if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any() &&
+            !Path.GetFullPath(registeredInstall ?? string.Empty).Equals(target, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Wybrany folder zawiera pliki, które nie należą do Sentinel AI. Wybierz pusty folder albo lokalizację istniejącej instalacji.");
+        return target;
+    }
+
+    internal static string GetInstallSpaceSummary(string selectedTarget)
+    {
+        var target = ValidateInstallSelection(selectedTarget);
+        var parent = Path.GetDirectoryName(target) ?? throw new InvalidOperationException("Nieprawidłowy folder instalacji.");
+        using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
+            ?? throw new InvalidDataException("Brak pakietu aplikacji w instalatorze.");
+        using var archive = new ZipArchive(resource, ZipArchiveMode.Read);
+        var entries = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)).ToArray();
+        var payloadBytes = entries.Sum(entry => entry.Length);
+        var payloadPaths = entries.Select(entry => entry.FullName.Replace('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        long preservedBytes = 0;
+        if (Directory.Exists(target))
+            foreach (var existing in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
+            {
+                var relative = Path.GetRelativePath(target, existing).Replace('\\', '/');
+                if (relative.Equals("Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase) || payloadPaths.Contains(relative)) continue;
+                preservedBytes = checked(preservedBytes + new FileInfo(existing).Length);
+            }
+        var requiredBytes = CalculateRequiredFreeSpace(payloadBytes, preservedBytes);
+        var volumeRoot = Path.GetPathRoot(parent) ?? throw new IOException("Nie można określić dysku instalacji.");
+        var availableBytes = new DriveInfo(volumeRoot).AvailableFreeSpace;
+            EnsureSufficientFreeSpace(availableBytes, requiredBytes);
+        return $"Pliki aplikacji: {payloadBytes / 1_048_576:N0} MB\r\nWymagane miejsce z zapasem: {requiredBytes / 1_048_576:N0} MB\r\nDostępne miejsce: {availableBytes / 1_048_576:N0} MB";
+    }
+
+    internal static void VerifyInstallation(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart)
+    {
+        target = Path.GetFullPath(target);
+        foreach (var relative in new[] { "Sentinel AI.exe", "Uninstall Sentinel AI.exe", "resources/engine/Sentinel.Engine.exe", "resources/engine/Sentinel.UrlHost.exe", "resources/engine/com.sentinelai.urlcheck.json" })
+            if (!File.Exists(Path.Combine(target, relative.Replace('/', Path.DirectorySeparatorChar))))
+                throw new InvalidDataException($"Weryfikacja nie znalazła wymaganego pliku: {relative}.");
+
+        var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+        if (!string.Equals(registered, target, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Weryfikacja wpisu aplikacji w profilu Windows nie powiodła się.");
+
+        var executable = Path.Combine(target, "Sentinel AI.exe");
+        var runValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") as string;
+        if (!AutoStartValueMatches(runValue, executable, autoStart))
+            throw new InvalidDataException("Weryfikacja ustawienia autostartu nie powiodła się.");
+
+        var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
+        var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
+        if (ShortcutPointsToInstall(startMenuLink, target) != startMenuShortcut || ShortcutPointsToInstall(desktopLink, target) != desktopShortcut)
+            throw new InvalidDataException("Weryfikacja skrótów nie zgadza się z wybranymi opcjami instalacji.");
+
+        foreach (var keyPath in new[] { @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck", @"Software\Microsoft\Edge\NativeMessagingHosts\com.sentinelai.urlcheck" })
+        {
+            var manifest = Registry.CurrentUser.OpenSubKey(keyPath)?.GetValue(null) as string;
+            if (!string.Equals(manifest, Path.Combine(target, "resources", "engine", "com.sentinelai.urlcheck.json"), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Weryfikacja rejestracji hosta przeglądarki nie powiodła się.");
+        }
+
+        var manifestPath = Path.Combine(target, "resources", "engine", "com.sentinelai.urlcheck.json");
+        using var nativeManifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        var manifestRoot = nativeManifest.RootElement;
+        if (manifestRoot.GetProperty("name").GetString() != "com.sentinelai.urlcheck"
+            || !string.Equals(manifestRoot.GetProperty("path").GetString(), Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), StringComparison.OrdinalIgnoreCase)
+            || manifestRoot.GetProperty("type").GetString() != "stdio"
+            || !manifestRoot.GetProperty("allowed_origins").EnumerateArray().Any(origin => origin.GetString() == "chrome-extension://nakmencmekkefmcddpihiiohjgabfemg/"))
+            throw new InvalidDataException("Weryfikacja manifestu Native Messaging nie powiodła się.");
+    }
+
+    private static bool AutoStartValueMatches(string? value, string executable, bool enabled)
+    {
+        var expected = $"\"{Path.GetFullPath(executable)}\" --minimized";
+        return enabled
+            ? string.Equals(value, expected, StringComparison.OrdinalIgnoreCase)
+            : string.IsNullOrEmpty(value);
+    }
+
+    private static bool ShortcutPointsToInstall(string shortcutPath, string installPath)
+    {
+        if (!File.Exists(shortcutPath)) return false;
+        object? shell = null;
+        object? shortcut = null;
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException("Windows nie udostępnia odczytu skrótów.");
+            shell = Activator.CreateInstance(shellType)!;
+            shortcut = ((dynamic)shell).CreateShortcut(shortcutPath);
+            var target = (string)((dynamic)shortcut).TargetPath;
+            return Path.GetFullPath(Path.GetDirectoryName(target) ?? string.Empty).Equals(installPath, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (shortcut is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shortcut);
+            if (shell is not null) System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
+        }
+    }
+
     internal static string ResolveInstallDirectory(string? registered, string fallback)
     {
         var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
@@ -304,16 +425,7 @@ internal static class Program
         CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null)
     {
         if (!VerifyPayload(showErrors: true)) throw new InvalidDataException("Weryfikacja instalatora nie powiodła się.");
-        target = Path.GetFullPath(target);
-        var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-        if (!target.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Wybierz folder w swoim profilu użytkownika. Instalacja nie wymaga uprawnień administratora.");
-        var registeredInstall = testMode ? registeredInstallOverride : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
-        if (!string.IsNullOrWhiteSpace(registeredInstall) && !Path.GetFullPath(registeredInstall).Equals(target, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException($"Sentinel AI jest już zainstalowany w folderze {registeredInstall}. Uruchom instalator z tej lokalizacji, aby go zaktualizować.");
-        if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any() &&
-            !Path.GetFullPath(registeredInstall ?? string.Empty).Equals(target, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Wybrany folder zawiera pliki, które nie należą do Sentinel AI. Wybierz pusty folder albo lokalizację istniejącej instalacji.");
+        target = ValidateInstallSelection(target, testMode ? registeredInstallOverride : null);
 
         var parent = Path.GetDirectoryName(target) ?? throw new InvalidOperationException("Nieprawidłowy folder instalacji.");
         using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
@@ -634,34 +746,51 @@ internal static class Program
 
 internal sealed class SetupWizard : Form
 {
-    private readonly TextBox folder = new() { Text = Program.GetPreferredInstallDirectory() };
-    private readonly CheckBox startMenu = new() { Text = "Utwórz skrót w menu Start", Checked = true, AutoSize = true };
-    private readonly CheckBox desktop = new() { Text = "Utwórz skrót na pulpicie", Checked = true, AutoSize = true };
-    private readonly CheckBox start = new() { Text = "Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true };
-    private readonly Label status = new() { AutoSize = true, Text = "Gotowy do instalacji" };
-    private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100, Height = 12, Dock = DockStyle.Fill };
-    private readonly Button install = new() { Text = "Zainstaluj", Width = 118, Height = 38 };
-    private readonly Button cancel = new() { Text = "Anuluj", Location = new Point(383, 381), Size = new Size(92, 38) };
-    private readonly PictureBox illustration = new() { Bounds = new Rectangle(454, 18, 150, 112), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent };
+    private enum WizardPage { Welcome, Location, Options, Summary, Installing, Verify, Complete, Error }
+
+    private readonly Label heading = new() { AutoSize = true, Font = new Font("Segoe UI Semibold", 22), ForeColor = Color.White, Location = new Point(32, 24) };
+    private readonly Label step = new() { AutoSize = true, ForeColor = Color.FromArgb(255, 166, 72), Location = new Point(34, 66) };
+    private readonly Label intro = new() { AutoSize = false, ForeColor = Color.FromArgb(216, 224, 235), Location = new Point(34, 99), Size = new Size(420, 64) };
+    private readonly Label pathLabel = new() { Text = "Folder instalacji", AutoSize = true, ForeColor = Color.White, Location = new Point(34, 171) };
+    private readonly TextBox folder = new() { Text = Program.GetPreferredInstallDirectory(), Location = new Point(34, 197), Size = new Size(430, 32), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    private readonly Button browse = new() { Text = "Wybierz…", Size = new Size(104, 32), Location = new Point(475, 197), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+    private readonly Label spaceInfo = new() { AutoSize = false, ForeColor = Color.FromArgb(190, 204, 222), Location = new Point(34, 244), Size = new Size(540, 68) };
+    private readonly CheckBox startMenu = new() { Text = "Utwórz skrót w menu Start", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox desktop = new() { Text = "Utwórz skrót na pulpicie", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox start = new() { Text = "Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox launchAfter = new() { Text = "Uruchom Sentinel AI po zakończeniu", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly Label summary = new() { AutoSize = false, ForeColor = Color.White, Location = new Point(34, 178), Size = new Size(420, 180) };
+    private readonly Label status = new() { AutoSize = false, ForeColor = Color.White, Location = new Point(34, 292), Size = new Size(570, 42) };
+    private readonly Label errorDetails = new() { AutoSize = false, ForeColor = Color.FromArgb(255, 185, 185), Location = new Point(34, 166), Size = new Size(420, 175) };
+    private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100, Height = 14, Location = new Point(34, 344), Size = new Size(620, 14), Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
+    private readonly Button back = new() { Text = "Wstecz", Size = new Size(100, 38), Location = new Point(34, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
+    private readonly Button next = new() { Text = "Rozpocznij", Size = new Size(136, 38), Location = new Point(518, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+    private readonly Button cancel = new() { Text = "Anuluj", Size = new Size(100, 38), Location = new Point(400, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+    private readonly Button openLog = new() { Text = "Otwórz log", Size = new Size(110, 38), Location = new Point(270, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+    private readonly PictureBox illustration = new() { Bounds = new Rectangle(475, 82, 180, 170), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent, Anchor = AnchorStyles.Top | AnchorStyles.Right };
     private CancellationTokenSource? installCancellation;
     private bool installationRunning;
+    private WizardPage page = WizardPage.Welcome;
+    private string lastError = string.Empty;
+    private bool errorCanRetry;
 
     public SetupWizard()
     {
-        Text = "Instalator Sentinel AI"; Width = 650; Height = 465; MinimumSize = new Size(650, 465); StartPosition = FormStartPosition.CenterScreen;
-        BackColor = Color.FromArgb(246, 248, 251); Font = new Font("Segoe UI", 10); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
+        Text = "Sentinel AI — Instalator"; ClientSize = new Size(700, 480); MinimumSize = new Size(680, 500); StartPosition = FormStartPosition.CenterScreen;
+        AutoScaleMode = AutoScaleMode.Dpi; BackColor = Color.FromArgb(19, 28, 42); Font = new Font("Segoe UI", 10); FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = false;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
-        var heading = new Label { Text = "Zainstaluj Sentinel AI", Font = new Font("Segoe UI Semibold", 21), ForeColor = Color.FromArgb(24, 41, 64), AutoSize = true, Location = new Point(34, 28) };
-        var intro = new Label { Text = "Zajmie to chwilę. Nie potrzebujesz uprawnień administratora.", AutoSize = true, Location = new Point(36, 75) };
-        var pathLabel = new Label { Text = "Miejsce instalacji", AutoSize = true, Location = new Point(36, 137) };
-        folder.SetBounds(36, 163, 470, 34); var browse = new Button { Text = "Wybierz…", Location = new Point(516, 162), Size = new Size(92, 36) };
-        startMenu.Location = new Point(38, 218); desktop.Location = new Point(38, 250); start.Location = new Point(38, 282); status.Location = new Point(38, 330);
-        progress.SetBounds(36, 358, 572, 13); install.Location = new Point(490, 381); install.BackColor = Color.FromArgb(20, 93, 153); install.ForeColor = Color.White; install.FlatStyle = FlatStyle.Flat;
-        cancel.DialogResult = DialogResult.Cancel;
-        Controls.AddRange([heading, intro, illustration, pathLabel, folder, browse, startMenu, desktop, start, status, progress, cancel, install]); AcceptButton = install; CancelButton = cancel;
-        SetIllustration("welcome");
-        browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); };
-        install.Click += async (_, _) => await InstallAsync();
+        next.BackColor = Color.FromArgb(238, 126, 42); next.ForeColor = Color.White; next.FlatStyle = FlatStyle.Flat; next.FlatAppearance.BorderSize = 0;
+        back.BackColor = Color.FromArgb(47, 61, 80); back.ForeColor = Color.White; back.FlatStyle = FlatStyle.Flat;
+        cancel.BackColor = Color.FromArgb(47, 61, 80); cancel.ForeColor = Color.White; cancel.FlatStyle = FlatStyle.Flat;
+        openLog.BackColor = Color.FromArgb(47, 61, 80); openLog.ForeColor = Color.White; openLog.FlatStyle = FlatStyle.Flat;
+        folder.SetBounds(34, 197, 430, 32); browse.Location = new Point(475, 197);
+        startMenu.Location = new Point(36, 185); desktop.Location = new Point(36, 223); start.Location = new Point(36, 261);
+        launchAfter.Location = new Point(36, 299); summary.Location = new Point(34, 178);
+        Controls.AddRange([heading, step, intro, pathLabel, folder, browse, spaceInfo, startMenu, desktop, start, launchAfter, summary, status, errorDetails, progress, illustration, back, next, cancel, openLog]);
+        browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); RefreshSpaceInfo(); } };
+        next.Click += async (_, _) => await MoveNextAsync();
+        back.Click += (_, _) => MoveBack();
+        openLog.Click += (_, _) => OpenLog();
         cancel.Click += (_, _) =>
         {
             if (installationRunning)
@@ -684,57 +813,89 @@ internal sealed class SetupWizard : Form
             e.Cancel = true;
             cancel.PerformClick();
         };
+        folder.Validated += (_, _) => RefreshSpaceInfo();
+        ShowPage(WizardPage.Welcome);
+    }
+
+    private async Task MoveNextAsync()
+    {
+        switch (page)
+        {
+            case WizardPage.Welcome: ShowPage(WizardPage.Location); break;
+            case WizardPage.Location:
+                try { spaceInfo.Text = Program.GetInstallSpaceSummary(folder.Text); ShowPage(WizardPage.Options); }
+                catch (Exception ex) { spaceInfo.Text = ex.Message; spaceInfo.ForeColor = Color.FromArgb(255, 185, 185); }
+                break;
+            case WizardPage.Options: ShowPage(WizardPage.Summary); break;
+            case WizardPage.Summary: await InstallAsync(); break;
+            case WizardPage.Error:
+                if (errorCanRetry) await InstallAsync();
+                else { DialogResult = DialogResult.OK; Close(); }
+                break;
+            case WizardPage.Complete:
+                if (launchAfter.Checked)
+                {
+                    try
+                    {
+                        var process = Process.Start(new ProcessStartInfo(Path.Combine(folder.Text, "Sentinel AI.exe")) { UseShellExecute = true })
+                            ?? throw new IOException("Windows nie uruchomił Sentinel AI.");
+                        Program.Log($"APP_LAUNCH_STARTED pid={process.Id}");
+                    }
+                    catch (Exception ex) { lastError = $"Instalacja przebiegła poprawnie, ale aplikacja nie wystartowała: {ex.Message}"; Program.Log($"APP_LAUNCH_FAILED type={ex.GetType().Name} message={Program.Clean(ex.Message)}"); ShowPage(WizardPage.Error, retryable: false); return; }
+                }
+                DialogResult = DialogResult.OK; Close();
+                break;
+        }
+    }
+
+    private void MoveBack()
+    {
+        switch (page)
+        {
+            case WizardPage.Location: ShowPage(WizardPage.Welcome); break;
+            case WizardPage.Options: ShowPage(WizardPage.Location); break;
+            case WizardPage.Summary: ShowPage(WizardPage.Options); break;
+            case WizardPage.Error: ShowPage(WizardPage.Summary); break;
+        }
     }
 
     private async Task InstallAsync()
     {
         installationRunning = true;
         installCancellation = new CancellationTokenSource();
-        install.Enabled = false;
-        folder.Enabled = false;
-        startMenu.Enabled = false;
-        desktop.Enabled = false;
-        start.Enabled = false;
-        cancel.Enabled = true;
-        SetIllustration("prepare");
+        progress.Value = 0;
+        ShowPage(WizardPage.Installing);
         try
         {
-            await Task.Run(() => Program.Install(folder.Text, startMenu.Checked, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() =>
+            var selectedPath = Program.ValidateInstallSelection(folder.Text);
+            await Task.Run(() => Program.Install(selectedPath, startMenu.Checked, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() =>
             {
                 status.Text = message;
                 progress.Value = value;
                 if (value >= 80) cancel.Enabled = false;
-                SetIllustration(value >= 100 ? "complete" : value >= 80 ? "configure" : value > 10 ? "installing" : "prepare");
+                SetIllustration(value >= 90 ? "configure" : value > 10 ? "installing" : "prepare");
             }), installCancellation.Token));
             installationRunning = false;
-            if (MessageBox.Show(this, "Sentinel AI został zainstalowany. Czy uruchomić program teraz?", "Gotowe", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
-                Process.Start(new ProcessStartInfo(Path.Combine(folder.Text, "Sentinel AI.exe")) { UseShellExecute = true });
-            DialogResult = DialogResult.OK; Close();
+            ShowPage(WizardPage.Verify);
+            status.Text = "Sprawdzam pliki, ustawienia, skróty i rejestrację przeglądarki…";
+            await Task.Run(() => Program.VerifyInstallation(selectedPath, startMenu.Checked, desktop.Checked, start.Checked));
+            Program.Log($"INSTALL_VERIFIED files=true registration=true shortcuts=true autostart={start.Checked} target={selectedPath}");
+            status.Text = "Instalacja została zweryfikowana.";
+            progress.Value = 100;
+            ShowPage(WizardPage.Complete);
         }
         catch (OperationCanceledException)
         {
-            status.Text = "Instalacja została anulowana. Zmiany zostały wycofane.";
-            cancel.DialogResult = DialogResult.Cancel;
-            SetIllustration("cancel");
-            cancel.Text = "Zamknij";
-            cancel.Enabled = true;
+            lastError = "Instalacja została anulowana. Poprzedni stan został przywrócony.";
+            Program.Log("UI_INSTALL_CANCELLED rollback=true");
+            ShowPage(WizardPage.Error, retryable: false);
         }
         catch (Exception ex)
         {
             Program.Log($"UI_INSTALL_ERROR type={ex.GetType().Name} message={Program.Clean(ex.Message)}");
             installationRunning = false;
-            install.Enabled = true;
-            folder.Enabled = true;
-            startMenu.Enabled = true;
-            desktop.Enabled = true;
-            start.Enabled = true;
-            cancel.DialogResult = DialogResult.Cancel;
-            cancel.Text = "Anuluj";
-            cancel.Enabled = true;
-            status.Text = "Instalacja nie została zakończona.";
-            SetIllustration("error");
-            if (MessageBox.Show(this, $"Nie udało się zainstalować Sentinel AI.\n\n{ex.Message}\n\nLog: {Program.LogPath}\n\nCzy otworzyć log?", "Błąd instalacji", MessageBoxButtons.YesNo, MessageBoxIcon.Error) == DialogResult.Yes)
-                Process.Start(new ProcessStartInfo(Program.LogPath) { UseShellExecute = true });
+            lastError = $"Nie udało się zakończyć instalacji.\r\n\r\n{ex.Message}\r\n\r\nLog diagnostyczny: {Program.LogPath}";
+            ShowPage(WizardPage.Error, retryable: true);
         }
         finally
         {
@@ -744,6 +905,130 @@ internal sealed class SetupWizard : Form
         }
     }
 
+    private void ShowPage(WizardPage target, bool retryable = false)
+    {
+        page = target;
+        if (target == WizardPage.Error) errorCanRetry = retryable;
+        var showLocation = target == WizardPage.Location;
+        var showOptions = target == WizardPage.Options;
+        var showSummary = target == WizardPage.Summary;
+        var showProgress = target is WizardPage.Installing or WizardPage.Verify;
+        var showError = target == WizardPage.Error;
+        pathLabel.Visible = folder.Visible = browse.Visible = spaceInfo.Visible = showLocation;
+        startMenu.Visible = desktop.Visible = start.Visible = showOptions;
+        summary.Visible = showSummary;
+        status.Visible = showProgress || target == WizardPage.Complete;
+        progress.Visible = showProgress || target == WizardPage.Complete;
+        errorDetails.Visible = showError;
+        openLog.Visible = showError;
+        launchAfter.Visible = target is WizardPage.Options or WizardPage.Complete;
+        illustration.Visible = target is WizardPage.Welcome or WizardPage.Options or WizardPage.Installing or WizardPage.Verify or WizardPage.Complete or WizardPage.Error;
+        back.Visible = target is WizardPage.Location or WizardPage.Options or WizardPage.Summary or WizardPage.Error;
+        cancel.Visible = target is WizardPage.Location or WizardPage.Options or WizardPage.Summary or WizardPage.Installing or WizardPage.Verify;
+        cancel.Enabled = target != WizardPage.Verify && !(target == WizardPage.Installing && progress.Value >= 80);
+        next.Visible = target is not (WizardPage.Installing or WizardPage.Verify);
+        next.Enabled = !installationRunning;
+        next.Text = target switch
+        {
+            WizardPage.Welcome => "Rozpocznij",
+            WizardPage.Location or WizardPage.Options => "Dalej",
+            WizardPage.Summary => "Zainstaluj",
+            WizardPage.Error when errorCanRetry => "Ponów instalację",
+            WizardPage.Error => "Zakończ",
+            WizardPage.Complete => "Zakończ",
+            _ => "Dalej"
+        };
+        back.Enabled = !installationRunning;
+        step.Text = target switch
+        {
+            WizardPage.Welcome => "KROK 1 Z 7  •  POWITANIE",
+            WizardPage.Location => "KROK 2 Z 7  •  LOKALIZACJA",
+            WizardPage.Options => "KROK 3 Z 7  •  USTAWIENIA",
+            WizardPage.Summary => "KROK 4 Z 7  •  PODSUMOWANIE",
+            WizardPage.Installing => "KROK 5 Z 7  •  INSTALOWANIE",
+            WizardPage.Verify => "KROK 6 Z 7  •  WERYFIKACJA",
+            WizardPage.Complete => "KROK 7 Z 7  •  GOTOWE",
+            _ => "BŁĄD INSTALACJI"
+        };
+        heading.Text = target switch
+        {
+            WizardPage.Welcome => "Sentinel AI",
+            WizardPage.Location => "Wybierz lokalizację",
+            WizardPage.Options => "Dostosuj instalację",
+            WizardPage.Summary => "Sprawdź ustawienia",
+            WizardPage.Installing => "Instaluję Sentinel AI",
+            WizardPage.Verify => "Weryfikuję instalację",
+            WizardPage.Complete => "Instalacja zakończona",
+            _ => "Wystąpił problem"
+        };
+        intro.Text = target switch
+        {
+            WizardPage.Welcome => "Własna instalacja Sentinel AI. Program zostanie zainstalowany w profilu użytkownika; nie wymaga uprawnień administratora.",
+            WizardPage.Location => "Wybierz bezpieczny folder w swoim profilu. Istniejąca instalacja zostanie zaktualizowana w tym samym miejscu.",
+            WizardPage.Options => "Wybierz skróty i zachowanie aplikacji. Możesz zmienić te ustawienia później.",
+            WizardPage.Summary => "Instalator sprawdzi pakiet, skopiuje pliki, skonfiguruje wybrane opcje i zweryfikuje wynik.",
+            WizardPage.Installing => "Postęp odpowiada kopiowaniu rzeczywistych plików aplikacji.",
+            WizardPage.Verify => "Sprawdzam pliki programu, ustawienie autostartu, skróty i host przeglądarki.",
+            WizardPage.Complete => "Pliki i konfiguracja instalacji zostały sprawdzone.",
+            _ => "Instalator nie zgłosi sukcesu, jeśli konfiguracja lub weryfikacja się nie powiedzie."
+        };
+        status.Text = target switch
+        {
+            WizardPage.Installing => "Przygotowuję instalację…",
+            WizardPage.Verify => "Weryfikuję pliki i konfigurację…",
+            WizardPage.Complete => "Sentinel AI został zainstalowany i zweryfikowany.",
+            _ => status.Text
+        };
+        if (showSummary)
+        {
+            var path = folder.Text.Trim();
+            summary.Text = $"Lokalizacja: {path}\r\n\r\nSkrót menu Start: {(startMenu.Checked ? "tak" : "nie")}\r\nSkrót na pulpicie: {(desktop.Checked ? "tak" : "nie")}\r\nAutostart Windows: {(start.Checked ? "tak" : "nie")}\r\nUruchom po instalacji: {(launchAfter.Checked ? "tak" : "nie")}\r\n\r\n{TryGetSpaceSummary(path)}";
+        }
+        if (showError) errorDetails.Text = lastError;
+        SetIllustration(target switch
+        {
+            WizardPage.Welcome => "welcome",
+            WizardPage.Options or WizardPage.Summary => "configure",
+            WizardPage.Location => "prepare",
+            WizardPage.Installing => progress.Value < 10 ? "prepare" : "installing",
+            WizardPage.Verify => "configure",
+            WizardPage.Complete => "complete",
+            WizardPage.Error when lastError.Contains("anulowana", StringComparison.OrdinalIgnoreCase) => "cancel",
+            _ => "error"
+        });
+        if (showLocation) RefreshSpaceInfo();
+    }
+
+    private string TryGetSpaceSummary(string path)
+    {
+        try { return Program.GetInstallSpaceSummary(path); }
+        catch (Exception ex) { return ex.Message; }
+    }
+
+    private void RefreshSpaceInfo()
+    {
+        try
+        {
+            spaceInfo.ForeColor = Color.FromArgb(190, 204, 222);
+            spaceInfo.Text = Program.GetInstallSpaceSummary(folder.Text);
+        }
+        catch (Exception ex)
+        {
+            spaceInfo.ForeColor = Color.FromArgb(255, 185, 185);
+            spaceInfo.Text = ex.Message;
+        }
+    }
+
+    private void OpenLog()
+    {
+        try
+        {
+            if (!File.Exists(Program.LogPath)) Program.Log("Installer log opened by user after an error.");
+            Process.Start(new ProcessStartInfo(Program.LogPath) { UseShellExecute = true });
+        }
+        catch (Exception ex) { MessageBox.Show(this, $"Nie można otworzyć logu: {ex.Message}", "Sentinel AI", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    }
+
     private void SetIllustration(string name)
     {
         using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream($"installer-{name}.png");
@@ -751,5 +1036,40 @@ internal sealed class SetupWizard : Form
         using var source = Image.FromStream(stream);
         illustration.Image?.Dispose();
         illustration.Image = new Bitmap(source);
+    }
+
+    internal static void ValidateVisualStates()
+    {
+        using var wizard = new SetupWizard();
+        wizard.lastError = "Kontrolowany błąd testowy instalatora.";
+        foreach (var page in Enum.GetValues<WizardPage>())
+        {
+            wizard.ShowPage(page, retryable: page == WizardPage.Error);
+            if (string.IsNullOrWhiteSpace(wizard.heading.Text) || string.IsNullOrWhiteSpace(wizard.step.Text))
+                throw new InvalidDataException($"Ekran instalatora {page} nie ma nagłówka lub wskaźnika kroku.");
+            if (wizard.illustration.Visible && wizard.illustration.Image is null)
+                throw new InvalidDataException($"Ekran instalatora {page} nie załadował swojej ilustracji.");
+        }
+        wizard.ShowPage(WizardPage.Location);
+        if (!wizard.folder.Visible || !wizard.browse.Visible || !wizard.spaceInfo.Visible)
+            throw new InvalidDataException("Ekran lokalizacji nie pokazuje ścieżki i informacji o miejscu.");
+        wizard.ShowPage(WizardPage.Options);
+        if (!wizard.startMenu.Visible || !wizard.desktop.Visible || !wizard.start.Visible || !wizard.launchAfter.Visible || !wizard.startMenu.Checked || !wizard.desktop.Checked || !wizard.start.Checked || !wizard.launchAfter.Checked)
+            throw new InvalidDataException("Ekran ustawień nie pokazuje domyślnych opcji instalacji.");
+        wizard.ShowPage(WizardPage.Summary);
+        if (!wizard.summary.Visible || !wizard.summary.Text.Contains("Autostart Windows", StringComparison.Ordinal) || !wizard.summary.Text.Contains("Uruchom po instalacji", StringComparison.Ordinal))
+            throw new InvalidDataException("Ekran podsumowania nie zawiera wybranych ustawień.");
+        wizard.ShowPage(WizardPage.Installing);
+        if (!wizard.progress.Visible || !wizard.status.Visible || !wizard.cancel.Visible)
+            throw new InvalidDataException("Ekran instalacji nie pokazuje postępu lub bezpiecznego anulowania.");
+        wizard.ShowPage(WizardPage.Verify);
+        if (!wizard.progress.Visible || wizard.cancel.Enabled)
+            throw new InvalidDataException("Ekran weryfikacji pozwala anulować zatwierdzanie instalacji.");
+        wizard.ShowPage(WizardPage.Complete);
+        if (!wizard.launchAfter.Visible || !wizard.progress.Visible)
+            throw new InvalidDataException("Ekran zakończenia nie pokazuje uruchomienia aplikacji.");
+        wizard.ShowPage(WizardPage.Error, retryable: true);
+        if (!wizard.errorDetails.Visible || !wizard.openLog.Visible || wizard.next.Text != "Ponów instalację")
+            throw new InvalidDataException("Ekran błędu nie udostępnia komunikatu, logu i ponowienia.");
     }
 }
