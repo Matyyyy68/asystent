@@ -1,8 +1,26 @@
-# Inwentaryzacja licencji zależności .NET
+# Inwentaryzacja deklaracji licencji zależności
 
-Stan na 2026-10-22. Lista pochodzi z plików `project.assets.json` bieżącego checkoutu dla klienta, serwera, instalatora i testów. Sprawdzono deklaracje licencji w lokalnych metadanych NuGet (`.nuspec`); to inwentaryzacja metadanych pakietów, nie opinia prawna ani pełna ocena warunków redystrybucji.
+Stan na 2026-10-22. .NET: lista pochodzi z plików `project.assets.json` bieżącego checkoutu dla klienta, serwera, instalatora i testów; sprawdzono lokalne metadane NuGet (`.nuspec`). JavaScript: sprawdzono `package.json` zainstalowanych zależności w `desktop/node_modules` i `website/node_modules`. Wyniki są deklaracjami wydawców, nie opinią prawną ani pełną oceną warunków redystrybucji.
 
-Zebrano 23 unikalne pary pakiet/wydanie: 10 deklaruje SPDX `MIT`, 12 deklaruje `Apache-2.0`, a `xunit.abstractions 2.0.3` deklaruje starsze `licenseUrl` zamiast SPDX. Wskazana strona licencji XUnit zawiera ogólną licencję Apache-2.0 oraz MIT dla wymienionych importowanych komponentów; ten pakiet wymaga ręcznej kontroli przed redystrybucją. Raport nie obejmuje zależności npm/Electron, treści całych paczek binarnych, narzędzi CI ani transitive system runtimes.
+Zebrano deklaracje dla 263 unikalnych par pakiet/wydanie: 23 NuGet oraz 240 zainstalowanych npm. Lockfile npm zawierają 290 unikalnych par pakiet/wydanie; 50 nie jest zainstalowanych w bieżących folderach `node_modules` (m.in. warianty platformowe) i ich deklaracje nie są w tym raporcie zweryfikowane. Wszystkie 240 zainstalowanych pakietów npm mają pole licencji w manifeście. Raport nie obejmuje treści całych paczek binarnych, narzędzi CI ani transitive system runtimes.
+
+## npm / Electron
+
+| Deklaracja `license` | Liczba pakietów |
+|---|---:|
+| MIT | 175 |
+| ISC | 33 |
+| BlueOak-1.0.0 | 8 |
+| Apache-2.0 | 7 |
+| BSD-3-Clause | 7 |
+| BSD-2-Clause | 5 |
+| `(WTFPL OR MIT)` | 1 |
+| `0BSD` | 1 |
+| `Python-2.0` | 1 |
+| WTFPL | 1 |
+| `WTFPL OR ISC` | 1 |
+
+Deklaracje inne niż MIT/ISC/Apache-2.0/BSD wymagają ręcznego przeglądu warunków, zwłaszcza przy redystrybucji: `chownr@3.0.0`, `isexe@3.1.5` i `4.0.0`, `minimatch@10.2.6`, `minipass@7.1.3`, `sax@1.6.1`, `tar@7.5.22`, `yallist@5.0.0` (BlueOak); `utf8-byte-length@1.0.5` (WTFPL OR MIT); `tslib@2.8.1` (0BSD); `argparse@2.0.1` (Python-2.0); `truncate-utf8-bytes@1.0.2` (WTFPL); `sanitize-filename@1.6.4` (WTFPL OR ISC). Zestaw deklaracji zależności zainstalowanych jest dostępny w [CSV](dependency-license-inventory.csv).
 
 ## MIT
 
@@ -35,4 +53,4 @@ Zebrano 23 unikalne pary pakiet/wydanie: 10 deklaruje SPDX `MIT`, 12 deklaruje `
 
 - `xunit.abstractions 2.0.3` — nuspec wskazuje [plik licencji projektu XUnit](https://raw.githubusercontent.com/xunit/xunit/master/license.txt), a nie wyrażenie SPDX. Plik opisuje Apache-2.0 jako licencję ogólną i zawiera wyjątki MIT dla dwóch importowanych komponentów.
 
-Właściciel nie wskazał jeszcze licencji samego Sentinel AI. Nie dodano pliku `LICENSE`; decyzja produktu i zgodność całego zestawu źródeł/redystrybucji pozostają otwarte. Wymagają też osobnej inwentaryzacji licencje zależności JavaScript i dołączonych narzędzi.
+Właściciel nie wskazał jeszcze licencji samego Sentinel AI. Nie dodano pliku `LICENSE`; decyzja produktu i zgodność całego zestawu źródeł/redystrybucji pozostają otwarte. Pozostają ręczny przegląd deklaracji nietypowych, 49 npm pakietów zapisanych w lockfile, ale nieobecnych lokalnie, oraz dołączonych narzędzi.
