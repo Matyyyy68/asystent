@@ -103,20 +103,20 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   writeFileSync(path.join(downloadsDirectory, 'nested', 'synthetic-nested.ps1'), 'Write-Output synthetic');
   await new Promise(resolve => setTimeout(resolve, 900)); await call('collect');
   downloadedHistory = (await call('history')).result;
-  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 1,
-    'Downloads monitor must skip oversized files and subdirectories');
+  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 2,
+    'Downloads monitor must skip oversized files and include a matching file in a subdirectory');
   await call('pause', { paused: true });
   writeFileSync(path.join(downloadsDirectory, 'synthetic-paused.ps1'), 'Write-Output synthetic');
   await new Promise(resolve => setTimeout(resolve, 900)); await call('collect');
   downloadedHistory = (await call('history')).result;
-  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 1,
+  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 2,
     'paused monitoring must not inspect or record downloaded files');
   await call('pause', { paused: false });
   await call('settings', { retentionDays: 30, notifications: true, monitorDownloadedFiles: false });
   writeFileSync(path.join(downloadsDirectory, 'synthetic-disabled.ps1'), 'Write-Output synthetic');
   await call('collect'); await new Promise(resolve => setTimeout(resolve, 900)); await call('collect');
   downloadedHistory = (await call('history')).result;
-  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 1,
+  assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 2,
     'disabled Downloads monitoring must stop processing new files');
   const snapshotStarted = performance.now();
   const connectionSnapshot = await call('connections'); assert.equal(connectionSnapshot.ok, true, connectionSnapshot.error);

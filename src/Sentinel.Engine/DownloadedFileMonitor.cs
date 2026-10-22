@@ -5,7 +5,7 @@ using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 
-/// <summary>Opt-in, local-only watcher for new files directly in the user's Downloads folder.</summary>
+/// <summary>Opt-in, local-only watcher for new files in the user's Downloads tree.</summary>
 public sealed class DownloadedFileMonitor : IDisposable
 {
     private const int DefaultMaximumBaselineFiles = 100_000;
@@ -16,6 +16,7 @@ public sealed class DownloadedFileMonitor : IDisposable
     private readonly string directory;
     private readonly int maximumPendingFiles;
     private readonly int maximumBaselineFiles;
+    private readonly TimeSpan reconciliationInterval;
     private readonly ConcurrentDictionary<string, DateTimeOffset> pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> processedFingerprints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileFingerprint> baseline = new(StringComparer.OrdinalIgnoreCase);
@@ -23,6 +24,7 @@ public sealed class DownloadedFileMonitor : IDisposable
     private long droppedPendingFiles;
     private long rescanRequestedVersion;
     private long rescanCompletedVersion;
+    private DateTimeOffset lastReconciledAtUtc;
     private FileSystemWatcher? watcher;
     private bool enabledRequested;
 
@@ -55,13 +57,17 @@ public sealed class DownloadedFileMonitor : IDisposable
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SHGetKnownFolderPath(ref Guid rfid, uint flags, IntPtr token, out IntPtr path);
 
-    public DownloadedFileMonitor(string directory, int maximumPendingFiles = 1000, int maximumBaselineFiles = DefaultMaximumBaselineFiles)
+    public DownloadedFileMonitor(string directory, int maximumPendingFiles = 1000, int maximumBaselineFiles = DefaultMaximumBaselineFiles,
+        TimeSpan? reconciliationInterval = null)
     {
         if (maximumPendingFiles < 1) throw new ArgumentOutOfRangeException(nameof(maximumPendingFiles));
         if (maximumBaselineFiles < 1) throw new ArgumentOutOfRangeException(nameof(maximumBaselineFiles));
+        var interval = reconciliationInterval ?? TimeSpan.FromMinutes(5);
+        if (interval <= TimeSpan.Zero || interval > TimeSpan.FromHours(1)) throw new ArgumentOutOfRangeException(nameof(reconciliationInterval));
         this.directory = Path.GetFullPath(directory);
         this.maximumPendingFiles = maximumPendingFiles;
         this.maximumBaselineFiles = maximumBaselineFiles;
+        this.reconciliationInterval = interval;
     }
 
     public async Task SetEnabledAsync(LocalStore store, bool enabled, CancellationToken cancellationToken = default)
@@ -90,7 +96,7 @@ public sealed class DownloadedFileMonitor : IDisposable
         {
             next = new FileSystemWatcher(directory)
             {
-                IncludeSubdirectories = false,
+                IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.Size | NotifyFilters.LastWrite,
                 Filter = "*",
                 EnableRaisingEvents = false
@@ -101,7 +107,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             next.Renamed += OnFileRenamed;
             next.Error += (_, _) =>
             {
-                Interlocked.Increment(ref rescanRequestedVersion);
+                RequestRescan();
                 State = "Monitoring Downloads odtwarza zmiany po utracie zdarzeń systemu plików.";
             };
             next.EnableRaisingEvents = true;
@@ -120,7 +126,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             else
             {
                 foreach (var item in saved.Files) baseline[item.Key] = new(item.Value.Length, item.Value.LastWriteTicks);
-                if (!CaptureCurrentPaths(out var currentPaths))
+                if (!TryEnumerateFilesWithoutFollowingReparsePoints(out var currentPaths))
                 {
                     next.Dispose(); watcher = null;
                     State = $"Monitoring pobranych plików niedostępny: nie można wznowić baseline'u (limit {maximumBaselineFiles} ścieżek lub błąd odczytu).";
@@ -134,6 +140,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             State = saved.Initialized
                 ? $"Monitoring Downloads wznowiono z lokalnego baseline'u; zmiany od ostatniej sesji są sprawdzane. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}."
                 : $"Monitoring Downloads działa; pliki są sprawdzane lokalnie względem listy hashy. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
+            lastReconciledAtUtc = DateTimeOffset.UtcNow;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or SqliteException or InvalidDataException)
         {
@@ -150,12 +157,13 @@ public sealed class DownloadedFileMonitor : IDisposable
         if (enabledRequested && watcher is null)
             await SetEnabledAsync(store, true, cancellationToken);
         if (watcher is null) return 0;
+        if (DateTimeOffset.UtcNow - lastReconciledAtUtc >= reconciliationInterval) RequestRescan();
+        await ReconcileIfNeededAsync(store, cancellationToken);
         if (reputation.Status().HashCount == 0)
         {
             State = $"Monitoring Downloads działa; zaimportuj lokalną listę hashy, aby sprawdzać pliki. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
             return 0;
         }
-        ReconcileIfNeeded(cancellationToken);
         var cutoff = DateTimeOffset.UtcNow - SettleTime;
         var ready = pending.Where(item => item.Value <= cutoff).Take(MaximumFilesPerSample).ToArray();
         var detections = 0;
@@ -167,7 +175,12 @@ public sealed class DownloadedFileMonitor : IDisposable
             try
             {
                 var info = new FileInfo(item.Key);
-                if (!IsDirectChild(info.FullName)) continue;
+                if (!IsInsideDownloadsTreeWithoutReparsePoints(info.FullName))
+                {
+                    await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
+                    baseline.TryRemove(info.FullName, out _);
+                    continue;
+                }
                 if (!info.Exists)
                 {
                     await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
@@ -254,62 +267,108 @@ public sealed class DownloadedFileMonitor : IDisposable
         return detections;
     }
 
-    private bool IsDirectChild(string path) => string.Equals(Path.GetDirectoryName(path), directory,
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-
-    private bool CaptureBaseline()
+    private bool IsInsideDownloadsTreeWithoutReparsePoints(string path)
     {
-        baseline.Clear();
+        var fullPath = Path.GetFullPath(path);
+        var relativePath = Path.GetRelativePath(directory, fullPath);
+        var separator = Path.DirectorySeparatorChar;
+        if (relativePath is "." or ".." || Path.IsPathRooted(relativePath) ||
+            relativePath.StartsWith(".." + separator, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            return false;
+
+        var parts = relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) return false;
+        var parent = directory;
         try
         {
-            foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+            for (var index = 0; index < parts.Length - 1; index++)
             {
-                var info = new FileInfo(path);
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                if (baseline.Count >= maximumBaselineFiles) return false;
-                baseline[info.FullName] = Fingerprint(info);
+                parent = Path.Combine(parent, parts[index]);
+                var attributes = File.GetAttributes(parent);
+                if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0)
+                    return false;
             }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    private bool TryEnumerateFilesWithoutFollowingReparsePoints(out string[] paths)
+    {
+        var files = new List<string>();
+        var directories = new Stack<string>();
+        var visitedDirectories = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        directories.Push(directory);
+        try
+        {
+            while (directories.Count > 0)
+            {
+                var current = Path.GetFullPath(directories.Pop());
+                if (!visitedDirectories.Add(current)) continue;
+                if (visitedDirectories.Count > maximumBaselineFiles)
+                {
+                    paths = [];
+                    return false;
+                }
+
+                foreach (var entryPath in Directory.EnumerateFileSystemEntries(current))
+                {
+                    var attributes = File.GetAttributes(entryPath);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        directories.Push(entryPath);
+                        continue;
+                    }
+
+                    if (files.Count >= maximumBaselineFiles)
+                    {
+                        paths = [];
+                        return false;
+                    }
+                    files.Add(Path.GetFullPath(entryPath));
+                }
+            }
+            paths = files.ToArray();
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            paths = [];
             return false;
         }
     }
 
-    private bool CaptureCurrentPaths(out string[] paths)
+    private bool CaptureBaseline()
     {
-        var collected = new List<string>();
-        try
+        baseline.Clear();
+        if (!TryEnumerateFilesWithoutFollowingReparsePoints(out var paths)) return false;
+        foreach (var path in paths)
         {
-            foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
-            {
-                var info = new FileInfo(path);
-                if ((info.Attributes & FileAttributes.ReparsePoint) != 0) continue;
-                if (collected.Count >= maximumBaselineFiles) { paths = []; return false; }
-                collected.Add(info.FullName);
-            }
-            paths = collected.ToArray(); return true;
+            var info = new FileInfo(path);
+            if (info.Exists && (info.Attributes & FileAttributes.ReparsePoint) == 0)
+                baseline[info.FullName] = Fingerprint(info);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        { paths = []; return false; }
+        return true;
     }
 
-    private void ReconcileIfNeeded(CancellationToken cancellationToken)
+    private async Task ReconcileIfNeededAsync(LocalStore store, CancellationToken cancellationToken)
     {
         var requestedVersion = Interlocked.Read(ref rescanRequestedVersion);
         if (requestedVersion == Interlocked.Read(ref rescanCompletedVersion)) return;
         try
         {
-            var scannedFiles = 0;
-            foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+            if (!TryEnumerateFilesWithoutFollowingReparsePoints(out var currentPaths))
+            {
+                State = $"Monitoring Downloads nie może zakończyć odtwarzania: folder przekracza limit {maximumBaselineFiles} plików lub katalogów albo jest niedostępny.";
+                return;
+            }
+            foreach (var path in currentPaths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (++scannedFiles > maximumBaselineFiles)
-                {
-                    State = $"Monitoring Downloads nie może zakończyć odtwarzania: folder przekracza limit {maximumBaselineFiles} plików.";
-                    return;
-                }
                 var info = new FileInfo(path);
                 if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0 || info.Length > MaximumFileBytes) continue;
                 var fingerprint = Fingerprint(info);
@@ -322,12 +381,20 @@ public sealed class DownloadedFileMonitor : IDisposable
                     pending[info.FullName] = DateTimeOffset.UtcNow;
                 }
             }
+            var currentSet = new HashSet<string>(currentPaths, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            await store.PruneDownloadedFileMonitorSnapshotAsync(currentPaths, maximumBaselineFiles, cancellationToken);
+            foreach (var stalePath in baseline.Keys.Where(path => !currentSet.Contains(path)).ToArray()) baseline.TryRemove(stalePath, out _);
             Interlocked.Exchange(ref rescanCompletedVersion, requestedVersion);
-            State = $"Monitoring Downloads działa; ponowne sprawdzenie katalogu odtworzyło zmiany po przepełnieniu kolejki. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
+            lastReconciledAtUtc = DateTimeOffset.UtcNow;
+            State = $"Monitoring Downloads odtworzył lokalny baseline katalogu. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             State = "Monitoring Downloads nie mógł dokończyć odtwarzania zmian; ponowi próbę przy następnym collect.";
+        }
+        catch (SqliteException)
+        {
+            State = "Monitoring Downloads nie mógł zapisać odtworzonego baseline'u; ponowi próbę przy następnym collect.";
         }
     }
 
@@ -364,17 +431,45 @@ public sealed class DownloadedFileMonitor : IDisposable
         foreach (var key in processedFingerprints.Keys.Take(500)) processedFingerprints.TryRemove(key, out _);
     }
 
-    private void OnFileChanged(object sender, FileSystemEventArgs args) => Queue(args.FullPath);
+    private void OnFileChanged(object sender, FileSystemEventArgs args)
+    {
+        if (Directory.Exists(args.FullPath) || (args.ChangeType == WatcherChangeTypes.Deleted && HasTrackedDescendant(args.FullPath)))
+        {
+            RequestRescan();
+            return;
+        }
+        Queue(args.FullPath);
+    }
     private void OnFileRenamed(object sender, RenamedEventArgs args)
     {
+        if (Directory.Exists(args.FullPath) || HasTrackedDescendant(args.OldFullPath))
+        {
+            RequestRescan();
+            return;
+        }
         Queue(args.OldFullPath);
         Queue(args.FullPath);
     }
 
+    private bool HasTrackedDescendant(string path)
+    {
+        var fullPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return baseline.Keys.Concat(pending.Keys).Any(candidate => Path.GetFullPath(candidate).StartsWith(fullPath, comparison));
+    }
+
+    private void RequestRescan() => Interlocked.Increment(ref rescanRequestedVersion);
+
     private void Queue(string path)
     {
-        if (Directory.Exists(path)) return;
         var fullPath = Path.GetFullPath(path);
+        if (Directory.Exists(fullPath)) { RequestRescan(); return; }
+        if (!IsInsideDownloadsTreeWithoutReparsePoints(fullPath))
+        {
+            var parent = Path.GetDirectoryName(fullPath);
+            if (parent is not null && !Directory.Exists(parent) && IsLexicallyInsideDownloadsTree(fullPath)) RequestRescan();
+            return;
+        }
         lock (pendingGate)
         {
             if (!pending.ContainsKey(fullPath) && pending.Count >= maximumPendingFiles)
@@ -386,6 +481,14 @@ public sealed class DownloadedFileMonitor : IDisposable
             }
             pending[fullPath] = DateTimeOffset.UtcNow;
         }
+    }
+
+    private bool IsLexicallyInsideDownloadsTree(string path)
+    {
+        var relativePath = Path.GetRelativePath(directory, Path.GetFullPath(path));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return relativePath is not ("." or "..") && !Path.IsPathRooted(relativePath) &&
+            !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, comparison);
     }
 
     public void Dispose()

@@ -24,6 +24,9 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         await store.InitializeAsync();
 
         await File.WriteAllTextAsync(Path.Combine(downloads, "preexisting.bin"), payload);
+        var preexistingFolder = Path.Combine(downloads, "existing-folder");
+        Directory.CreateDirectory(preexistingFolder);
+        await File.WriteAllTextAsync(Path.Combine(preexistingFolder, "preexisting-nested.bin"), payload);
         using var monitor = new DownloadedFileMonitor(downloads, maximumPendingFiles: 2);
         await monitor.SetEnabledAsync(store, true);
         Assert.Contains("działa", monitor.State, StringComparison.OrdinalIgnoreCase);
@@ -31,20 +34,50 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         const int newFiles = 5;
         for (var index = 0; index < newFiles; index++)
             await File.WriteAllTextAsync(Path.Combine(downloads, $"new-{index}.bin"), payload);
+        var newFolder = Path.Combine(downloads, "new-folder");
+        Directory.CreateDirectory(newFolder);
+        await File.WriteAllTextAsync(Path.Combine(newFolder, "nested-new.bin"), payload);
 
         await Task.Delay(TimeSpan.FromMilliseconds(900));
         var recorded = 0;
-        for (var attempt = 0; attempt < 40 && recorded < newFiles; attempt++)
+        for (var attempt = 0; attempt < 40 && recorded < newFiles + 1; attempt++)
         {
             recorded += await monitor.CollectAsync(store, reputation);
-            if (recorded < newFiles) await Task.Delay(TimeSpan.FromMilliseconds(100));
+            if (recorded < newFiles + 1) await Task.Delay(TimeSpan.FromMilliseconds(100));
         }
 
-        Assert.Equal(newFiles, recorded);
+        Assert.Equal(newFiles + 1, recorded);
         var events = await store.ReadAsync();
-        Assert.Equal(newFiles, events.Count(item => item.Source == "downloads-local-hash"));
+        Assert.Equal(newFiles + 1, events.Count(item => item.Source == "downloads-local-hash"));
         Assert.DoesNotContain(events, item => item.Application == "preexisting.bin");
-        Assert.Contains("odtworzyło", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(events, item => item.Application == "preexisting-nested.bin");
+        Assert.DoesNotContain("nested-new.bin", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("odtworzył", monitor.State, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DeletingNestedFolderPrunesItsPersistedFilesFromBaseline()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        var nested = Path.Combine(downloads, "nested");
+        Directory.CreateDirectory(nested);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+        await File.WriteAllTextAsync(Path.Combine(nested, "old.bin"), "existing nested file");
+
+        using var monitor = new DownloadedFileMonitor(downloads, reconciliationInterval: TimeSpan.FromMilliseconds(100));
+        await monitor.SetEnabledAsync(store, true);
+        Assert.Single((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
+
+        Directory.Delete(nested, recursive: true);
+        for (var attempt = 0; attempt < 40 && (await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Count > 0; attempt++)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+            await monitor.CollectAsync(store, new FileHashReputation(Path.Combine(data, "reputation")));
+        }
+
+        Assert.Empty((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
     }
 
     [Fact]
