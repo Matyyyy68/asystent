@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reguły URL `2026.10.3` dodają umiarkowany sygnał, gdy ścieżka logowania/weryfikacji/płatności występuje razem ze złożonym URL. Ewaluacja offline 235 795 adresów PhiUSIIL (URL-only, bez otwierania adresów) zmieniła TP/FN z 117/100 828 do 2 068/98 877 przy 14 FP w obu pomiarach; recall nadal wynosi tylko 2,05% i nie jest to wynik produkcyjny. Zestaw nie jest dołączony; skrypt i ograniczenia opisuje `docs/DETECTION-EVALUATION.md`.
 - Dodatkowa walidacja Enterprise dla bieżącego kodu: `dotnet test server/Sentinel.Server.sln -c Release` 22/22, Release build bez ostrzeżeń, HTTP smoke na loopback PASS. Smoke objął auth/RBAC, polityki, konfigurację AI i zgodę, bazę wiedzy, zaproszenia/enrollment, heartbeat, audit i revoke.
 
 - Opt-in monitoring Downloads obejmuje nowe i zmienione pliki także w podfolderach. Nie podąża za reparse points, uzgadnia całe drzewo co 5 minut i usuwa z baseline'u ścieżki po skasowaniu katalogu; testy sprawdzają nowy plik z podfolderu, pominięcie plików sprzed włączenia i sprzątanie po usunięciu drzewa.

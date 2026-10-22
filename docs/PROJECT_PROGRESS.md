@@ -3,7 +3,7 @@
 **Aktualizacja:** 2026-10-22
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
 
-**Stan zweryfikowany (SQLite v20):** pełna bramka PASS: .NET 245/245 bez pominięć, monitor 11/11, Engine IPC i Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI i autotest instalatora; Enterprise API 22/22, Release build i HTTP smoke PASS. Nieopublikowany lokalny instalator SHA-256 `338514FF1B152240B17BB574B913CDD32B1477512FCB9961ABBB7D5CCF15D219`.
+**Stan zweryfikowany (SQLite v20, reguły URL 2026.10.3):** pełna bramka builda/instalatora PASS: .NET 250/250 bez pominięć, Engine IPC i Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI i autotest instalatora. Enterprise API 22/22, Release build i HTTP smoke również przeszły. Nieopublikowany lokalny instalator SHA-256 `65A90A484B0333CE8F90FAC581CB92D4B90E224F27508606FEA50927CC31FF9E`.
 
 **Audyt zakresu:** macierz `docs/IMPLEMENTATION_GAP_ANALYSIS.md` ma 21 obszarów: 5 `DONE_AND_VERIFIED`, 15 `PARTIALLY_IMPLEMENTED`, 0 `MISSING` i 1 `BLOCKED`; 16 obszarów nie spełnia wszystkich kryteriów ukończenia. Istnieje 11 osobnych planów (`PLAN-001`–`PLAN-011`), wszystkie `IN_PROGRESS`. Nie wyliczam procentu, bo priorytety i kryteria nie są równoważne.
 
@@ -13,6 +13,8 @@
 **Instalator GUI:** po potwierdzeniu użytkownika uruchomiłem lokalny v0.15.38, ale podgląd okna dwukrotnie przekroczył limit czasu (`FrameArrived timed out`, `window capture timed out`). Nie kliknąłem kontrolek ani nie rozpocząłem instalacji; kontrola procesu nie wykazała działającego procesu instalatora. Pełny GUI install/update/uninstall nadal jest nieweryfikowany.
 
 **Okno błędu `dotnet.exe` (0xe0434352):** podczas bieżącego testu serwera uruchomiony proces API nie załadował tymczasowego certyfikatu PFX w sandboxie i zakończył się `CryptographicException`; poza sandboxem ten sam test TLS przeszedł, a pełna suita Enterprise przeszła 22/22. Test ma teraz preflight importu certyfikatu w procesie testowym, zanim uruchomi proces potomny. To potwierdza błąd w sandboxowym teście, ale nie dowodzi, że wyjaśnia każde okno błędu na komputerze; instalator GUI nie został uruchomiony w tej walidacji.
+
+**Ewaluacja detekcji URL:** reguła `url.auth_structure` w wersji `2026.10.3` przeszła testy syntetyczne 27/27. Pełna ewaluacja URL-only na UCI PhiUSIIL dała TP=2 068, FP=14, TN=134 836, FN=98 877, recall 2,05%; cały zbiór służył eksploracji i pomiarowi, bez holdoutu, więc nie dowodzi skuteczności produkcyjnej. Reprodukcja i ograniczenia są w `docs/DETECTION-EVALUATION.md`.
 
 **Zakres pozostałych prac:** wciąż otwarte są m.in. event stream procesów/zdarzeń (WMI/ETW odrzuciły dostęp), reprezentatywna ewaluacja i kalibracja detekcji, pełny test GUI instalatora/autostartu, rzeczywisty Ollama i MalwareBazaar, semantyczne wyszukiwanie/OCR, podpisane aktualizacje oraz testy Enterprise z zaufanym certyfikatem wdrożeniowym. Część wymaga zewnętrznych danych, uprawnień lub decyzji; kod i testy możliwe bez tych zależności są nadal do realizacji.
 

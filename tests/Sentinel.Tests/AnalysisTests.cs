@@ -90,7 +90,28 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.2", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.3", ThreatAnalysisEngine.RulesVersion);
+    }
+    [Theory]
+    [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("https://a.b.c.d.example.test/login")]
+    public void AuthenticationPathCombinedWithComplexUrlRaisesModerateWarning(string url)
+    {
+        var result = Engine().Analyze(Input("", url));
+        Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
+        Assert.True(result.Risk >= RiskLevel.Moderate);
+        Assert.Equal("2026.10.3", ThreatAnalysisEngine.RulesVersion);
+        Assert.DoesNotContain(url, result.Explanation);
+    }
+    [Theory]
+    [InlineData("https://accounts.google.com/login")]
+    [InlineData("https://example.test/this-is-a-very-long-but-ordinary-information-page-with-many-segments/without-any-authentication-word")]
+    [InlineData("https://example.test/blogin?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public void AuthenticationOrStructuralSignalsAloneDoNotRaiseRisk(string url)
+    {
+        var result = Engine().Analyze(Input("", url));
+        Assert.DoesNotContain(result.Indicators, item => item.Id == "url.auth_structure");
+        Assert.True(result.Risk < RiskLevel.Moderate);
     }
     [Theory]
     [InlineData("http://example.test")]
@@ -122,7 +143,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.2", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.3", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]

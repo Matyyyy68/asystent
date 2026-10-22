@@ -1,10 +1,15 @@
 using System.Net;
+using System.Text.RegularExpressions;
 
 namespace Sentinel.Core.Analysis;
 
 /// <summary>Pure offline analysis. Never resolves DNS or visits a target.</summary>
 public sealed class UrlAnalyzer(DomainNames domains)
 {
+    private static readonly Regex AuthenticationPath = new(
+        @"(?:^|[/?&=._-])(?:login|log-in|signin|sign-in|verify|verification|account|password|auth|payment|wallet)(?=$|[/?&=._-])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     private static readonly Dictionary<string, string[]> Brands = new(StringComparer.Ordinal)
     {
         ["paypal"] = ["paypal.com"], ["microsoft"] = ["microsoft.com", "microsoftonline.com", "live.com", "office.com"],
@@ -28,6 +33,11 @@ public sealed class UrlAnalyzer(DomainNames domains)
         if (uri.UserInfo.Length > 0) Add("url.userinfo", "Adres zawiera część przed znakiem @, która może mylić co do celu.", 3);
         if (host.Split('.').Any(l => l.StartsWith("xn--", StringComparison.Ordinal))) Add("url.idn", "Nazwa domeny zawiera znaki IDN; sama ta cecha nie dowodzi oszustwa.", 1);
         if (new[] { "zip", "mov", "top", "xyz" }.Contains(host.Split('.')[^1])) Add("url.tld", "Sufiks domeny wymaga dodatkowej weryfikacji.", 1);
+        var pathAndQuery = uri.PathAndQuery;
+        var structurallyComplex = value.Length >= 120 || host.Split('.').Length >= 5 ||
+            pathAndQuery.Length >= 60 || pathAndQuery.Count(character => character == '/') >= 4;
+        if (structurallyComplex && AuthenticationPath.IsMatch(pathAndQuery))
+            Add("url.auth_structure", "Adres łączy ścieżkę logowania, weryfikacji lub płatności z dodatkową złożonością URL.", 3);
         if (registered is not null)
         {
             var label = registered.Split('.')[0];
