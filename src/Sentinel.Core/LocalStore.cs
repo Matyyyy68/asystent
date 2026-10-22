@@ -96,7 +96,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 18) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 19) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -255,6 +255,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 await Execute(c, "PRAGMA user_version=18; COMMIT;", ct);
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 19)
+        {
+            await Execute(c, "BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS windows_persistence_snapshot(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.run','registry.runonce','startup.folder')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); CREATE TABLE IF NOT EXISTS windows_persistence_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1))); INSERT OR IGNORE INTO windows_persistence_monitor_metadata(id,initialized) VALUES(1,0); PRAGMA user_version=19; COMMIT;", ct);
         }
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
@@ -605,6 +609,84 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         using var command = c.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "DELETE FROM downloaded_file_snapshot; UPDATE downloaded_file_monitor_metadata SET initialized=0 WHERE id=1";
         await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    public async Task<WindowsPersistenceMonitorSnapshot> ReadWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized FROM windows_persistence_monitor_metadata WHERE id=1";
+        var initialized = Convert.ToInt32(await metadata.ExecuteScalarAsync(ct) ?? 0, CultureInfo.InvariantCulture) == 1;
+        using var query = c.CreateCommand(); query.CommandText = "SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot ORDER BY entry_key LIMIT 256";
+        using var reader = await query.ExecuteReaderAsync(ct);
+        var entries = new Dictionary<string, WindowsPersistenceFingerprint>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(ct))
+        {
+            var entry = new WindowsPersistenceFingerprint(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3) == 1);
+            ValidateWindowsPersistenceFingerprint(entry);
+            entries.Add(entry.Key, entry);
+        }
+        return new(initialized, entries);
+    }
+    public async Task InitializeWindowsPersistenceMonitorSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, CancellationToken ct = default)
+    {
+        ValidateWindowsPersistenceFingerprints(entries);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var clear = c.CreateCommand()) { clear.Transaction = transaction; clear.CommandText = "DELETE FROM windows_persistence_snapshot"; await clear.ExecuteNonQueryAsync(ct); }
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task CommitWindowsPersistenceChangeAsync(string key, WindowsPersistenceFingerprint? current, SecurityEvent item, CancellationToken ct = default)
+    {
+        if (current is not null && !string.Equals(current.Key, key, StringComparison.Ordinal)) throw new ArgumentException("Niezgodny klucz wpisu autostartu.", nameof(current));
+        if (current is not null) ValidateWindowsPersistenceFingerprint(current);
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 100) throw new ArgumentException("Nieprawidłowy klucz wpisu autostartu.", nameof(key));
+        var (eventId, source) = ValidateEvent(item);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var insert = c.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch)";
+            AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        if (current is null)
+        {
+            using var remove = c.CreateCommand(); remove.Transaction = transaction; remove.CommandText = "DELETE FROM windows_persistence_snapshot WHERE entry_key=$key";
+            remove.Parameters.AddWithValue("$key", key); await remove.ExecuteNonQueryAsync(ct);
+        }
+        else await UpsertWindowsPersistenceFingerprintAsync(c, transaction, current, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task ResetWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "DELETE FROM windows_persistence_snapshot; UPDATE windows_persistence_monitor_metadata SET initialized=0 WHERE id=1";
+        await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    private static void ValidateWindowsPersistenceFingerprints(IReadOnlyCollection<WindowsPersistenceFingerprint> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count > 256) throw new ArgumentOutOfRangeException(nameof(entries), "Przekroczono limit migawki autostartu.");
+        foreach (var entry in entries) ValidateWindowsPersistenceFingerprint(entry);
+        if (entries.Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Count() != entries.Count)
+            throw new ArgumentException("Migawka autostartu zawiera powtórzone klucze.", nameof(entries));
+    }
+    private static void ValidateWindowsPersistenceFingerprint(WindowsPersistenceFingerprint entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Key) || entry.Key.Length > 100 ||
+            entry.Source is not ("registry.run" or "registry.runonce" or "startup.folder") ||
+            entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
+            throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
+    }
+    private static async Task UpsertWindowsPersistenceFingerprintAsync(SqliteConnection c, SqliteTransaction transaction,
+        WindowsPersistenceFingerprint entry, CancellationToken ct)
+    {
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT INTO windows_persistence_snapshot(entry_key,source,fingerprint,writable_location) VALUES($key,$source,$fingerprint,$writable) ON CONFLICT(entry_key) DO UPDATE SET source=excluded.source,fingerprint=excluded.fingerprint,writable_location=excluded.writable_location";
+        command.Parameters.AddWithValue("$key", entry.Key); command.Parameters.AddWithValue("$source", entry.Source);
+        command.Parameters.AddWithValue("$fingerprint", entry.Fingerprint); command.Parameters.AddWithValue("$writable", entry.WritableLocation ? 1 : 0);
+        await command.ExecuteNonQueryAsync(ct);
     }
     private static void ValidateDownloadedFiles(IReadOnlyCollection<DownloadFileFingerprint> files, int maximumFiles)
     {
@@ -1135,7 +1217,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v17 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v19 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -1153,7 +1235,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -1169,7 +1251,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation')";
             if (backupVersion is 16 or 17 or 18)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations'" + (backupVersion >= 17 ? ",'enterprise_event_deferred'" : "") + ")";
-            var expectedTables = backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            if (backupVersion == 19)
+                required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata')";
+            var expectedTables = backupVersion == 19 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";

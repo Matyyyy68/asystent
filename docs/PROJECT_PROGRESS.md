@@ -3,11 +3,11 @@
 **Aktualizacja:** 2026-10-22
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
 
-**Stan zweryfikowany:** pełna bramka po monitorze autostartu PASS: .NET 241/241 bez pominięć, Engine IPC i Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI oraz autotest instalatora PASS. Nieopublikowany lokalny artefakt v0.15.38 ma SHA-256 `10C1A2AC400C5251BD218E19F4772F3D4C1C54334745D1A98FEE7E878684E3F4`.
+**Stan zweryfikowany:** pełna bramka po monitorze autostartu PASS: .NET 243/243 bez pominięć, Engine IPC i Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI oraz autotest instalatora PASS. Nieopublikowany lokalny artefakt v0.15.38 ma SHA-256 `5834E8FB99F2FBB8B681FC841A616DE9F9EED3709D472825673E900068B82698`.
 
 **Audyt zakresu:** macierz `docs/IMPLEMENTATION_GAP_ANALYSIS.md` ma 21 obszarów: 5 `DONE_AND_VERIFIED`, 15 `PARTIALLY_IMPLEMENTED`, 0 `MISSING` i 1 `BLOCKED`; 16 obszarów nie spełnia wszystkich kryteriów ukończenia. Istnieje 11 osobnych planów (`PLAN-001`–`PLAN-011`), wszystkie `IN_PROGRESS`. Nie wyliczam procentu, bo priorytety i kryteria nie są równoważne.
 
-**Monitor autostartu:** wdrożono opt-in detekcję HKCU Run/RunOnce i bezpośrednich plików Startup bieżącego użytkownika. Cichy baseline, polling co ≥30 s, limit 256 elementów i 32 zredagowanych zdarzeń na próbkę; rekordy pozostają lokalne. Testy jednostkowe 7/7 przechodzą. HKLM, Scheduled Tasks i zmiany podczas zamknięcia aplikacji pozostają poza zakresem.
+**Monitor autostartu:** wdrożono opt-in detekcję HKCU Run/RunOnce i bezpośrednich plików Startup bieżącego użytkownika. Cichy baseline, polling co ≥30 s, limit 256 elementów i 32 zredagowanych zdarzeń na próbkę; rekordy pozostają lokalne. Testy jednostkowe 9/9 przechodzą; trwały baseline wykrywa zmianę utrzymującą się przez restart, zapis zdarzenia i baseline jest atomowy. HKLM, Scheduled Tasks i zmiany podczas zamknięcia aplikacji pozostają poza zakresem.
 **Ostatnie zmiany audytu:** commit `9d16f60` uzupełnił inwentaryzację deklaracji licencji do 313 par: 23 NuGet oraz 290 npm z lockfile (240 obecnych w `node_modules`, 50 nieobecnych lokalnie). Skrypt `scripts/audit-dependency-licenses.ps1` odtwarza CSV, odrzuca brakujące/sprzeczne deklaracje i przeszedł test powtarzalności. Monitor Downloads obejmuje podfoldery, pomija reparse points i uzgadnia drzewo co 5 minut. Licencja produktu nadal wymaga decyzji właściciela; nie dodano `LICENSE`.
 
 **Instalator GUI:** po potwierdzeniu użytkownika uruchomiłem lokalny v0.15.38, ale podgląd okna dwukrotnie przekroczył limit czasu (`FrameArrived timed out`, `window capture timed out`). Nie kliknąłem kontrolek ani nie rozpocząłem instalacji; kontrola procesu nie wykazała działającego procesu instalatora. Pełny GUI install/update/uninstall nadal jest nieweryfikowany.
@@ -16,7 +16,7 @@
 
 **Audyt źródeł trwałości Windows (2026-10-22):** bieżące konto mogło odczytać HKCU Run (0 wpisów; RunOnce nie istnieje), HKLM Run (3 wpisy) i WOW6432Node Run (8 wpisów), a także oba foldery Startup użytkownika i wspólny (odpowiednio 1 i 2 elementy). Nie wypisywano nazw ani poleceń autostartu. Dziennik `Microsoft-Windows-TaskScheduler/Operational` jest dostępny, ale wyłączony; usługa Task Scheduler działa, natomiast `Get-ScheduledTask` kończy się `CimException` / `HRESULT 0x80041003` (PermissionDenied), a `schtasks /query` nie zwraca listy. Nie zmieniano rejestru, kanałów zdarzeń ani konfiguracji systemu. Szczegóły i plan: `PLAN-011`.
 
-**Następny krok:** zakończyć pełną bramkę monitora autostartu, następnie kontynuować wykonalne pozycje z pozostałych planów. GUI instalatora ponowić, gdy przechwytywanie okna będzie działać. Szczegółowy chronologiczny dziennik wcześniejszych etapów poniżej ma charakter historyczny; powyższy stan jest aktualny.
+**Następny krok:** zweryfikować trwały baseline monitoringu autostartu i kontynuować wykonalne pozycje z pozostałych planów. GUI instalatora ponowić, gdy przechwytywanie okna będzie działać. Szczegółowy chronologiczny dziennik wcześniejszych etapów poniżej ma charakter historyczny; powyższy stan jest aktualny.
 
 ## Historia wcześniejszych etapów
 

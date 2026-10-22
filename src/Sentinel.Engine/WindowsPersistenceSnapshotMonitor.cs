@@ -14,9 +14,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private const int MaximumEventsPerSample = 32;
     private readonly Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture;
     private readonly TimeSpan minimumInterval;
-    private Dictionary<string, PersistenceSnapshotEntry>? baseline;
     private DateTimeOffset? lastAttempt;
-    private bool wasEnabled;
+    private bool? wasEnabled;
 
     public string State { get; private set; } = "Monitor zmian autostartu jest wyłączony.";
 
@@ -37,7 +36,16 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         ArgumentNullException.ThrowIfNull(store);
         if (!enabled || paused)
         {
-            baseline = null;
+            if (wasEnabled is null or true)
+            {
+                try { await store.ResetWindowsPersistenceMonitorSnapshotAsync(cancellationToken); }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    State = "Nie można wyczyścić lokalnego baseline'u autostartu: " + exception.GetType().Name;
+                    wasEnabled = false;
+                    return 0;
+                }
+            }
             lastAttempt = null;
             wasEnabled = false;
             State = paused ? "Monitor zmian autostartu wstrzymany." : "Monitor zmian autostartu jest wyłączony.";
@@ -51,7 +59,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (wasEnabled && lastAttempt is { } previous && now - previous < minimumInterval) return 0;
+        if (wasEnabled == true && lastAttempt is { } previous && now - previous < minimumInterval) return 0;
         wasEnabled = true;
         lastAttempt = now;
 
@@ -69,12 +77,28 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             return 0;
         }
 
-        if (baseline is null)
+        WindowsPersistenceMonitorSnapshot stored;
+        try { stored = await store.ReadWindowsPersistenceMonitorSnapshotAsync(cancellationToken); }
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            baseline = snapshot.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            State = "Nie można odczytać lokalnego baseline'u autostartu: " + exception.GetType().Name;
+            return 0;
+        }
+        var current = snapshot.ToDictionary(pair => pair.Key,
+            pair => new WindowsPersistenceFingerprint(pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation), StringComparer.Ordinal);
+        if (!stored.Initialized)
+        {
+            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), cancellationToken); }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                State = "Nie można ustawić lokalnego baseline'u autostartu: " + exception.GetType().Name;
+                return 0;
+            }
             State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów.";
             return 0;
         }
+        var baseline = stored.Entries.ToDictionary(pair => pair.Key,
+            pair => new PersistenceSnapshotEntry(pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation), StringComparer.Ordinal);
 
         var changes = GetChanges(baseline, snapshot).Take(MaximumEventsPerSample).ToArray();
         var recorded = 0;
@@ -99,7 +123,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów.",
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence);
-            try { await store.AddLocalOnlyAsync(item, cancellationToken); }
+            try { await store.CommitWindowsPersistenceChangeAsync(change.Key, change.Current is null ? null : current[change.Key], item, cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 State = "Nie można zapisać zmiany autostartu lokalnie: " + exception.GetType().Name;
@@ -170,7 +194,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0) continue;
                     var info = new FileInfo(path);
                     var key = CreateKey("startup.folder", Path.GetFileName(path));
-                    var fingerprint = $"{info.Length}:{info.LastWriteTimeUtc.Ticks}";
+                    var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{info.Length}:{info.LastWriteTimeUtc.Ticks}")));
                     if (!entries.ContainsKey(key) && entries.Count >= MaximumEntries)
                     {
                         entries["!overflow"] = new("overflow", "", false);
@@ -249,7 +273,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         return source + ":" + stable;
     }
 
-    public void Dispose() { baseline = null; }
+    public void Dispose() { lastAttempt = null; }
 
     private enum PersistenceChangeKind { Added, Changed, Removed }
     private sealed record PersistenceChange(string Key, PersistenceChangeKind Kind,

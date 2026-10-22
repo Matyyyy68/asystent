@@ -1,4 +1,6 @@
 using Sentinel.Core;
+using System.Security.Cryptography;
+using System.Text;
 using Xunit;
 
 namespace Sentinel.Tests;
@@ -13,7 +15,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var store = await CreateStore();
         var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
         {
-            ["existing"] = new("registry.run", "fingerprint-existing", false)
+            ["existing"] = Entry("registry.run", "fingerprint-existing", false)
         };
         using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
 
@@ -22,8 +24,8 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
 
         snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
         {
-            ["existing"] = new("registry.run", "fingerprint-existing", false),
-            ["new"] = new("registry.runonce", "secret-command-fingerprint", true)
+            ["existing"] = Entry("registry.run", "fingerprint-existing", false),
+            ["new"] = Entry("registry.runonce", "secret-command-fingerprint", true)
         };
         Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
 
@@ -44,13 +46,13 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var store = await CreateStore();
         var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
         {
-            ["one"] = new("startup.folder", "size:time:1", false)
+            ["one"] = Entry("startup.folder", "size:time:1", false)
         };
         using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
         await monitor.CollectAsync(store, enabled: true, paused: false);
 
-        snapshot["one"] = new("startup.folder", "size:time:2", false);
-        snapshot["two"] = new("registry.run", "fingerprint-2", false);
+        snapshot["one"] = Entry("startup.folder", "size:time:2", false);
+        snapshot["two"] = Entry("registry.run", "fingerprint-2", false);
         Assert.Equal(2, await monitor.CollectAsync(store, enabled: true, paused: false));
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
 
@@ -68,15 +70,15 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var store = await CreateStore();
         var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
         {
-            ["one"] = new("registry.run", "fingerprint-1", false)
+            ["one"] = Entry("registry.run", "fingerprint-1", false)
         };
         using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
         await monitor.CollectAsync(store, enabled: true, paused: false);
         await monitor.CollectAsync(store, enabled: true, paused: true);
-        snapshot["one"] = new("registry.run", "fingerprint-2", false);
+        snapshot["one"] = Entry("registry.run", "fingerprint-2", false);
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
         Assert.Empty(await store.ReadAsync());
-        snapshot["two"] = new("registry.run", "fingerprint-3", false);
+        snapshot["two"] = Entry("registry.run", "fingerprint-3", false);
         Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
     }
 
@@ -87,7 +89,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var fail = false;
         var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
         {
-            ["one"] = new("registry.run", "fingerprint-1", false)
+            ["one"] = Entry("registry.run", "fingerprint-1", false)
         };
         IReadOnlyDictionary<string, PersistenceSnapshotEntry> Capture()
         {
@@ -102,7 +104,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         Assert.DoesNotContain("secret path", monitor.State, StringComparison.Ordinal);
 
         fail = false;
-        snapshot["two"] = new("registry.run", "fingerprint-2", false);
+        snapshot["two"] = Entry("registry.run", "fingerprint-2", false);
         Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
     }
 
@@ -111,7 +113,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     {
         var store = await CreateStore();
         var snapshot = Enumerable.Range(0, 257).ToDictionary(index => index.ToString(),
-            index => new PersistenceSnapshotEntry("registry.run", "fingerprint-" + index, false), StringComparer.Ordinal);
+            index => Entry("registry.run", "fingerprint-" + index, false), StringComparer.Ordinal);
         using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
 
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
@@ -120,7 +122,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
 
         snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
         {
-            ["safe"] = new("registry.run", "safe-fingerprint", false)
+            ["safe"] = Entry("registry.run", "safe-fingerprint", false)
         };
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
         Assert.Empty(await store.ReadAsync());
@@ -135,7 +137,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await monitor.CollectAsync(store, enabled: true, paused: false);
 
         for (var index = 0; index < 40; index++)
-            snapshot[index.ToString()] = new("registry.run", "fingerprint-" + index, false);
+            snapshot[index.ToString()] = Entry("registry.run", "fingerprint-" + index, false);
         Assert.Equal(32, await monitor.CollectAsync(store, enabled: true, paused: false));
         Assert.Contains("8 czeka", monitor.State, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(8, await monitor.CollectAsync(store, enabled: true, paused: false));
@@ -154,6 +156,49 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await reopened.InitializeAsync();
         Assert.True((await reopened.LoadSettingsAsync()).MonitorPersistenceChanges);
     }
+
+    [Fact]
+    public async Task PersistedBaselineDetectsChangesAfterMonitorRestartWithoutStoringRawValues()
+    {
+        var store = await CreateStore();
+        var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["hashed-existing-id"] = Entry("registry.run", "secret-command-before", false)
+        };
+        using (var first = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero))
+            Assert.Equal(0, await first.CollectAsync(store, enabled: true, paused: false));
+
+        var saved = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(saved.Initialized);
+        Assert.Contains("registry.run", System.Text.Json.JsonSerializer.Serialize(saved.Entries));
+        Assert.DoesNotContain("secret-command-before", System.Text.Json.JsonSerializer.Serialize(saved.Entries), StringComparison.Ordinal);
+
+        snapshot["hashed-existing-id"] = Entry("registry.run", "secret-command-after", false);
+        using var restarted = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
+        Assert.Equal(1, await restarted.CollectAsync(store, enabled: true, paused: false));
+        Assert.Contains(await store.ReadAsync(), item => item.Source == "windows-persistence-snapshot" && item.Explanation.Contains("zmieniono", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DatabaseRestorePreservesTheActivePersistenceBaseline()
+    {
+        var source = await CreateStore();
+        var target = await CreateStore();
+        var sourceEntry = new WindowsPersistenceFingerprint("source-id", "registry.run", Entry("registry.run", "source-command", false).Fingerprint, false);
+        var targetEntry = new WindowsPersistenceFingerprint("target-id", "startup.folder", Entry("startup.folder", "target-command", false).Fingerprint, false);
+        await source.InitializeWindowsPersistenceMonitorSnapshotAsync([sourceEntry]);
+        await target.InitializeWindowsPersistenceMonitorSnapshotAsync([targetEntry]);
+        var backup = Path.Combine(root, "state.db");
+        await source.BackupAsync(backup);
+
+        Assert.Equal(0, await target.RestoreAsync(backup));
+        var restored = await target.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(restored.Initialized);
+        Assert.Equal("target-id", Assert.Single(restored.Entries.Keys));
+    }
+
+    private static PersistenceSnapshotEntry Entry(string source, string value, bool writable)
+        => new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))), writable);
 
     private async Task<LocalStore> CreateStore()
     {
