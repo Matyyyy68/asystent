@@ -41,11 +41,16 @@ function finish(code) { if (finished) return; finished = true; clearTimeout(time
     }
     const baseline = (await call('status')).runtime;
     const observations = [], latencies = [];
+    let controlledConnectionRecorded = false;
     const start = performance.now();
     for (let index = 1; index <= sampleCount; index++) {
       const due = start + index * intervalMs;
       await new Promise(resolve => setTimeout(resolve, Math.max(0, due - performance.now())));
       const before = performance.now(); await call('collect'); latencies.push(performance.now() - before);
+      if (tcpMonitor && !controlledConnectionRecorded && index <= Math.ceil(10000 / intervalMs)) {
+        const recentHistory = await call('history');
+        controlledConnectionRecorded = recentHistory.some(event => event.source === 'tcp-connection-snapshot' && event.explanation.includes(tcpTarget));
+      }
       observations.push((await call('status')).runtime);
     }
     const elapsedMs = performance.now() - start;
@@ -57,8 +62,8 @@ function finish(code) { if (finished) return; finished = true; clearTimeout(time
     const history = tcpMonitor ? await call('history') : null;
     if (tcpMonitor) {
       if (!finalStatus.tcpConnections.includes('Ciągła migawka TCP/UDP działa')) throw new Error(`TCP observer was not healthy: ${finalStatus.tcpConnections}`);
-      if (!history.some(event => event.source === 'tcp-connection-snapshot' && event.explanation.includes(tcpTarget)))
-        throw new Error(`The controlled TCP connection ${tcpTarget} was not recorded.`);
+      if (!controlledConnectionRecorded)
+        throw new Error(`The controlled TCP connection ${tcpTarget} was not observed within the first ${Math.ceil(10000 / intervalMs)} samples.`);
     }
     console.log(JSON.stringify({
       samples: observations.length, elapsedSeconds: +(elapsedMs / 1000).toFixed(1),
@@ -66,7 +71,7 @@ function finish(code) { if (finished) return; finished = true; clearTimeout(time
       startingWorkingSetMiB: +(baseline.workingSetBytes / 1048576).toFixed(1), peakWorkingSetMiB: +(peakWorkingSet / 1048576).toFixed(1),
       collectLatencyMs: { median: +sorted[Math.floor(sorted.length / 2)].toFixed(1), max: +Math.max(...sorted).toFixed(1) },
       processSource: finalStatus.processes,
-      ...(tcpMonitor ? { tcpObserver: finalStatus.tcpConnections, tcpEventsRecorded: history.filter(event => event.source === 'tcp-connection-snapshot').length, controlledConnection: tcpTarget } : {}),
+      ...(tcpMonitor ? { tcpObserver: finalStatus.tcpConnections, tcpEventsVisibleInHistory: history.filter(event => event.source === 'tcp-connection-snapshot').length, controlledConnection: tcpTarget, controlledConnectionObservedEarly: controlledConnectionRecorded } : {}),
       note: `Single local Windows session; ${durationSeconds}-second profile with ${intervalMs}-ms collect intervals${tcpMonitor ? ' and an opt-in controlled TCP connection' : ''}; not a fleet or long-duration performance guarantee.`
     }, null, 2));
     finish(0);
