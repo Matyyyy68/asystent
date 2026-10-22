@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Sentinel.Core.Analysis;
@@ -34,6 +35,8 @@ public sealed class UrlAnalyzer(DomainNames domains)
         if (!uri.IsDefaultPort) Add("url.port", "Adres zawiera niestandardowy port.", 1);
         if (uri.UserInfo.Length > 0) Add("url.userinfo", "Adres zawiera część przed znakiem @, która może mylić co do celu.", 3);
         if (host.Split('.').Any(l => l.StartsWith("xn--", StringComparison.Ordinal))) Add("url.idn", "Nazwa domeny zawiera znaki IDN; sama ta cecha nie dowodzi oszustwa.", 1);
+        if (host.Split('.').Any(ContainsMixedLatinGreekOrCyrillic))
+            Add("url.idn_mixed_script", "Jedna etykieta domeny miesza alfabet łaciński z greckim lub cyrylicą; może to utrudniać rozpoznanie nazwy.", 1);
         if (new[] { "zip", "mov", "top", "xyz" }.Contains(host.Split('.')[^1])) Add("url.tld", "Sufiks domeny wymaga dodatkowej weryfikacji.", 1);
         var pathAndQuery = uri.PathAndQuery;
         var structurallyComplex = value.Length >= 120 || host.Split('.').Length >= 5 ||
@@ -77,6 +80,23 @@ public sealed class UrlAnalyzer(DomainNames domains)
         var authorityHost = uri.HostNameType == UriHostNameType.IPv6 ? $"[{host}]" : host;
         var origin = $"{uri.Scheme}://{authorityHost}" + (uri.IsDefaultPort ? "" : $":{uri.Port}");
         return new(true, origin, host, registered, signals);
+    }
+    private static bool ContainsMixedLatinGreekOrCyrillic(string asciiLabel)
+    {
+        string unicode;
+        try { unicode = new System.Globalization.IdnMapping().GetUnicode(asciiLabel); }
+        catch (ArgumentException) { return false; }
+
+        bool latin = false, greek = false, cyrillic = false;
+        foreach (var rune in unicode.EnumerateRunes())
+        {
+            if (!Rune.IsLetter(rune)) continue;
+            int value = rune.Value;
+            if (value is >= 0x0041 and <= 0x024F or >= 0x1E00 and <= 0x1EFF or >= 0x2C60 and <= 0x2C7F or >= 0xA720 and <= 0xA7FF or >= 0xAB30 and <= 0xAB6F) latin = true;
+            else if (value is >= 0x0370 and <= 0x03FF or >= 0x1F00 and <= 0x1FFF) greek = true;
+            else if (value is >= 0x0400 and <= 0x052F or >= 0x2DE0 and <= 0x2DFF or >= 0xA640 and <= 0xA69F) cyrillic = true;
+        }
+        return (latin && (greek || cyrillic)) || (greek && cyrillic);
     }
     public IReadOnlyList<ThreatIndicator> Compare(NavigationSignal navigation)
     {

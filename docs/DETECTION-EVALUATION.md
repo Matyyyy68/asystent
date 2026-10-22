@@ -1,7 +1,7 @@
 # Ewaluacja deterministycznej analizy URL
 
 **Data pomiaru:** 2026-10-22  
-**Wersja reguł:** `2026.10.5`
+**Wersja reguł:** `2026.10.6`
 **Zakres:** wyłącznie kolumny `URL` i `label`; żaden adres nie został otwarty, rozwiązany przez DNS ani wysłany do usługi.
 
 ## Zestaw i odtwarzanie
@@ -26,7 +26,7 @@ Ten podział usuwa przeciek między subdomenami, ale **nie jest niezależnym wyn
 
 ## Wynik
 
-Klasyfikator uznaje wynik `Moderate` lub wyższy za alarm. Przed `url.auth_structure` (`2026.10.2`) wynik wynosił TP=117, FP=14, TN=134 836, FN=100 828. Po `url.auth_structure` (`2026.10.3`) było TP=2 068, FP=14, TN=134 836, FN=98 877. Reguła `url.structure_combination` (`2026.10.4`) dodała na tym samym, eksplorowanym zestawie 2 300 wykryć. Wersja `2026.10.5` obniża dokładną nazwę marki bez weryfikacji do wagi 1, rozpoznaje `.google`, `.apple` i `.microsoft` jako brandowe TLD oraz zachowuje silną wagę dla literówek i brandu w cudzej subdomenie. Bieżący URL-only wynik to:
+Klasyfikator uznaje wynik `Moderate` lub wyższy za alarm. Przed `url.auth_structure` (`2026.10.2`) wynik wynosił TP=117, FP=14, TN=134 836, FN=100 828. Po `url.auth_structure` (`2026.10.3`) było TP=2 068, FP=14, TN=134 836, FN=98 877. Reguła `url.structure_combination` (`2026.10.4`) dodała na tym samym, eksplorowanym zestawie 2 300 wykryć. Wersja `2026.10.5` obniża dokładną nazwę marki bez weryfikacji do wagi 1, rozpoznaje `.google`, `.apple` i `.microsoft` jako brandowe TLD oraz zachowuje silną wagę dla literówek i brandu w cudzej subdomenie. Wersja `2026.10.6` dodaje słaby wskaźnik mieszania łaciny z greką lub cyrylicą w jednej etykiecie IDN. Ponowne uruchomienie na tym samym snapshotcie nie zmieniło metryk ani podziału domenowego; wskaźnik nie zmienia sam klasyfikacji do `Moderate`. Ten zbiór był już oglądany, więc wynik nie jest niezależnym testem. Bieżący URL-only wynik to:
 
 | Metryka | Wynik |
 |---|---:|

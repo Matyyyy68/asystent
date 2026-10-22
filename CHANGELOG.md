@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reguły URL `2026.10.6` dodają słaby sygnał, gdy pojedyncza etykieta domeny miesza litery łacińskie z greckimi lub cyrylicą. Sam sygnał nie podnosi ryzyka do poziomu Moderate; osobne etykiety (np. łacińska domena i cyrylicki TLD) ani niełacińskie litery łacińskie nie są oznaczane. Testy obejmują oba przypadki mieszane i kontrolne IDN. Diagnostyczne ponowienie PhiUSIIL nie zmieniło metryk URL-only; zestaw był wcześniej oglądany i nie jest niezależnym testem.
+
 - Monitoring DNS Operational odczytuje wyłącznie zdarzenia DNS Client Query Completed (3008), jeśli kanał jest już włączony. Ograniczony parser i read-only `wevtutil` odrzucają odpowiedź DNS, a kursor SQLite v22 zapobiega ponownemu przetwarzaniu; gdy kanał jest wyłączony, status wskazuje fallback bez zmian w Windows. Parser, limity, migracja i pełny build/self-test PASS; live odczytu zdarzeń nie zweryfikowano, bo kanał audytowy jest wyłączony.
 - Dopasowania z DNS Operational trafiają do powiadomień Windows, gdy użytkownik je włączy; przegląd i ustawienia pokazują stan kanału oraz źródła alertów. Tekst powiadomienia jest wspólny dla cache i event logu, bez mylnego przypisywania alertu do jednego źródła. Pełny build/self-test PASS: .NET 278/278, Electron 14/14, `npm audit` 0, produkcyjny UI i autotest instalatora.
 - Wyszukiwanie FTS5 zachowuje dopasowania dokładne i dodaje ograniczoną alternatywę prefiksową dla długich tokenów, co poprawia część zapytań z polskimi odmianami (regresja „logowania” → „logować”). To nadal wyszukiwanie leksykalne, nie semantyczne; testy .NET 278/278, Electron 14/14, `npm audit` 0, produkcyjny UI i autotest instalatora PASS.

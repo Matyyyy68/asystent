@@ -57,6 +57,20 @@ public sealed class AnalysisTests
         Assert.Contains(result.Indicators, i => i.Id == "url.idn");
     }
     [Theory]
+    [InlineData("https://mixеd.test")] // Cyrillic small letter ie in an otherwise Latin label.
+    [InlineData("https://miχed.test")] // Greek small letter chi in an otherwise Latin label.
+    public void MixedLatinGreekOrCyrillicLabelAddsOnlyAWeakIdnSignal(string url)
+    {
+        var result = Engine().Analyze(Input("", url));
+        Assert.Contains(result.Indicators, item => item.Id == "url.idn_mixed_script" && item.Weight == 1);
+        Assert.True(result.Risk < RiskLevel.Moderate);
+    }
+    [Theory]
+    [InlineData("https://bücher.de")] // Non-ASCII Latin letters are not mixed scripts.
+    [InlineData("https://example.рф")] // Different scripts in separate labels are not treated as a mixed label.
+    public void NonMixedIdnLabelsDoNotGetTheMixedScriptSignal(string url) =>
+        Assert.DoesNotContain(Urls().Analyze(url).Indicators, item => item.Id == "url.idn_mixed_script");
+    [Theory]
     [InlineData("file:///tmp/a")]
     [InlineData("javascript:alert(1)")]
     [InlineData("not a URL")]
@@ -108,7 +122,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
@@ -118,7 +132,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", url));
         Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
         Assert.True(result.Risk >= RiskLevel.Moderate);
-        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -139,7 +153,7 @@ public sealed class AnalysisTests
 
         Assert.Contains(result.Indicators, item => item.Id == "url.structure_combination");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -183,7 +197,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.5", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]
