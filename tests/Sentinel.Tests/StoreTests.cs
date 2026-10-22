@@ -12,6 +12,33 @@ public sealed class StoreTests : IDisposable
     private async Task<LocalStore> Store() { var s = new LocalStore(dir); await s.InitializeAsync(); return s; }
     private static SecurityEvent Event(DateTimeOffset? time = null) => new(0,time ?? DateTimeOffset.UtcNow,RiskLevel.Information,"Test","Synthetic","Synthetic test only","No action",EventStatus.New);
     [Fact] public async Task SettingsSurviveReopening() { var s = await Store(); await s.SaveSettingsAsync(new(7,false)); var next = await Store(); Assert.Equal(new AppSettings(7,false), await next.LoadSettingsAsync()); }
+    [Fact] public async Task DnsOperationalRecordCursorPersistsAndCanResetAfterLogClear()
+    {
+        var store = await Store();
+        Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
+        await store.SetDnsOperationalRecordCursorAsync(42);
+        Assert.Equal(42, await (await Store()).GetDnsOperationalRecordCursorAsync());
+        await store.SetDnsOperationalRecordCursorAsync(3);
+        Assert.Equal(3, await (await Store()).GetDnsOperationalRecordCursorAsync());
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.SetDnsOperationalRecordCursorAsync(-1));
+    }
+    [Fact] public async Task VersionTwentyOneDatabaseMigratesDnsOperationalCursorWithoutLosingHistory()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { Category = "BeforeDnsCursorMigration" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE dns_operational_monitor_metadata; PRAGMA user_version=21;";
+            await command.ExecuteNonQueryAsync();
+        }
+        await store.InitializeAsync();
+        Assert.Equal("BeforeDnsCursorMigration", Assert.Single(await store.ReadAsync()).Category);
+        Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
+        await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
+    }
     [Fact] public async Task ContinuousTcpMonitoringOptInSurvivesReopening()
     {
         var store = await Store();
@@ -227,7 +254,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(21L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -838,7 +865,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(21L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -857,7 +884,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(21L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {

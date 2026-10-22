@@ -11,6 +11,7 @@ using Sentinel.Core.Analysis;
 using Sentinel.Core.Configuration;
 using Sentinel.Core.Enterprise;
 using Sentinel.Core.Knowledge;
+using Sentinel.Engine;
 
 // Versioned JSON-lines protocol on inherited stdio only; no listening TCP port.
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -57,6 +58,7 @@ using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
 var deduplicator = new NotificationDeduplicator();
+var dnsOperationalLog = OperatingSystem.IsWindows() ? new WindowsDnsOperationalLogSource() : null;
 using var enterpriseHttpClient = CreateEnterpriseHttpClient();
 var enterpriseAgent = new EnterpriseAgentClient(enterpriseHttpClient);
 var enterpriseCredentialRotator = new EnterpriseCredentialRotator(enterpriseAgent, deviceCredentials);
@@ -173,6 +175,59 @@ DateTimeOffset? lastDnsRead = null;
 DateTimeOffset? lastDnsError = null;
 DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
+DateTimeOffset? lastDnsOperationalAttempt = null;
+string dnsOperationalState = "Kanał DNS Operational nie został jeszcze sprawdzony";
+async Task<int> ReadDnsOperationalEventsAsync(CancellationToken cancellationToken = default)
+{
+    if (dnsOperationalLog is null) return 0;
+    if (!await dnsOperationalLog.IsEnabledAsync(cancellationToken))
+    {
+        dnsOperationalState = "Kanał DNS Operational jest wyłączony; nie zmieniono konfiguracji systemu";
+        return 0;
+    }
+    var cursor = await store.GetDnsOperationalRecordCursorAsync(cancellationToken);
+    var latestRecordId = await dnsOperationalLog.ReadLatestRecordIdAsync(cancellationToken);
+    if (cursor is null)
+    {
+        await store.SetDnsOperationalRecordCursorAsync(latestRecordId ?? 0, cancellationToken);
+        dnsOperationalState = "Kanał DNS Operational aktywny; ustawiono początkowy punkt odczytu";
+        return 0;
+    }
+    if (latestRecordId is null || latestRecordId.Value < cursor.Value)
+    {
+        await store.SetDnsOperationalRecordCursorAsync(latestRecordId ?? 0, cancellationToken);
+        dnsOperationalState = "Dziennik DNS został wyczyszczony lub obrócony; ustawiono nowy punkt odczytu";
+        return 0;
+    }
+
+    var records = await dnsOperationalLog.ReadAfterAsync(cursor.Value, cancellationToken);
+    var matches = 0;
+    foreach (var record in records)
+    {
+        if (record.QueryName is null || record.Timestamp is not { } observedAt ||
+            !reputation.FindMatches([record.QueryName], observedAt).Any() || !deduplicator.TryMark(record.QueryName, observedAt)) continue;
+        var correlationDomain = domainNames.RegistrableDomain(record.QueryName) ?? record.QueryName;
+        var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt, ct: cancellationToken);
+        var eventId = DnsOperationalEventId(record.RecordId);
+        await RecordDetectionAsync(new SecurityEvent(0, observedAt, RiskLevel.High,
+            "Domena na liście CERT Polska", "Windows DNS Client Operational", "Zaobserwowano zapytanie o domenę z aktualnej listy: " + record.QueryName,
+            "Ostrzeżenie, bez blokowania. Zdarzenie nie wskazuje procesu; odpowiedź DNS nie jest przechowywana.", EventStatus.New,
+            EventId: eventId, Source: "dns-operational", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+            CorrelationId: correlationId,
+            EvidenceCodes: ["dns.windows-operational-query", "reputation.cert.current-feed-match"],
+            SignalHash: LocalStore.CreateHostSignalHash(record.QueryName)), "url", "reputation.cert");
+        matches++;
+    }
+    if (records.Count > 0)
+        await store.SetDnsOperationalRecordCursorAsync(records[^1].RecordId, cancellationToken);
+    dnsOperationalState = $"Kanał DNS Operational działa; odczytano {records.Count} nowych zdarzeń, dopasowania: {matches}";
+    return matches;
+}
+static Guid DnsOperationalEventId(long recordId)
+{
+    var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("sentinel-dns-operational-v1:" + recordId.ToString(CultureInfo.InvariantCulture)));
+    return new Guid(hash.AsSpan(0, 16));
+}
 Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
 {
     cancellationToken.ThrowIfCancellationRequested();
@@ -245,7 +300,7 @@ while (await Console.In.ReadLineAsync() is { } line)
         {
             case "status":
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
-                    dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
+                    dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
                     persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
@@ -315,9 +370,17 @@ while (await Console.In.ReadLineAsync() is { } line)
                     }
                     catch (Exception ex) { lastDnsError = DateTimeOffset.UtcNow; dnsState = "Odczyt cache DNS niedostępny: " + ex.GetType().Name; }
                 }
+                if (settings.Paused) dnsOperationalState = "Obserwacja wstrzymana";
+                else if (OperatingSystem.IsWindows() &&
+                    (lastDnsOperationalAttempt is not { } previousOperationalAttempt || DateTimeOffset.UtcNow - previousOperationalAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
+                {
+                    lastDnsOperationalAttempt = DateTimeOffset.UtcNow;
+                    try { _ = await ReadDnsOperationalEventsAsync(); }
+                    catch (Exception ex) { dnsOperationalState = "Dziennik DNS Operational niedostępny: " + ex.GetType().Name; }
+                }
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
                     ? await SyncEnterpriseAsync(force: false) : null;
-                result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState,
+                result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
                     processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
                     downloadedFileMatches, downloadedFiles = downloadedFileMonitor.State,
                     persistenceChanges, persistence = persistenceMonitor.State, enterpriseSync };
@@ -415,7 +478,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     runtime = new { framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString() },
                     hostLifecycle = new { status = safeHostStatus, lastExitCode = safeExitCode, stderrObserved = hostStderrObserved, stderrExceptionType = safeExceptionType },
                     recentEngineFailures = safeHostFailures,
-                    monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
+                    monitors = new { dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                         processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State,
                         persistence = persistenceMonitor.State },
                     settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,

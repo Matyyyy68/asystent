@@ -1,4 +1,4 @@
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const { createServer } = require('node:http');
 const net = require('node:net');
@@ -205,6 +205,11 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     const dns = await call('collect'); assert.equal(dns.ok,true);
     assert.ok(dns.result.dns.startsWith('Odczyt cache DNS działa'), dns.result.dns);
     const dnsStatus = (await call('status')).result;
+    assert.match(dnsStatus.dnsOperational, /Kanał DNS Operational|Dziennik DNS Operational/, 'DNS event channel status must be visible');
+    const channelConfiguration = execFileSync(path.join(process.env.SystemRoot, 'System32', 'wevtutil.exe'),
+      ['gl', 'Microsoft-Windows-DNS-Client/Operational', '/f:xml'], { encoding: 'utf8' });
+    if (/enabled="false"/i.test(channelConfiguration))
+      assert.match(dnsStatus.dnsOperational, /wyłączony/i, 'disabled system channel must use a visible read-only fallback');
     assert.ok(Number.isFinite(Date.parse(dnsStatus.lastDnsReadUtc)), 'successful DNS cache read must expose its UTC timestamp');
     assert.equal(dnsStatus.lastDnsErrorUtc, null, 'successful first DNS cache read must not report an error');
     const snapshot = await call('connections'); assert.equal(snapshot.ok, true, snapshot.error);

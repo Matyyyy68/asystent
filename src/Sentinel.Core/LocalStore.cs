@@ -96,7 +96,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 21) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 22) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -120,6 +120,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             INSERT OR IGNORE INTO downloaded_file_monitor_metadata(id,initialized) VALUES(1,0);
             CREATE TABLE IF NOT EXISTS domain_correlation(domain_key TEXT PRIMARY KEY CHECK(length(domain_key)=64), correlation_id TEXT NOT NULL CHECK(length(correlation_id)=36), last_seen_ticks INTEGER NOT NULL CHECK(last_seen_ticks>=0));
             CREATE INDEX IF NOT EXISTS ix_domain_correlation_last_seen ON domain_correlation(last_seen_ticks);
+            CREATE TABLE IF NOT EXISTS dns_operational_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), last_record_id INTEGER NULL CHECK(last_record_id IS NULL OR last_record_id>=0));
+            INSERT OR IGNORE INTO dns_operational_monitor_metadata(id,last_record_id) VALUES(1,NULL);
             INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
             COMMIT;
             """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
@@ -275,6 +277,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
+        if (v < 22)
+            await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=22; COMMIT;", ct);
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
             await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
@@ -323,6 +327,25 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var json = await cmd.ExecuteScalarAsync(cancellationToken) as string;
         var result = json is null ? new AppSettings() : JsonSerializer.Deserialize<AppSettings>(json) ?? throw new InvalidDataException("Nieprawidłowe ustawienia.");
         Validate(result); return result;
+    }
+
+    public async Task<long?> GetDnsOperationalRecordCursorAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT last_record_id FROM dns_operational_monitor_metadata WHERE id=1";
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    public async Task SetDnsOperationalRecordCursorAsync(long recordId, CancellationToken cancellationToken = default)
+    {
+        if (recordId < 0) throw new ArgumentOutOfRangeException(nameof(recordId));
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO dns_operational_monitor_metadata(id,last_record_id) VALUES(1,$recordId) ON CONFLICT(id) DO UPDATE SET last_record_id=excluded.last_record_id";
+        command.Parameters.AddWithValue("$recordId", recordId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
     private static void Validate(AppSettings s)
     {
@@ -1249,7 +1272,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v20 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v22 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -1267,7 +1290,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20 or 21))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20 or 21 or 22))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -1285,7 +1308,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations'" + (backupVersion >= 17 ? ",'enterprise_event_deferred'" : "") + ")";
             if (backupVersion is 19 or 20 or 21)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata')";
-            var expectedTables = backupVersion is 19 or 20 or 21 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            if (backupVersion == 22)
+                required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata','dns_operational_monitor_metadata')";
+            var expectedTables = backupVersion == 22 ? 16 : backupVersion is 19 or 20 or 21 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
