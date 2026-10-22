@@ -107,12 +107,12 @@ internal static class Program
                 || !ResolveInstallDirectory(Environment.GetFolderPath(Environment.SpecialFolder.System), fallbackDirectory)
                     .Equals(Path.GetFullPath(fallbackDirectory), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("Wykrywanie istniejącej lokalizacji instalacji nie działa poprawnie.");
-            Install(root, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None, testMode: true);
+            Install(root, startMenuShortcut: true, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None, testMode: true);
             var preservedFile = Path.Combine(root, "self-test-user-file.txt");
             File.WriteAllText(preservedFile, "preserve across update and rollback");
             var engineExecutable = Path.Combine(root, "resources", "engine", "Sentinel.Engine.exe");
             File.WriteAllText(engineExecutable, "outdated-payload-marker");
-            Install(root, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None,
+            Install(root, startMenuShortcut: true, desktopShortcut: false, autoStart: false, (_, _) => { }, CancellationToken.None,
                 testMode: true, registeredInstallOverride: root);
             using (var engine = new FileStream(engineExecutable, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
@@ -123,6 +123,19 @@ internal static class Program
             if (File.ReadAllText(preservedFile) != "preserve across update and rollback")
                 throw new InvalidDataException("Aktualizacja nie zachowała pliku spoza pakietu.");
 
+            Directory.CreateDirectory(data);
+            var shortcutTest = Path.Combine(data, "start-menu-test.lnk");
+            ApplyShortcutOption(shortcutTest, Path.Combine(root, "Sentinel AI.exe"), root, enabled: true);
+            if (!File.Exists(shortcutTest)) throw new InvalidDataException("Wybrana opcja skrótu nie utworzyła skrótu.");
+            ApplyShortcutOption(shortcutTest, Path.Combine(root, "Sentinel AI.exe"), root, enabled: false);
+            if (File.Exists(shortcutTest)) throw new InvalidDataException("Wyłączona opcja skrótu nie usunęła skrótu Sentinel.");
+            var otherExecutable = Path.Combine(data, "other-app.exe");
+            File.WriteAllText(otherExecutable, "other app");
+            var unrelatedShortcut = Path.Combine(data, "unrelated.lnk");
+            CreateShortcut(unrelatedShortcut, otherExecutable);
+            ApplyShortcutOption(unrelatedShortcut, Path.Combine(root, "Sentinel AI.exe"), root, enabled: false);
+            if (!File.Exists(unrelatedShortcut)) throw new InvalidDataException("Wyłączenie skrótu usunęło skrót nienależący do Sentinel.");
+
             byte[] engineBeforeSpaceFailure;
             using (var engine = File.OpenRead(engineExecutable)) engineBeforeSpaceFailure = SHA256.HashData(engine);
             var parentDirectory = Path.GetDirectoryName(root)!;
@@ -130,7 +143,7 @@ internal static class Program
             var spaceFailureInjected = false;
             try
             {
-                Install(root, desktopShortcut: false, autoStart: false,
+                Install(root, startMenuShortcut: true, desktopShortcut: false, autoStart: false,
                     (_, percent) => { if (percent > 10) throw new IOException("Simulated disk full during staging."); }, CancellationToken.None,
                     testMode: true, registeredInstallOverride: root);
             }
@@ -188,7 +201,7 @@ internal static class Program
                 var cancelled = false;
                 try
                 {
-                    Install(root, desktopShortcut: false, autoStart: false,
+                    Install(root, startMenuShortcut: true, desktopShortcut: false, autoStart: false,
                         (_, percent) => { if (percent == 90) cancellation.Cancel(); }, cancellation.Token,
                         testMode: true, registeredInstallOverride: root);
                 }
@@ -287,7 +300,7 @@ internal static class Program
         return defaultDirectory;
     }
 
-    internal static void Install(string target, bool desktopShortcut, bool autoStart, Action<string, int> progress,
+    internal static void Install(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart, Action<string, int> progress,
         CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null)
     {
         if (!VerifyPayload(showErrors: true)) throw new InvalidDataException("Weryfikacja instalatora nie powiodła się.");
@@ -338,7 +351,7 @@ internal static class Program
         var oldMoved = false;
         try
         {
-            Log($"INSTALL_START target={target} autostart={autoStart} desktop={desktopShortcut}");
+            Log($"INSTALL_START target={target} startMenu={startMenuShortcut} autostart={autoStart} desktop={desktopShortcut}");
             Directory.CreateDirectory(staging);
             progress("Przygotowuję pliki programu…", 10);
             using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
@@ -406,12 +419,12 @@ internal static class Program
                     SetUninstallRegistration(target);
                     using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
                     if (autoStart) run.SetValue("Sentinel AI", $"\"{executable}\" --minimized"); else run.DeleteValue("Sentinel AI", false);
-                    CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk"), executable);
-                    if (desktopShortcut) CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk"), executable);
+                    ApplyShortcutOption(startMenuLink, executable, target, startMenuShortcut);
+                    ApplyShortcutOption(desktopLink, executable, target, desktopShortcut);
                     RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--register", 8000);
                 }
                 progress("Gotowe.", 100);
-                Log($"INSTALL_SUCCESS target={target} testMode={testMode} autostart={autoStart} desktop={desktopShortcut}");
+                Log($"INSTALL_SUCCESS target={target} testMode={testMode} startMenu={startMenuShortcut} autostart={autoStart} desktop={desktopShortcut}");
             }
             catch (Exception ex)
             {
@@ -539,6 +552,12 @@ internal static class Program
         System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
     }
 
+    private static void ApplyShortcutOption(string link, string executable, string installPath, bool enabled)
+    {
+        if (enabled) CreateShortcut(link, executable);
+        else DeleteShortcutIfOwned(link, installPath);
+    }
+
     private static void Uninstall(string target, bool testMode = false)
     {
         target = Path.GetFullPath(target);
@@ -616,6 +635,7 @@ internal static class Program
 internal sealed class SetupWizard : Form
 {
     private readonly TextBox folder = new() { Text = Program.GetPreferredInstallDirectory() };
+    private readonly CheckBox startMenu = new() { Text = "Utwórz skrót w menu Start", Checked = true, AutoSize = true };
     private readonly CheckBox desktop = new() { Text = "Utwórz skrót na pulpicie", Checked = true, AutoSize = true };
     private readonly CheckBox start = new() { Text = "Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true };
     private readonly Label status = new() { AutoSize = true, Text = "Gotowy do instalacji" };
@@ -635,10 +655,10 @@ internal sealed class SetupWizard : Form
         var intro = new Label { Text = "Zajmie to chwilę. Nie potrzebujesz uprawnień administratora.", AutoSize = true, Location = new Point(36, 75) };
         var pathLabel = new Label { Text = "Miejsce instalacji", AutoSize = true, Location = new Point(36, 137) };
         folder.SetBounds(36, 163, 470, 34); var browse = new Button { Text = "Wybierz…", Location = new Point(516, 162), Size = new Size(92, 36) };
-        desktop.Location = new Point(38, 224); start.Location = new Point(38, 258); status.Location = new Point(38, 324);
-        progress.SetBounds(36, 354, 572, 13); install.Location = new Point(490, 381); install.BackColor = Color.FromArgb(20, 93, 153); install.ForeColor = Color.White; install.FlatStyle = FlatStyle.Flat;
+        startMenu.Location = new Point(38, 218); desktop.Location = new Point(38, 250); start.Location = new Point(38, 282); status.Location = new Point(38, 330);
+        progress.SetBounds(36, 358, 572, 13); install.Location = new Point(490, 381); install.BackColor = Color.FromArgb(20, 93, 153); install.ForeColor = Color.White; install.FlatStyle = FlatStyle.Flat;
         cancel.DialogResult = DialogResult.Cancel;
-        Controls.AddRange([heading, intro, illustration, pathLabel, folder, browse, desktop, start, status, progress, cancel, install]); AcceptButton = install; CancelButton = cancel;
+        Controls.AddRange([heading, intro, illustration, pathLabel, folder, browse, startMenu, desktop, start, status, progress, cancel, install]); AcceptButton = install; CancelButton = cancel;
         SetIllustration("welcome");
         browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); };
         install.Click += async (_, _) => await InstallAsync();
@@ -672,13 +692,14 @@ internal sealed class SetupWizard : Form
         installCancellation = new CancellationTokenSource();
         install.Enabled = false;
         folder.Enabled = false;
+        startMenu.Enabled = false;
         desktop.Enabled = false;
         start.Enabled = false;
         cancel.Enabled = true;
         SetIllustration("prepare");
         try
         {
-            await Task.Run(() => Program.Install(folder.Text, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() =>
+            await Task.Run(() => Program.Install(folder.Text, startMenu.Checked, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() =>
             {
                 status.Text = message;
                 progress.Value = value;
@@ -704,6 +725,7 @@ internal sealed class SetupWizard : Form
             installationRunning = false;
             install.Enabled = true;
             folder.Enabled = true;
+            startMenu.Enabled = true;
             desktop.Enabled = true;
             start.Enabled = true;
             cancel.DialogResult = DialogResult.Cancel;

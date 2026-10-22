@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Kreator instalatora udostępnia teraz osobną, domyślnie włączoną opcję skrótu menu Start. Odznaczenie usuwa tylko skrót kierujący do instalacji Sentinel; aktualizacja zachowuje pozostałe skróty i rollback przywraca poprzedni stan. Self-test weryfikuje utworzenie, usunięcie i zachowanie obcego skrótu. Pełny build/self-test PASS; artefakt testowy nie jest wydaniem.
 - Reguły URL `2026.10.4` dodają umiarkowany sygnał przy współwystępowaniu co najmniej trzech wymiarów struktury URL. Na eksplorowanym pełnym PhiUSIIL (235 795 adresów, URL-only) wynik wzrósł do TP=4 368, FP=14, TN=134 836, FN=96 577 (recall 4,33%, FPR 0,0104%). Progi wybrano na tym samym zbiorze, bez holdoutu; to wynik rozwojowy, nie produkcyjny. Szczegóły: `docs/DETECTION-EVALUATION.md`.
 
 - Opt-in monitor trwałości Windows obejmuje teraz zaplanowane zadania odczytane przez `schtasks /query /xml`. XML, nazwy i komendy zostają w pamięci; SQLite v21 zapisuje hashowane ID/odciski oraz oddzielny stan cichego baseline'u. Przy odmowie źródła zachowuje poprzedni baseline i nadal przetwarza pozostałe źródła. Testy monitora 15/15 i live read-only przepływ dla 175 zadań PASS. Pełny build/installer PASS: .NET 254/254, Engine IPC, DNS/TCP/UDP, Electron 14/14, `npm audit` 0, UI i autotest instalatora. Testowy instalator nie jest wydaniem; SHA-256 `6306806E779C34BE695E0079D2B028212EE55A830748050ABEED4960C442D725`.
