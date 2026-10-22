@@ -39,7 +39,8 @@ public sealed class BrowserIntegrationTests : IDisposable
     [Fact]
     public async Task NativeHostEndToEndAnalyzesNavigationAndReturnsLocalWarning()
     {
-        var request = JsonSerializer.SerializeToUtf8Bytes(new BrowserRequest("navigation-1", "analyze", "https://paypal.com.evil.test/login"));
+        var url = "https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var request = JsonSerializer.SerializeToUtf8Bytes(new BrowserRequest("navigation-1", "analyze", url, "chrome"));
         var input = new MemoryStream();
         await NativeMessagingProtocol.WriteAsync(input, request);
         input.Position = 0;
@@ -51,7 +52,12 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.NotNull(response);
         Assert.True(response.Available);
         Assert.True(response.ShouldWarn);
-        Assert.Contains(response.Indicators, item => item.Id == "url.brand");
+        Assert.Equal("2026.10.3", response.RulesVersion);
+        Assert.Equal("Moderate", response.Risk);
+        Assert.Contains(response.Indicators, item => item.Id == "url.auth_structure");
+        var serialized = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain(url, serialized);
+        Assert.DoesNotContain("example.test", serialized);
     }
 
     [Fact]
@@ -65,22 +71,6 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.Contains(response.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(LocalStore.CreateUrlEvidenceSignalHash("attacker.test", response.Indicators.Select(item => item.Id)), response.SignalHash);
         Assert.DoesNotContain("attacker.test", JsonSerializer.Serialize(response));
-    }
-
-    [Fact]
-    public void BrowserHostUsesCurrentRulesForCombinedAuthenticationStructure()
-    {
-        var url = "https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        var response = new UrlRequestProcessor().Process(new BrowserRequest("auth-structure-1", "analyze", url, "chrome"));
-
-        Assert.True(response.Available);
-        Assert.True(response.ShouldWarn);
-        Assert.Equal("2026.10.3", response.RulesVersion);
-        Assert.Equal("Moderate", response.Risk);
-        Assert.Contains(response.Indicators, item => item.Id == "url.auth_structure");
-        var serialized = JsonSerializer.Serialize(response);
-        Assert.DoesNotContain(url, serialized);
-        Assert.DoesNotContain("example.test", serialized);
     }
 
     [Fact]
