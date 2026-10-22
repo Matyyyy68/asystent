@@ -941,6 +941,7 @@ internal sealed class SetupWizard : Form
             _ => "Dalej"
         };
         back.Enabled = !installationRunning;
+        ActiveControl = next.Visible && next.Enabled ? next : cancel.Visible && cancel.Enabled ? cancel : null;
         step.Text = target switch
         {
             WizardPage.Welcome => "KROK 1 Z 7  •  POWITANIE",
@@ -1051,6 +1052,11 @@ internal sealed class SetupWizard : Form
             wizard.ShowPage(page, retryable: page == WizardPage.Error);
             if (string.IsNullOrWhiteSpace(wizard.heading.Text) || string.IsNullOrWhiteSpace(wizard.step.Text))
                 throw new InvalidDataException($"Ekran instalatora {page} nie ma nagłówka lub wskaźnika kroku.");
+            var expectedActiveControl = wizard.next.Visible && wizard.next.Enabled ? wizard.next
+                : wizard.cancel.Visible && wizard.cancel.Enabled ? wizard.cancel
+                : null;
+            if (!ReferenceEquals(wizard.ActiveControl, expectedActiveControl))
+                throw new InvalidDataException($"Ekran instalatora {page} nie ustawia fokusu na bezpiecznym przycisku klawiatury.");
             if (wizard.illustration.Visible && wizard.illustration.Image is null)
                 throw new InvalidDataException($"Ekran instalatora {page} nie załadował swojej ilustracji.");
         }
