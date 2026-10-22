@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Dodatkowa walidacja Enterprise dla bieżącego kodu: `dotnet test server/Sentinel.Server.sln -c Release` 22/22, Release build bez ostrzeżeń, HTTP smoke na loopback PASS. Smoke objął auth/RBAC, polityki, konfigurację AI i zgodę, bazę wiedzy, zaproszenia/enrollment, heartbeat, audit i revoke.
+
 - Opt-in monitoring Downloads obejmuje nowe i zmienione pliki także w podfolderach. Nie podąża za reparse points, uzgadnia całe drzewo co 5 minut i usuwa z baseline'u ścieżki po skasowaniu katalogu; testy sprawdzają nowy plik z podfolderu, pominięcie plików sprzed włączenia i sprzątanie po usunięciu drzewa.
 - Pełne `scripts/build-user.ps1 -Installer` po zmianie Downloads PASS: .NET 234/234 bez pominięć, Electron 14/14, `npm audit` 0, Engine IPC, Windows process/DNS/TCP/UDP checks, UI build i installer self-test. Powtórny build 2026-10-22 poza sandboxem potwierdził ten sam wynik; aktualny lokalny artefakt ma SHA-256 `BFFD8DFFE60BADEECBC1C17296CFA533D468081512E538A8D8DC8CB4680D52C0` i nie został opublikowany.
 - Dodano opt-in monitor zmian HKCU Run/RunOnce i folderu Startup bieżącego użytkownika: cichy baseline, polling co ≥30 s, limity 256 elementów i 32 zdarzeń na próbkę, lokalne zredagowane rekordy bez Enterprise sync. Pełna bramka PASS: .NET 243/243, Electron 14/14, Engine IPC, Windows DNS/TCP/UDP, UI build, `npm audit` 0 i installer self-test. Lokalny artefakt testowy ma SHA-256 `5834E8FB99F2FBB8B681FC841A616DE9F9EED3709D472825673E900068B82698`; nie został opublikowany. HKLM i Scheduled Tasks są poza zakresem; monitor nie wykryje wpisu dodanego i usuniętego w całości podczas zamknięcia aplikacji.

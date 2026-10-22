@@ -3,7 +3,7 @@
 **Aktualizacja:** 2026-10-22
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
 
-**Stan zweryfikowany:** pełna bramka po monitorze autostartu PASS: .NET 243/243 bez pominięć, Engine IPC i Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI oraz autotest instalatora PASS. Nieopublikowany lokalny artefakt v0.15.38 ma SHA-256 `5834E8FB99F2FBB8B681FC841A616DE9F9EED3709D472825673E900068B82698`.
+**Stan zweryfikowany:** pełna bramka po monitorze autostartu PASS: .NET 243/243 bez pominięć, Engine IPC i Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI, autotest instalatora oraz testy Enterprise API 22/22 i HTTP smoke PASS. Nieopublikowany lokalny artefakt v0.15.38 ma SHA-256 `5834E8FB99F2FBB8B681FC841A616DE9F9EED3709D472825673E900068B82698`.
 
 **Audyt zakresu:** macierz `docs/IMPLEMENTATION_GAP_ANALYSIS.md` ma 21 obszarów: 5 `DONE_AND_VERIFIED`, 15 `PARTIALLY_IMPLEMENTED`, 0 `MISSING` i 1 `BLOCKED`; 16 obszarów nie spełnia wszystkich kryteriów ukończenia. Istnieje 11 osobnych planów (`PLAN-001`–`PLAN-011`), wszystkie `IN_PROGRESS`. Nie wyliczam procentu, bo priorytety i kryteria nie są równoważne.
 
