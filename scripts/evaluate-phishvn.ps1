@@ -2,11 +2,18 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
     [string]$CsvPath,
-    [ValidateSet('gold', 'silver', 'bronze')]
+    [ValidateSet('train', 'val', 'test')]
+    [string]$Split = 'test',
     [string[]]$Tiers = @('gold', 'silver')
 )
 
 $ErrorActionPreference = 'Stop'
+$requestedTiers = @($Tiers | ForEach-Object { $_ -split '[,\s]+' } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim().ToLowerInvariant() })
+$invalidTiers = @($requestedTiers | Where-Object { $_ -notin 'gold', 'silver', 'bronze' })
+if ($requestedTiers.Count -eq 0 -or $invalidTiers.Count -gt 0) {
+    throw 'Tiers must be a comma- or space-separated combination of gold, silver, and bronze.'
+}
+$Tiers = @(@('gold', 'silver', 'bronze') | Where-Object { $_ -in $requestedTiers } | Sort-Object -Unique)
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $coreAssembly = Join-Path $repositoryRoot 'src\Sentinel.Core\bin\Release\net10.0\Sentinel.Core.dll'
 if (-not (Test-Path -LiteralPath $coreAssembly -PathType Leaf)) {
@@ -38,8 +45,8 @@ try {
     if ($urlIndex -lt 0 -or $labelIndex -lt 0 -or $tierIndex -lt 0) {
         throw 'Expected PhishVN CSV columns url, label, and tier were not found.'
     }
-    if ($splitIndex -lt 0 -and [IO.Path]::GetFileName($resolvedCsv) -cne 'url_test.csv') {
-        throw 'Input must be the official url_test.csv file or include a split column identifying every row as test.'
+    if ($splitIndex -lt 0 -and [IO.Path]::GetFileName($resolvedCsv) -cne "url_$Split.csv") {
+        throw "Input must be the official url_$Split.csv file or include a split column identifying every row as $Split."
     }
 
     [long]$record = 1
@@ -49,8 +56,8 @@ try {
         if ($null -eq $fields -or $fields.Length -le [Math]::Max($urlIndex, [Math]::Max($labelIndex, $tierIndex))) {
             throw "Malformed PhishVN CSV row near record $record; no URL values were logged."
         }
-        if ($splitIndex -ge 0 -and ($fields.Length -le $splitIndex -or $fields[$splitIndex] -cne 'test')) {
-            throw "Input contains a non-test row near record $record; no URL values were logged."
+        if ($splitIndex -ge 0 -and ($fields.Length -le $splitIndex -or $fields[$splitIndex] -cne $Split)) {
+            throw "Input contains a row outside the requested $Split split near record $record; no URL values were logged."
         }
 
         $tier = $fields[$tierIndex].ToLowerInvariant()
@@ -64,8 +71,11 @@ try {
         if ($tier -notin $Tiers) { continue }
 
         $url = $fields[$urlIndex]
-        $navigation = [Sentinel.Core.Analysis.NavigationSignal]::new($url)
-        $context = [Sentinel.Core.Analysis.AnalysisContext]::new('offline-phishvn-test-evaluation', '', $timestamp, $navigation)
+        # PhishVN includes scheme-stripped URLs. Add HTTPS only as a parser prefix;
+        # the dataset does not establish the actual transport scheme for these rows.
+        $analysisUrl = if ($url -match '^[A-Za-z][A-Za-z0-9+.-]*://') { $url } else { 'https://' + $url }
+        $navigation = [Sentinel.Core.Analysis.NavigationSignal]::new($analysisUrl)
+        $context = [Sentinel.Core.Analysis.AnalysisContext]::new("offline-phishvn-$Split-evaluation", '', $timestamp, $navigation)
         $assessment = $engine.Analyze($context)
         $predictedPhishing = $assessment.Risk -ge [Sentinel.Core.RiskLevel]::Moderate
         $actualPhishing = $label -eq 'phishing'
@@ -84,13 +94,13 @@ try {
     foreach ($tier in $selected) {
         foreach ($key in @('Rows', 'TP', 'FP', 'TN', 'FN', 'InvalidUrl')) { $total[$key] += $counts[$tier][$key] }
     }
-    if ($total.Rows -eq 0) { throw 'The official test split has no rows in the selected confidence tiers.' }
+    if ($total.Rows -eq 0) { throw "The official $Split split has no rows in the selected confidence tiers." }
 
     $aggregateName = [string]::Join('+', $selected) + ' aggregate'
     foreach ($entry in @(@{ Tier = $aggregateName; Counts = $total }) + @($selected | ForEach-Object { @{ Tier = $_; Counts = $counts[$_] } })) {
         $item = $entry.Counts
         [pscustomobject]@{
-            Dataset = 'PhishVN v3.1.0 official temporal/group-domain test split'
+            Dataset = "PhishVN v3.1.0 official temporal/group-domain $Split split"
             ConfidenceTier = $entry.Tier
             Rows = $item.Rows
             InvalidUrl = $item.InvalidUrl

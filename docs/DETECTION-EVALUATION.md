@@ -62,17 +62,34 @@ Reguły dla `.google`, `.apple` i `.microsoft` opierają się na [ICANN Spec 13 
 
 Do dalszej walidacji nadal potrzeba reprezentatywnego, deduplikowanego zestawu z wiarygodnym pochodzeniem, oddzielnego holdoutu i kalibracji na realistycznej bazowej częstości ataków. `confidence` pozostaje puste.
 
-## Niezależny test czasowy PhishVN — ewaluator gotowy, wynik oczekuje na dane
+## Niezależny test czasowy PhishVN — wynik bazowy reguł 2026.10.6
 
 Zidentyfikowano niezależny zbiór [PhishVN v3.1.0 na Mendeley Data](https://data.mendeley.com/datasets/b97hxbxtpd/4), licencjonowany na [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Wersja 4 aktualizuje dokumentację, a dane pozostają bajtowo zgodne z wersją 3. Autorzy publikują oficjalny split train/validation/test grupowany po domenie i czasie; plik `data/splits/url_test.csv` ma 8 941 wierszy. Wersja opisuje 18 997 rekordów rdzenia gold/silver oraz osobne 34 119 rekordów bronze. Raportowanie domyślnie ogranicza się do gold/silver; noisy tier bronze można uwzględnić jawnie, ale nie należy łączyć go z głównym wynikiem bez osobnego oznaczenia.
 
-Dodany `scripts/evaluate-phishvn.ps1` używa tylko kolumn `url`, `label`, `tier` i — jeśli jest obecna — `split`. Ocenia stały próg `Moderate`, nie dobiera reguł ani progu, nie otwiera URL-i, i odrzuca plik ze wskazaniem train/validation. Dane nie są dołączane do repozytorium. Po pobraniu archiwum z oficjalnej strony należy sprawdzić sumy plików według jego `MANIFEST.txt`, a następnie uruchomić:
+Pobrano oficjalne `PhishVN_v3.1.0_open.zip` (5 813 309 B, SHA-256 `308351E9D0C0FCA13A81F2F63524A7DEE08CCBA6C775848D125B3DA5525D0AB5`). SHA-256 `data/splits/url_test.csv` to `B692882E8AE26B2C0B217C090E92D3A19307A26ACBFB3C8C89692DB26D409BC9` (1 961 206 B), zgodne z wpisem w dołączonym `MANIFEST.txt`. Archiwum i CSV pozostają w katalogu tymczasowym, poza repozytorium.
+
+Dodany `scripts/evaluate-phishvn.ps1` używa wyłącznie `url`, `label`, `tier` i — jeśli jest obecna — `split`. Ocenia niezmieniony próg `Moderate`, nie dobiera reguł ani progu, nie otwiera URL-i i odrzuca wiersze spoza testu. W zbiorze 8 941 rekordów 8 553 adresy są pozbawione schematu; ewaluator dopisuje `https://` wyłącznie jako techniczny prefiks wymagany przez parser, bez uznawania tego za informację o rzeczywistym protokole. Wszystkie 8 941 wierszy przeszły analizę parsera. Uruchomienie:
 
 ```powershell
 dotnet build src/Sentinel.Core/Sentinel.Core.csproj -c Release
 pwsh -NoProfile -File scripts/evaluate-phishvn.ps1 -CsvPath C:\ścieżka\PhishVN\data\splits\url_test.csv
 pwsh -NoProfile -File scripts/evaluate-phishvn.ps1 -CsvPath C:\ścieżka\PhishVN\data\splits\url_test.csv -Tiers gold,silver,bronze
+# Dane rozwojowe wolno analizować jawnie; wyników train/val nie raportuj jako testu:
+pwsh -NoProfile -File scripts/evaluate-phishvn.ps1 -CsvPath C:\ścieżka\PhishVN\data\splits\url_train.csv -Split train
+pwsh -NoProfile -File scripts/evaluate-phishvn.ps1 -CsvPath C:\ścieżka\PhishVN\data\splits\url_val.csv -Split val
 pwsh -NoProfile -File scripts/test-evaluate-phishvn.ps1
 ```
 
-Ewaluator przeszedł test fixture dla filtrowania tierów, macierzy pomyłek, jawnego dodania bronze oraz blokady plików bez potwierdzonego splitu testowego. **Nie wykonano jeszcze pomiaru na prawdziwym PhishVN:** publiczny endpoint API Mendeley wymaga OAuth, a próba pobrania przez stronę repozytorium zwróciła HTML zamiast ZIP. W rezultacie F03 nadal nie ma niezależnego wyniku. Kiedy dostęp do archiwum będzie działał, raport należy opublikować z SHA-256 archiwum i wersją reguł, bez dostrajania na testowym zbiorze. PhishVN jest ponadto zlokalizowany na Wietnam; nawet prawidłowy wynik nie zastąpi oceny na innych językach i realistycznym ruchu produkcyjnym.
+| Tier | Wiersze | Phishing | Legalne | TP | FP | TN | FN | Precision | Recall | FPR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Gold + silver (wynik główny) | 4 332 | 487 | 3 845 | 0 | 2 | 3 843 | 487 | 0% | 0% | 0,0520% |
+| Gold | 2 673 | 69 | 2 604 | 0 | 2 | 2 602 | 69 | 0% | 0% | 0,0768% |
+| Silver | 1 659 | 418 | 1 241 | 0 | 0 | 1 241 | 418 | — | 0% | 0% |
+| Bronze (osobno, niższa wiarygodność) | 4 609 | 4 609 | 0 | 0 | 0 | 0 | 4 609 | — | 0% | — |
+| Wszystkie tiery (nie używać jako głównego wyniku) | 8 941 | 5 096 | 3 845 | 0 | 2 | 3 843 | 5 096 | 0% | 0% | 0,0520% |
+
+Reguły `2026.10.6` nie wykryły żadnego phishingu przy progu Moderate na tym zewnętrznym teście. Nie zmieniano reguł po obejrzeniu wyniku; niska wykrywalność jest dowodem ograniczenia obecnego zestawu, nie przyczyną do strojenia na teście. F03 pozostaje częściowo wdrożone. Przyszły rozwój lokalizacji/reguł może używać wyłącznie train/validation, a poprawę skuteczności należy potwierdzić na nowym, nieoglądanym holdoucie, ponieważ wynik PhishVN jest już znany. PhishVN jest zlokalizowany na Wietnam i nie zastąpi walidacji na innych językach ani realistycznym ruchu produkcyjnym. Reguły nie są skalibrowane do częstości bazowej, a zero wykryć oznacza, że nie wolno przedstawiać obecnej analizy URL jako skutecznej ochrony phishingowej.
+
+### Diagnostyka rozwojowa (niezależna od testu)
+
+Przy niezmienionych regułach `2026.10.6` wynik train dla gold/silver to 13 080 wierszy: TP=0, FP=3, TN=11 001, FN=2 076 (recall 0%, FPR 0,0273%). Validation: 1 585 wierszy, TP=0, FP=0, TN=1 561, FN=24 (recall 0%, FPR 0%). Wszystkie adresy przeszły parser. To pomiar bazowy, nie poprawa ani niezależne potwierdzenie jakości; potwierdza, że aktualne reguły praktycznie nie pokrywają etykietowanych phishingowych adresów tego zbioru także przed testem. `-Split` jest wymagane dla plików train/val, a ewaluator odrzuca rekord oznaczony innym splitem. Nie dostrajano reguł na tych wynikach w ramach pomiaru.
