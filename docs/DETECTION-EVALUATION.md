@@ -61,3 +61,18 @@ Osobny snapshot Tranco `746PX`, utworzony 2026-10-21, ma SHA-256 `577EB57D995B85
 Reguły dla `.google`, `.apple` i `.microsoft` opierają się na [ICANN Spec 13 dla Google](https://www.icann.org/en/registry-agreements/details/google), [Apple](https://www.icann.org/en/registry-agreements/details/apple) i [Microsoft](https://www.icann.org/en/registry-agreements/details/microsoft). Dodatkowe przykłady własności sprawdzono w [liście domen Google](https://www.google.com/supported_domains), dokumentacji Microsoft dla [`cloud.microsoft`](https://learn.microsoft.com/microsoft-365/enterprise/cloud-microsoft-domain) oraz [dokumentacji Apple News](https://developer.apple.com/documentation/applenewsformat/supportedurls). Tranco opisuje [metodologię rankingu](https://tranco-list.eu/methodology); ranking popularności nie nadaje domenom etykiety „bezpieczna”.
 
 Do dalszej walidacji nadal potrzeba reprezentatywnego, deduplikowanego zestawu z wiarygodnym pochodzeniem, oddzielnego holdoutu i kalibracji na realistycznej bazowej częstości ataków. `confidence` pozostaje puste.
+
+## Niezależny test czasowy PhishVN — ewaluator gotowy, wynik oczekuje na dane
+
+Zidentyfikowano niezależny zbiór [PhishVN v3.1.0 na Mendeley Data](https://data.mendeley.com/datasets/b97hxbxtpd/4), licencjonowany na [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Wersja 4 aktualizuje dokumentację, a dane pozostają bajtowo zgodne z wersją 3. Autorzy publikują oficjalny split train/validation/test grupowany po domenie i czasie; plik `data/splits/url_test.csv` ma 8 941 wierszy. Wersja opisuje 18 997 rekordów rdzenia gold/silver oraz osobne 34 119 rekordów bronze. Raportowanie domyślnie ogranicza się do gold/silver; noisy tier bronze można uwzględnić jawnie, ale nie należy łączyć go z głównym wynikiem bez osobnego oznaczenia.
+
+Dodany `scripts/evaluate-phishvn.ps1` używa tylko kolumn `url`, `label`, `tier` i — jeśli jest obecna — `split`. Ocenia stały próg `Moderate`, nie dobiera reguł ani progu, nie otwiera URL-i, i odrzuca plik ze wskazaniem train/validation. Dane nie są dołączane do repozytorium. Po pobraniu archiwum z oficjalnej strony należy sprawdzić sumy plików według jego `MANIFEST.txt`, a następnie uruchomić:
+
+```powershell
+dotnet build src/Sentinel.Core/Sentinel.Core.csproj -c Release
+pwsh -NoProfile -File scripts/evaluate-phishvn.ps1 -CsvPath C:\ścieżka\PhishVN\data\splits\url_test.csv
+pwsh -NoProfile -File scripts/evaluate-phishvn.ps1 -CsvPath C:\ścieżka\PhishVN\data\splits\url_test.csv -Tiers gold,silver,bronze
+pwsh -NoProfile -File scripts/test-evaluate-phishvn.ps1
+```
+
+Ewaluator przeszedł test fixture dla filtrowania tierów, macierzy pomyłek, jawnego dodania bronze oraz blokady plików bez potwierdzonego splitu testowego. **Nie wykonano jeszcze pomiaru na prawdziwym PhishVN:** publiczny endpoint API Mendeley wymaga OAuth, a próba pobrania przez stronę repozytorium zwróciła HTML zamiast ZIP. W rezultacie F03 nadal nie ma niezależnego wyniku. Kiedy dostęp do archiwum będzie działał, raport należy opublikować z SHA-256 archiwum i wersją reguł, bez dostrajania na testowym zbiorze. PhishVN jest ponadto zlokalizowany na Wietnam; nawet prawidłowy wynik nie zastąpi oceny na innych językach i realistycznym ruchu produkcyjnym.
