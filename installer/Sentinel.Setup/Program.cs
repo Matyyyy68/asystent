@@ -758,7 +758,7 @@ internal sealed class SetupWizard : Form
     private readonly CheckBox startMenu = new() { Text = "Utwórz skrót w menu &Start", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
     private readonly CheckBox desktop = new() { Text = "Utwórz skrót na &pulpicie", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
     private readonly CheckBox start = new() { Text = "&Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-    private readonly CheckBox launchAfter = new() { Text = "Uruchom Sentinel AI po &zakończeniu", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox launchAfter = new() { Text = "Uruchom Sentinel AI po &instalacji", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
     private readonly Label summary = new() { AutoSize = false, ForeColor = Color.White, Location = new Point(34, 178), Size = new Size(420, 180) };
     private readonly Label status = new() { AutoSize = false, ForeColor = Color.White, Location = new Point(34, 292), Size = new Size(570, 42) };
     private readonly Label errorDetails = new() { AutoSize = false, ForeColor = Color.FromArgb(255, 185, 185), Location = new Point(34, 166), Size = new Size(420, 175) };
@@ -1067,6 +1067,13 @@ internal sealed class SetupWizard : Form
         if (!wizard.startMenu.Visible || !wizard.desktop.Visible || !wizard.start.Visible || !wizard.launchAfter.Visible || !wizard.startMenu.Checked || !wizard.desktop.Checked || !wizard.start.Checked || !wizard.launchAfter.Checked
             || !wizard.startMenu.Text.Contains('&') || !wizard.desktop.Text.Contains('&') || !wizard.start.Text.Contains('&') || !wizard.launchAfter.Text.Contains('&'))
             throw new InvalidDataException("Ekran ustawień nie pokazuje domyślnych opcji instalacji.");
+        var accessKeys = new[] { wizard.startMenu.Text, wizard.desktop.Text, wizard.start.Text, wizard.launchAfter.Text }
+            .Select(text => text.IndexOf('&') is var ampersand && ampersand >= 0 && ampersand + 1 < text.Length
+                ? char.ToUpperInvariant(text[ampersand + 1])
+                : '\0')
+            .ToArray();
+        if (accessKeys.Any(key => key == '\0') || accessKeys.Distinct().Count() != accessKeys.Length)
+            throw new InvalidDataException("Opcje instalatora nie mają unikalnych skrótów klawiaturowych.");
         wizard.ShowPage(WizardPage.Summary);
         if (!wizard.summary.Visible || !wizard.summary.Text.Contains("Autostart Windows", StringComparison.Ordinal) || !wizard.summary.Text.Contains("Uruchom po instalacji", StringComparison.Ordinal))
             throw new InvalidDataException("Ekran podsumowania nie zawiera wybranych ustawień.");
