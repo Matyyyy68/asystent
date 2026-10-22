@@ -98,7 +98,7 @@ app.whenReady().then(() => {
       const state = await call('collect', {});
       tray?.setToolTip('Sentinel AI — ' + state.dns + ' · procesy: ' + state.processes);
       if (state.detections > 0 && state.notifications && Notification.isSupported())
-        new Notification({ title: 'Sentinel AI — ostrzeżenie DNS', body: 'W cache DNS wykryto domenę z listy CERT Polska. Ruch nie został zablokowany.' }).show();
+        new Notification({ title: 'Sentinel AI — ostrzeżenie DNS', body: 'W źródle DNS wykryto domenę z listy CERT Polska. Ruch nie został zablokowany.' }).show();
     } catch { tray?.setToolTip('Sentinel AI — silnik niedostępny'); }
     finally { collecting = false; }
   }, 1000);

@@ -204,6 +204,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     await call('pause', {paused:false}); await new Promise(resolve => setTimeout(resolve, 15_100));
     const dns = await call('collect'); assert.equal(dns.ok,true);
     assert.ok(dns.result.dns.startsWith('Odczyt cache DNS działa'), dns.result.dns);
+    assert.match(dns.result.dnsOperational, /Kanał DNS Operational|Dziennik DNS Operational/, 'collect must expose DNS event channel status');
     const dnsStatus = (await call('status')).result;
     assert.match(dnsStatus.dnsOperational, /Kanał DNS Operational|Dziennik DNS Operational/, 'DNS event channel status must be visible');
     const channelConfiguration = execFileSync(path.join(process.env.SystemRoot, 'System32', 'wevtutil.exe'),

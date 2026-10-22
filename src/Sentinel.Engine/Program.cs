@@ -177,13 +177,13 @@ DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
 DateTimeOffset? lastDnsOperationalAttempt = null;
 string dnsOperationalState = "Kanał DNS Operational nie został jeszcze sprawdzony";
-async Task<int> ReadDnsOperationalEventsAsync(CancellationToken cancellationToken = default)
+async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToken cancellationToken = default)
 {
-    if (dnsOperationalLog is null) return 0;
+    if (dnsOperationalLog is null) return [];
     if (!await dnsOperationalLog.IsEnabledAsync(cancellationToken))
     {
         dnsOperationalState = "Kanał DNS Operational jest wyłączony; nie zmieniono konfiguracji systemu";
-        return 0;
+        return [];
     }
     var cursor = await store.GetDnsOperationalRecordCursorAsync(cancellationToken);
     var latestRecordId = await dnsOperationalLog.ReadLatestRecordIdAsync(cancellationToken);
@@ -191,17 +191,17 @@ async Task<int> ReadDnsOperationalEventsAsync(CancellationToken cancellationToke
     {
         await store.SetDnsOperationalRecordCursorAsync(latestRecordId ?? 0, cancellationToken);
         dnsOperationalState = "Kanał DNS Operational aktywny; ustawiono początkowy punkt odczytu";
-        return 0;
+        return [];
     }
     if (latestRecordId is null || latestRecordId.Value < cursor.Value)
     {
         await store.SetDnsOperationalRecordCursorAsync(latestRecordId ?? 0, cancellationToken);
         dnsOperationalState = "Dziennik DNS został wyczyszczony lub obrócony; ustawiono nowy punkt odczytu";
-        return 0;
+        return [];
     }
 
     var records = await dnsOperationalLog.ReadAfterAsync(cursor.Value, cancellationToken);
-    var matches = 0;
+    var matches = new List<string>();
     foreach (var record in records)
     {
         if (record.QueryName is null || record.Timestamp is not { } observedAt ||
@@ -216,11 +216,11 @@ async Task<int> ReadDnsOperationalEventsAsync(CancellationToken cancellationToke
             CorrelationId: correlationId,
             EvidenceCodes: ["dns.windows-operational-query", "reputation.cert.current-feed-match"],
             SignalHash: LocalStore.CreateHostSignalHash(record.QueryName)), "url", "reputation.cert");
-        matches++;
+        matches.Add(record.QueryName);
     }
     if (records.Count > 0)
         await store.SetDnsOperationalRecordCursorAsync(records[^1].RecordId, cancellationToken);
-    dnsOperationalState = $"Kanał DNS Operational działa; odczytano {records.Count} nowych zdarzeń, dopasowania: {matches}";
+    dnsOperationalState = $"Kanał DNS Operational działa; odczytano {records.Count} nowych zdarzeń, dopasowania: {matches.Count}";
     return matches;
 }
 static Guid DnsOperationalEventId(long recordId)
@@ -375,7 +375,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     (lastDnsOperationalAttempt is not { } previousOperationalAttempt || DateTimeOffset.UtcNow - previousOperationalAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
                 {
                     lastDnsOperationalAttempt = DateTimeOffset.UtcNow;
-                    try { _ = await ReadDnsOperationalEventsAsync(); }
+                    try { detections.AddRange(await ReadDnsOperationalEventsAsync()); }
                     catch (Exception ex) { dnsOperationalState = "Dziennik DNS Operational niedostępny: " + ex.GetType().Name; }
                 }
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
