@@ -47,13 +47,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Audit NuGet dependencies
+        shell: pwsh
+        run: ./scripts/audit-nuget.ps1
       - name: Build and test application
         shell: pwsh
         run: ./scripts/build-user.ps1 -Installer
       - name: Build and test Enterprise API
         shell: pwsh
         run: |
-          dotnet test server/Sentinel.Server.sln -c Release -p:NuGetAudit=false
+          dotnet test server/Sentinel.Server.sln -c Release
           if ($LASTEXITCODE) { throw 'Enterprise API tests failed' }
           dotnet build server/Sentinel.Server.sln -c Release --no-restore
           if ($LASTEXITCODE) { throw 'Enterprise API build failed' }
