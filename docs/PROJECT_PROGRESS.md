@@ -3,7 +3,7 @@
 **Aktualizacja:** 2026-10-22
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
 
-**Stan zweryfikowany:** po rozszerzeniu monitora Downloads pełna bramka `scripts/build-user.ps1 -Installer` przeszła lokalnie: .NET 234/234 bez pominięć, Engine IPC i testy Windows procesów/DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny build UI oraz autotest instalatora PASS. Lokalny instalator testowy ma SHA-256 `5BEB179BA39902C74A931395EBC6B156C06F6CE3BC64FF7BD9C626E4ED371B9B`; nie został opublikowany. Jedno wcześniejsze uruchomienie w sandboxie zatrzymało esbuilda z powodu odmowy odczytu katalogu nadrzędnego; ponowienie poza sandboxem zakończyło się sukcesem.
+**Stan zweryfikowany:** po rozszerzeniu monitora Downloads pełna bramka `scripts/build-user.ps1 -Installer` przeszła ponownie 2026-10-22 poza sandboxem: .NET 234/234 bez pominięć, Engine IPC i testy Windows procesów/DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny build UI oraz autotest instalatora PASS. Lokalny instalator testowy ma SHA-256 `BFFD8DFFE60BADEECBC1C17296CFA533D468081512E538A8D8DC8CB4680D52C0`; nie został opublikowany. W zwykłym sandboxie esbuild nie uzyskał odczytu katalogu nadrzędnego, a build poza sandboxem przeszedł.
 
 **Audyt zakresu:** macierz `docs/IMPLEMENTATION_GAP_ANALYSIS.md` ma 20 obszarów: 5 `DONE_AND_VERIFIED`, 14 `PARTIALLY_IMPLEMENTED`, 1 `BLOCKED`; 15 obszarów nie spełnia wszystkich kryteriów ukończenia. Istnieje 10 osobnych planów (`PLAN-001`–`PLAN-010`), wszystkie `IN_PROGRESS`. Nie wyliczam procentu, bo priorytety i kryteria nie są równoważne.
 

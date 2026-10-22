@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Opt-in monitoring Downloads obejmuje nowe i zmienione pliki także w podfolderach. Nie podąża za reparse points, uzgadnia całe drzewo co 5 minut i usuwa z baseline'u ścieżki po skasowaniu katalogu; testy sprawdzają nowy plik z podfolderu, pominięcie plików sprzed włączenia i sprzątanie po usunięciu drzewa.
-- Pełne `scripts/build-user.ps1 -Installer` po zmianie Downloads PASS: .NET 234/234 bez pominięć, Electron 14/14, `npm audit` 0, Engine IPC, Windows process/DNS/TCP/UDP checks, UI build i installer self-test. Nieopublikowany artefakt lokalny ma SHA-256 `5BEB179BA39902C74A931395EBC6B156C06F6CE3BC64FF7BD9C626E4ED371B9B`.
+- Pełne `scripts/build-user.ps1 -Installer` po zmianie Downloads PASS: .NET 234/234 bez pominięć, Electron 14/14, `npm audit` 0, Engine IPC, Windows process/DNS/TCP/UDP checks, UI build i installer self-test. Powtórny build 2026-10-22 poza sandboxem potwierdził ten sam wynik; aktualny lokalny artefakt ma SHA-256 `BFFD8DFFE60BADEECBC1C17296CFA533D468081512E538A8D8DC8CB4680D52C0` i nie został opublikowany.
 - Inwentaryzacja licencji została rozszerzona na wszystkie wpisy w obu npm lockfile. Raport CSV obejmuje 290 npm (240 lokalnych, 50 lockfile-only) i 23 NuGet; wszystkie wpisy npm mają deklarację licencji. Decyzja o licencji produktu pozostaje otwarta.
 - Pełny `scripts/build-user.ps1 -Installer` dla bieżącego `main` przeszedł: .NET 233/233 bez pominięć, Engine IPC i testy Windows procesów/DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny UI i autotest instalatora PASS. Lokalny, nieopublikowany instalator v0.15.38: SHA-256 `57CC2A232D181542D1F543831C5736EE43B65D7338909CF7B530EC7B9E7302F8`.
 
