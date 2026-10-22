@@ -68,6 +68,22 @@ public sealed class BrowserIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void BrowserHostUsesCurrentRulesForCombinedAuthenticationStructure()
+    {
+        var url = "https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var response = new UrlRequestProcessor().Process(new BrowserRequest("auth-structure-1", "analyze", url, "chrome"));
+
+        Assert.True(response.Available);
+        Assert.True(response.ShouldWarn);
+        Assert.Equal("2026.10.3", response.RulesVersion);
+        Assert.Equal("Moderate", response.Risk);
+        Assert.Contains(response.Indicators, item => item.Id == "url.auth_structure");
+        var serialized = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain(url, serialized);
+        Assert.DoesNotContain("example.test", serialized);
+    }
+
+    [Fact]
     public void ProcessorWarnsOnDeceptiveBrandAndDoesNotReturnSubmittedUrl()
     {
         var url = "https://paypal.com.evil.test/login?email=private@example.test";
