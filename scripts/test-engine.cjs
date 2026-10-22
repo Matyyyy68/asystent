@@ -137,6 +137,12 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   downloadedHistory = (await call('history')).result;
   assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 2,
     'disabled Downloads monitoring must stop processing new files');
+  const clearedHashFeed = await call('fileHashFeedClear');
+  assert.equal(clearedHashFeed.ok, true, clearedHashFeed.error);
+  assert.deepEqual(clearedHashFeed.result, { hashCount: 0, importedAt: null });
+  const fileAfterHashFeedClear = await call('file', { path: unsignedFixture });
+  assert.equal(fileAfterHashFeedClear.ok, true, fileAfterHashFeedClear.error);
+  assert.deepEqual(fileAfterHashFeedClear.result.reputation, { feedImported: false, match: false, explanation: 'Brak lokalnej listy hashy.' });
   await call('settings', { retentionDays: 30, notifications: true, monitorPersistenceChanges: true });
   const persistenceBaseline = await call('collect'); assert.equal(persistenceBaseline.ok, true, persistenceBaseline.error);
   assert.match(persistenceBaseline.result.persistence, /ustawiono baseline/,

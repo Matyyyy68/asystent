@@ -59,6 +59,18 @@ public sealed class FileHashReputation
         return new(imported, match);
     }
 
+    public FileHashReputationStatus Clear()
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM hashes; DELETE FROM metadata WHERE id=1;";
+        command.ExecuteNonQuery();
+        transaction.Commit();
+        return new(0, null);
+    }
+
     public async Task<FileHashReputationStatus> ImportFileAsync(string path, CancellationToken cancellationToken = default)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);

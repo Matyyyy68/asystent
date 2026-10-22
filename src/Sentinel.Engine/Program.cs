@@ -652,6 +652,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 result = new { fileFeedStatus.HashCount, fileFeedStatus.ImportedAt,
                     explanation = $"Zaimportowano {fileFeedStatus.HashCount} hashy do lokalnej listy. Sentinel nie weryfikuje niezależnie źródła." };
                 break;
+            case "fileHashFeedClear": result = fileHashReputation.Clear(); break;
             case "malwareBazaarConfigure":
                 if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Klucz MalwareBazaar wymaga Windows DPAPI.");
                 var malwareBazaarKey = request.GetProperty("apiKey").GetString() ?? "";

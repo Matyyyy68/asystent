@@ -52,6 +52,22 @@ public sealed class FileHashReputationTests : IDisposable
         Assert.Equal(0, reputation.Status().HashCount);
     }
 
+    [Fact]
+    public void ClearingFeedRemovesHashesAndImportMetadataAcrossRestart()
+    {
+        var reputation = new FileHashReputation(directory);
+        var hash = new string('b', 64);
+        reputation.Import(hash, DateTimeOffset.Parse("2026-10-22T12:00:00Z"));
+
+        var status = reputation.Clear();
+
+        Assert.Equal(new FileHashReputationStatus(0, null), status);
+        Assert.Equal(new FileHashReputationCheck(false, false), reputation.Check(hash));
+        var reopened = new FileHashReputation(directory);
+        Assert.Equal(new FileHashReputationStatus(0, null), reopened.Status());
+        Assert.Equal(new FileHashReputationCheck(false, false), reopened.Check(hash));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
