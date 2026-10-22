@@ -25,6 +25,11 @@ try {
     if ($aggregate.Rows -ne 3 -or $aggregate.InvalidUrl -ne 0 -or $result.ConfidenceTier -contains 'bronze') {
         throw 'Default evaluation must include gold/silver and exclude bronze.'
     }
+    $fixtureMetadata = Get-Item -LiteralPath $fixture
+    $fixtureHash = (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash
+    if ($aggregate.DataSizeBytes -ne $fixtureMetadata.Length -or $aggregate.DataSha256 -ne $fixtureHash) {
+        throw 'Evaluation report must identify the exact CSV byte size and SHA-256.'
+    }
     if (($aggregate.TP + $aggregate.FP + $aggregate.TN + $aggregate.FN) -ne $aggregate.Rows) {
         throw 'Aggregate confusion matrix does not account for all selected rows.'
     }

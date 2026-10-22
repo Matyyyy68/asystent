@@ -68,7 +68,7 @@ Zidentyfikowano niezależny zbiór [PhishVN v3.1.0 na Mendeley Data](https://dat
 
 Pobrano oficjalne `PhishVN_v3.1.0_open.zip` (5 813 309 B, SHA-256 `308351E9D0C0FCA13A81F2F63524A7DEE08CCBA6C775848D125B3DA5525D0AB5`). SHA-256 `data/splits/url_test.csv` to `B692882E8AE26B2C0B217C090E92D3A19307A26ACBFB3C8C89692DB26D409BC9` (1 961 206 B), zgodne z wpisem w dołączonym `MANIFEST.txt`. Archiwum i CSV pozostają w katalogu tymczasowym, poza repozytorium.
 
-Dodany `scripts/evaluate-phishvn.ps1` używa wyłącznie `url`, `label`, `tier` i — jeśli jest obecna — `split`. Ocenia niezmieniony próg `Moderate`, nie dobiera reguł ani progu, nie otwiera URL-i i odrzuca wiersze spoza testu. W zbiorze 8 941 rekordów 8 553 adresy są pozbawione schematu; ewaluator dopisuje `https://` wyłącznie jako techniczny prefiks wymagany przez parser, bez uznawania tego za informację o rzeczywistym protokole. Wszystkie 8 941 wierszy przeszły analizę parsera. Uruchomienie:
+Dodany `scripts/evaluate-phishvn.ps1` używa wyłącznie `url`, `label`, `tier` i — jeśli jest obecna — `split`. Ocenia niezmieniony próg `Moderate`, nie dobiera reguł ani progu, nie otwiera URL-i i odrzuca wiersze spoza testu. Raport zawiera SHA-256 i rozmiar bajtowy CSV obliczone z tego samego, tylko do odczytu uchwytu pliku, z którego parser pobiera rekordy. W zbiorze 8 941 rekordów 8 553 adresy są pozbawione schematu; ewaluator dopisuje `https://` wyłącznie jako techniczny prefiks wymagany przez parser, bez uznawania tego za informację o rzeczywistym protokole. Wszystkie 8 941 wierszy przeszły analizę parsera. Uruchomienie:
 
 ```powershell
 dotnet build src/Sentinel.Core/Sentinel.Core.csproj -c Release

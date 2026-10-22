@@ -27,7 +27,11 @@ $engine = [Sentinel.Core.Analysis.ThreatAnalysisEngine]::new(
     [Sentinel.Core.Analysis.UrlAnalyzer]::new($domainNames))
 $timestamp = [DateTimeOffset]::UnixEpoch
 $resolvedCsv = (Resolve-Path -LiteralPath $CsvPath).Path
-$parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($resolvedCsv, [Text.Encoding]::UTF8, $true)
+$csvStream = [IO.FileStream]::new($resolvedCsv, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+$dataSizeBytes = $csvStream.Length
+$dataSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($csvStream))
+$csvStream.Position = 0
+$parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($csvStream, [Text.Encoding]::UTF8, $true)
 $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
 $parser.SetDelimiters(',')
 $parser.HasFieldsEnclosedInQuotes = $true
@@ -115,6 +119,8 @@ try {
             RulesVersion = [Sentinel.Core.Analysis.ThreatAnalysisEngine]::RulesVersion
             URLsOpened = 0
             DataFile = [IO.Path]::GetFileName($resolvedCsv)
+            DataSizeBytes = $dataSizeBytes
+            DataSha256 = $dataSha256
         }
     }
 }
