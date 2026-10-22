@@ -5,7 +5,7 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 ## Wydanie i instalacja
 
 - Publicznym wydaniem pozostaje [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący `main` zawiera późniejsze poprawki, w tym automatyczną rotację poświadczeń Enterprise po 90 dniach. Zmiany te nie trafiły jeszcze do opublikowanego instalatora; lokalny build bieżącego kodu nie jest publicznym wydaniem.
-- Pełny build i self-test instalatora przechodzą, ale pełnego cyklu GUI, rejestracji Native Messaging, skrótów, autostartu oraz install/update/uninstall nie zweryfikowano na czystym Windows. Kreator v0.15.38 uruchomił się, a izolowaną ścieżkę dało się ustawić; sterowanie przerwało się przed kliknięciem instalacji, więc rzeczywistej instalacji nie wykonano.
+- Pełny build i self-test instalatora przechodzą, ale pełnego cyklu GUI, rejestracji Native Messaging, skrótów, autostartu oraz install/update/uninstall nie zweryfikowano na czystym Windows. Próba z 2026-10-22 potwierdziła otwarcie okna v0.15.38, ale system przechwytywania obrazu dwukrotnie przekroczył limit czasu po ponownym wyborze okna; nie wykonano kliknięć ani rzeczywistej instalacji.
 - Instalator nie jest podpisany Authenticode, nie ma podpisanego manifestu aktualizacji ani automatycznego updatera. Nie należy traktować lokalnego SHA-256 jako podpisu wydawcy.
 - Rozszerzenie Chrome/Edge wymaga ręcznego załadowania. Izolowane testy na fixture `.test` przeszły, ale ręcznego przepływu w zwykłym profilu użytkownika nie zweryfikowano. Ostrzeżenie może pojawić się po rozpoczęciu ładowania strony i nie blokuje nawigacji.
 
