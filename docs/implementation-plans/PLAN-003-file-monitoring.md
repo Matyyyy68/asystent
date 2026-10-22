@@ -15,3 +15,4 @@
 
 
 13. **Usuwanie lokalnego feedu (2026-10-22):** ustawienia pozwalają potwierdzić czyszczenie hashy i metadanych. Transakcja SQLite usuwa feed; skan po operacji zwraca brak zaimportowanej listy, bez kasowania poprzednich zdarzeń. Core i Engine IPC pokrywają usunięcie; pełna bramka `scripts/build-user.ps1 -Installer` PASS: .NET 284/284, IPC, DNS/TCP/UDP, Electron 14/14, `npm audit` 0, UI production build i self-test instalatora PASS. Artefakt testowy v0.15.38: 281330553 B, SHA-256 `992149AC1DE43AFD5607470EE10ABFF62B1AE354BC68EF90D368D2AF6B541B3A`; nie jest wydaniem.
+14. **Spójność stanu sprawdzania (2026-10-22):** dopasowanie SHA-256 i obecność feedu są odczytywane jednym zapytaniem SQLite, aby równoległy import/clear nie łączył dwóch różnych stanów bazy. Dotychczasowe testy sprawdzają osobno trafienie, brak trafienia przy aktywnym feedzie i pusty feed.

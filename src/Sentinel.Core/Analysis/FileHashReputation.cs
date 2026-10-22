@@ -52,11 +52,11 @@ public sealed class FileHashReputation
         var normalized = Normalize(sha256);
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT EXISTS(SELECT 1 FROM hashes WHERE sha256=$hash)";
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM hashes WHERE sha256=$hash), EXISTS(SELECT 1 FROM hashes)";
         command.Parameters.AddWithValue("$hash", normalized);
-        var imported = Status().HashCount > 0;
-        var match = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) != 0;
-        return new(imported, match);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return new(false, false);
+        return new(reader.GetInt32(1) != 0, reader.GetInt32(0) != 0);
     }
 
     public FileHashReputationStatus Clear()
