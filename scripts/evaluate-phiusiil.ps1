@@ -1,7 +1,10 @@
 param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
-    [string]$CsvPath
+    [string]$CsvPath,
+    [ValidateRange(1, 99)]
+    [int]$DomainHoldoutPercent = 30,
+    [string]$SplitSeed = 'sentinel-f03-domain-holdout-v1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,6 +16,10 @@ if (-not (Test-Path -LiteralPath $coreAssembly -PathType Leaf)) {
 
 Add-Type -AssemblyName Microsoft.VisualBasic
 Add-Type -Path $coreAssembly
+$domainNames = [Sentinel.Core.Analysis.DomainNames]::new()
+$utf8 = [Text.Encoding]::UTF8
+$train = @{ Rows = 0L; Domains = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal); TP = 0L; FP = 0L; TN = 0L; FN = 0L; InvalidUrl = 0L }
+$holdout = @{ Rows = 0L; Domains = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal); TP = 0L; FP = 0L; TN = 0L; FN = 0L; InvalidUrl = 0L }
 
 $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new((Resolve-Path -LiteralPath $CsvPath).Path, [Text.Encoding]::UTF8, $true)
 $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
@@ -28,7 +35,7 @@ try {
     }
 
     $engine = [Sentinel.Core.Analysis.ThreatAnalysisEngine]::new(
-        [Sentinel.Core.Analysis.UrlAnalyzer]::new([Sentinel.Core.Analysis.DomainNames]::new()))
+        [Sentinel.Core.Analysis.UrlAnalyzer]::new($domainNames))
     $timestamp = [DateTimeOffset]::UnixEpoch
     [long]$truePositive = 0
     [long]$falsePositive = 0
@@ -54,6 +61,29 @@ try {
         $assessment = $engine.Analyze($context)
         $predictedPhishing = $assessment.Risk -ge [Sentinel.Core.RiskLevel]::Moderate
         $actualPhishing = $label -eq '0' # UCI label 0 = phishing; 1 = legitimate.
+
+        # Assign whole registrable domains using a deterministic hash independent of URL labels and row order.
+        $splitUri = $null
+        $validForSplit = [Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$splitUri) -and $splitUri.Scheme -in @('http', 'https')
+        if ($validForSplit) {
+            $splitHost = $splitUri.IdnHost.TrimEnd('.').ToLowerInvariant()
+            $domainKey = $domainNames.RegistrableDomain($splitHost)
+            if ([string]::IsNullOrWhiteSpace($domainKey)) { $domainKey = $splitHost }
+        } else {
+            $invalidHash = [Security.Cryptography.SHA256]::HashData($utf8.GetBytes("invalid-url`n$url"))
+            $domainKey = 'invalid:' + [Convert]::ToHexString($invalidHash)
+        }
+        $splitHash = [Security.Cryptography.SHA256]::HashData($utf8.GetBytes("$SplitSeed`n$domainKey"))
+        $splitBucket = [Convert]::ToUInt32([Convert]::ToHexString($splitHash, 0, 4), 16) % 100
+        $partition = if ($splitBucket -lt $DomainHoldoutPercent) { $holdout } else { $train }
+        $partition.Rows++
+        [void]$partition.Domains.Add($domainKey)
+        if ($assessment.Uncertainties -contains 'Podany adres nie jest poprawnym adresem HTTP/HTTPS.') { $partition.InvalidUrl++ }
+        if ($actualPhishing) {
+            if ($predictedPhishing) { $partition.TP++ } else { $partition.FN++ }
+        } else {
+            if ($predictedPhishing) { $partition.FP++ } else { $partition.TN++ }
+        }
 
         if ($assessment.Uncertainties -contains 'Podany adres nie jest poprawnym adresem HTTP/HTTPS.') {
             $invalidUrl++
@@ -82,6 +112,27 @@ try {
         Threshold = 'Moderate'
         RulesVersion = [Sentinel.Core.Analysis.ThreatAnalysisEngine]::RulesVersion
         URLsOpened = 0
+    }
+    foreach ($entry in @(@{ Name = 'DomainTrain'; Counts = $train }, @{ Name = 'DomainHoldout'; Counts = $holdout })) {
+        $counts = $entry.Counts
+        [pscustomobject]@{
+            Partition = $entry.Name
+            SplitSeed = $SplitSeed
+            HoldoutPercent = $DomainHoldoutPercent
+            Domains = $counts.Domains.Count
+            Rows = $counts.Rows
+            InvalidUrl = $counts.InvalidUrl
+            TP = $counts.TP
+            FP = $counts.FP
+            TN = $counts.TN
+            FN = $counts.FN
+            Precision = [Math]::Round($counts.TP / [Math]::Max(1, $counts.TP + $counts.FP), 6)
+            Recall = [Math]::Round($counts.TP / [Math]::Max(1, $counts.TP + $counts.FN), 6)
+            FalsePositiveRate = [Math]::Round($counts.FP / [Math]::Max(1, $counts.FP + $counts.TN), 6)
+            Threshold = 'Moderate'
+            RulesVersion = [Sentinel.Core.Analysis.ThreatAnalysisEngine]::RulesVersion
+            URLsOpened = 0
+        }
     }
 }
 finally {

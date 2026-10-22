@@ -13,10 +13,16 @@ Pobrany snapshot ZIP ma SHA-256 `0A639FD03AEA6308C5B1C10C92AA23C2CE1505447A91372
 ```powershell
 dotnet build src/Sentinel.Core/Sentinel.Core.csproj -c Release
 pwsh -NoProfile -File scripts/evaluate-phiusiil.ps1 -CsvPath C:\ścieżka\PhiUSIIL_Phishing_URL_Dataset.csv
+pwsh -NoProfile -File scripts/evaluate-phiusiil.ps1 -CsvPath C:\ścieżka\PhiUSIIL_Phishing_URL_Dataset.csv -DomainHoldoutPercent 30 -SplitSeed sentinel-f03-domain-holdout-v1
+pwsh -NoProfile -File scripts/test-evaluate-phiusiil-split.ps1
 pwsh -NoProfile -File scripts/analyze-phiusiil-features.ps1 -CsvPath C:\ścieżka\PhiUSIIL_Phishing_URL_Dataset.csv
 ```
 
 W pomiarze cztery wiersze zawierały adres, którego aplikacja nie uznała za poprawny URL HTTP/HTTPS; pozostały w mianowniku jako niewykryte phishingi lub legalne adresy według podanej etykiety.
+
+Ewaluator zwraca także `DomainTrain` i `DomainHoldout`: dzieli według SHA-256 ziarna i domeny rejestrowalnej z dołączonej PSL, bez użycia etykiety i niezależnie od kolejności wierszy. Wiersze tej samej domeny pozostają w jednym podziale; niepoprawne URL-e otrzymują grupę opartą na ich lokalnym hashu. Procent holdoutu (domyślnie 30) i ziarno można ustawić parametrami. Test regresyjny sprawdza powtarzalność, brak przecieku subdomen, kompletność macierzy i obsługę niepoprawnego URL-a.
+
+Ten podział usuwa przeciek między subdomenami, ale **nie jest niezależnym wynikiem dla obecnych reguł**: progi `2026.10.4` dobrano wcześniej po obejrzeniu całego tego zbioru. Wyniki `DomainHoldout` są więc diagnostyczne. Przy następnej zmianie F03 należy dobierać reguły tylko na `DomainTrain`, zamrozić je przed odczytem `DomainHoldout` i nadal pozyskać odrębny czasowo zbiór.
 
 ## Wynik
 
@@ -32,6 +38,17 @@ Klasyfikator uznaje wynik `Moderate` lub wyższy za alarm. Przed `url.auth_struc
 | False-positive rate wśród etykiet legalnych | 0,0104% |
 
 `url.structure_combination` daje umiarkowany sygnał, gdy co najmniej 3 z 4 wymiarów występują jednocześnie: URL ma ≥75 znaków; host jest długi (≥50 znaków), głęboki (≥5 etykiet) albo zawiera ≥3 łączniki; część ścieżki i zapytania ma ≥6 cyfr albo ≥4 parametry; ścieżka zawiera ≥4 ukośniki. Same długie adresy, głęboki host, parametry lub ścieżka nie wywołują tego sygnału. Test regresyjny pokrywa wspólny przypadek oraz każdy pojedynczy wymiar osobno.
+
+### Stały podział po domenie (diagnostyczny)
+
+Od 2026-10-22 `scripts/evaluate-phiusiil.ps1` raportuje również deterministyczny split, który przypisuje wszystkie URL-e tej samej domeny rejestrowalnej do jednej części. Przy `DomainHoldoutPercent=30` i seedzie `sentinel-f03-domain-holdout-v1` otrzymano:
+
+| Część | Domeny | Wiersze | TP | FP | TN | FN | Precision | Recall | FPR |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| DomainTrain | 138 385 | 167 041 | 2 668 | 11 | 94 559 | 69 803 | 99,5894% | 3,6815% | 0,0116% |
+| DomainHoldout | 58 916 | 68 754 | 1 700 | 3 | 40 277 | 26 774 | 99,8238% | 5,9704% | 0,0074% |
+
+To potwierdza rozdzielenie domen i daje punkt odniesienia do przyszłego strojenia. **Nie jest niezależnym testem obecnych reguł:** progi `2026.10.4` wybrano po analizie całego zbioru, więc także domeny z tej części były pośrednio widziane podczas rozwoju. Nie zmieniano reguł na podstawie powyższych liczb. Kolejne strojenie powinno używać wyłącznie `DomainTrain`, zamrozić reguły przed odczytem `DomainHoldout` oraz dodać czasowo odrębny zbiór.
 
 Reguła i progi powstały po eksploracji tego samego pełnego zbioru; pomiar v2026.10.4 jest miarą rozwojową, a nie holdoutem ani niezależnym testem. Nie jest to ocena produkcyjna: brak deduplikacji, proporcje etykiet są sztuczne względem ruchu użytkownika, a źródłowe etykiety i adresy nie są niezależnym testem jakości Sentinel. Wysokiej precyzji z tego zestawu nie wolno interpretować jako skalibrowanej pewności. Zbiór zawiera też cechy stron, których Sentinel celowo nie używa; mierzony jest wyłącznie klasyfikator URL.
 

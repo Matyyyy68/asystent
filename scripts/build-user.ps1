@@ -9,6 +9,8 @@ try {
   if ($LASTEXITCODE) { throw 'Debug Engine build failed' }
   dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release
   if ($LASTEXITCODE) { throw 'Tests failed' }
+  pwsh -NoProfile -File scripts/test-evaluate-phiusiil-split.ps1
+  if ($LASTEXITCODE) { throw 'Domain-disjoint detection evaluation test failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {
     dotnet publish "src/$project/$project.csproj" -c Release -r win-x64 --self-contained true -o artifacts/engine
     if ($LASTEXITCODE) { throw "Build $project failed" }
