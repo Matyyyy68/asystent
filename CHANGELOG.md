@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ponowna walidacja Enterprise API: `dotnet test server/Sentinel.Server.sln -c Release --no-restore` PASS 22/22 bez pominięć po uruchomieniu poza sandboxem, który blokował import tymczasowego PFX. Certyfikat pozostał testowy i nie trafił do magazynów Windows.
 - Pełna bramka `scripts/build-user.ps1 -Installer` dla bieżącego kodu przeszła: .NET 284/284 bez pominięć, split domenowy i PhishVN, Engine IPC, Windows DNS/TCP/UDP, Electron 14/14, `npm audit` 0, UI production build i autotest instalatora. Lokalny artefakt testowy v0.15.38 ma 281330553 B i SHA-256 `BB760E9018D9B3D34AEE80A0372F552D326593273F94A15DC935F7DEF6CC7E1F`; nie jest wydaniem. Pełny cykl GUI pozostaje nieweryfikowany.
 - Próba interaktywnego GUI instalatora bieżącego artefaktu zatrzymała się przed instalacją z powodu niedostępnej geometrii kontrolki i timeoutu przechwytywania okna. Potwierdzono brak folderu testowego, wpisów uninstall/autostartu i skrótów po zamknięciu procesu.
 - Ustawienia pozwalają po potwierdzeniu usunąć zaimportowaną lokalną listę IP/CIDR. Operacja transakcyjnie czyści sieci i czas importu, od razu aktualizuje dopasowanie w pamięci, nie usuwa historii zdarzeń i jest dostępna tylko przy niepustej liście.
