@@ -1,9 +1,21 @@
 # Postęp projektu Sentinel AI
 
-**Aktualizacja:** 2026-10-21
-**Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Windows CI `39489166139`, website Pages `39489165920` i installer build/self-test/release `39489181456` PASS. Instalator 262559349 B, SHA-256 `bb34834eb654e450728f95093d500715b5f6ef5ab9f7825c32d146b9fb2c4cd8` oraz sidecar `.sha256` są dostępne. .NET 202/202, desktop 6/6, website test/lint/build, Engine IPC, Release build i self-test instalatora PASS.
+**Aktualizacja:** 2026-10-22
+**Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący `main` zawiera nowsze, nieopublikowane poprawki; nie należy utożsamiać lokalnego instalatora testowego z wydaniem.
 
-**Najnowsza praca lokalna, jeszcze nieopublikowana:** monitor startu procesu zapisuje dostępny lokalny obraz pliku; kolejka tła o pojemności 33 (wliczając jedną pracę w toku) sprawdza SHA-256/Authenticode do 256 MiB i dopasowuje hash wyłącznie do zaimportowanej lokalnej listy. Pending jest wznawiane po restarcie. Historia pokazuje metadane, eksporty i payload Enterprise są ich pozbawione. Pełny build lokalny PASS: .NET 232/232, Electron 10/10, `npm audit` 0, Engine IPC, Windows DNS/TCP/UDP, UI produkcyjny i autotest instalatora; nowy instalator SHA-256 `E48855782077DD10649991643E1A262E7DB0A97B5B2E25A74FC77CF2861C4AAC`. Do wykonania: commit/push i sprawdzenie CI. Nadal brak GUI testu instalacji; poprzednie wydanie v0.15.38 można pobrać z GitHub Release.
+**Stan zweryfikowany:** `main` jest wypchnięty i czysty na commicie `9d16f60`. Pełna bramka `scripts/build-user.ps1 -Installer` przeszła lokalnie: .NET 233/233 bez pominięć, Engine IPC i testy Windows procesów/DNS/TCP/UDP, Electron 14/14, `npm audit` 0, produkcyjny build UI oraz autotest instalatora PASS. Lokalny instalator testowy ma SHA-256 `57CC2A232D181542D1F543831C5736EE43B65D7338909CF7B530EC7B9E7302F8`; nie został opublikowany. Jedno wcześniejsze uruchomienie w sandboxie zatrzymało esbuilda z powodu odmowy odczytu katalogu nadrzędnego; ponowienie poza sandboxem zakończyło się sukcesem.
+
+**Audyt zakresu:** macierz `docs/IMPLEMENTATION_GAP_ANALYSIS.md` ma 20 obszarów: 5 `DONE_AND_VERIFIED`, 14 `PARTIALLY_IMPLEMENTED`, 1 `BLOCKED`; 15 obszarów nie spełnia wszystkich kryteriów ukończenia. Istnieje 10 osobnych planów (`PLAN-001`–`PLAN-010`), wszystkie `IN_PROGRESS`. Nie wyliczam procentu, bo priorytety i kryteria nie są równoważne.
+
+**Ostatnia zmiana audytu:** commit `9d16f60` uzupełnił inwentaryzację deklaracji licencji do 313 par: 23 NuGet oraz 290 npm z lockfile (240 obecnych w `node_modules`, 50 nieobecnych lokalnie). Skrypt `scripts/audit-dependency-licenses.ps1` odtwarza CSV, odrzuca brakujące/sprzeczne deklaracje i przeszedł test powtarzalności. To inwentaryzacja deklaracji, nie rozstrzygnięcie prawne. Licencja produktu nadal wymaga decyzji właściciela; nie dodano `LICENSE`.
+
+**Instalator GUI:** po potwierdzeniu użytkownika uruchomiłem lokalny v0.15.38, ale podgląd okna dwukrotnie przekroczył limit czasu (`FrameArrived timed out`, `window capture timed out`). Nie kliknąłem kontrolek ani nie rozpocząłem instalacji; kontrola procesu nie wykazała działającego procesu instalatora. Pełny GUI install/update/uninstall nadal jest nieweryfikowany.
+
+**Zakres pozostałych prac:** wciąż otwarte są m.in. event stream procesów/zdarzeń (WMI/ETW odrzuciły dostęp), reprezentatywna ewaluacja i kalibracja detekcji, pełny test GUI instalatora/autostartu, rzeczywisty Ollama i MalwareBazaar, semantyczne wyszukiwanie/OCR, podpisane aktualizacje oraz testy Enterprise z zaufanym certyfikatem wdrożeniowym. Część wymaga zewnętrznych danych, uprawnień lub decyzji; kod i testy możliwe bez tych zależności są nadal do realizacji.
+
+**Następny krok:** kontynuować priorytetowe wykonalne pozycje `PLAN-001`–`PLAN-010`, wybierając zmianę na podstawie bieżącego kodu i testów; osobno ponowić GUI tylko wtedy, gdy przechwytywanie okna będzie działać. Szczegółowy chronologiczny dziennik wcześniejszych etapów poniżej ma charakter historyczny; powyższy stan jest aktualny.
+
+## Historia wcześniejszych etapów
 
 Diagnostyka procesu Engine zachowuje teraz typ wyjątku z ostatniej awarii, również po kolejnym restarcie. Pełny `scripts/build-user.ps1 -Installer` po zmianach diagnostyki i scalania URL PASS: .NET 230/230 bez pominięć, testy Electron 10/10, `npm audit` 0, Engine IPC, Windows DNS/TCP/UDP, UI produkcyjny i autotest instalatora. Lokalny, nieopublikowany instalator v0.15.38: 281241465 B, SHA-256 `4A4C233C20F1BDE7A3624D78B68415F7B1A0F8820B340DA8C2EE29A4FDEF775A`. Próba instalacji GUI zatrzymała się przed startem instalacji po przerwaniu sterowania oknem; cykl GUI pozostaje niezweryfikowany.
 
