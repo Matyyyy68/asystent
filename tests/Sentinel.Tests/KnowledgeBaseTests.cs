@@ -41,6 +41,49 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task ControlledRetrievalQueriesRankRelevantKnowledgeSourcesInTopThree()
+    {
+        var store = await CreateAsync();
+        var documents = new Dictionary<string, string>
+        {
+            ["credential-phishing.md"] = "Phishing email credential theft. Check the sender domain and report malicious links. Never enter an account password from a message link.",
+            ["dns-cache.md"] = "DNS cache records domain lookups. Inspect cached DNS entries when troubleshooting name resolution.",
+            ["invoice-fraud.md"] = "Invoice fraud can redirect a bank transfer. Verify vendor bank details using a trusted phone number.",
+            ["browser-privacy.md"] = "Browser privacy settings control history, cookies, and cross-site tracking.",
+            ["security-overview.md"] = "Security guidance: protect accounts, update software, verify senders, review invoices, and inspect network settings.",
+            ["password-recovery.md"] = "Account recovery lets a user reset a forgotten password through the official service."
+        };
+        foreach (var (name, content) in documents)
+        {
+            var path = Path.Combine(directory, name);
+            await File.WriteAllTextAsync(path, content);
+            await store.ImportAsync(path);
+        }
+
+        (string Query, string RelevantSource)[] cases =
+        [
+            ("phishing email sender", "credential-phishing.md"),
+            ("dns cache lookup", "dns-cache.md"),
+            ("invoice fraud transfer", "invoice-fraud.md"),
+            ("browser history privacy", "browser-privacy.md")
+        ];
+        var reciprocalRanks = new List<double>();
+        var hitsAtThree = 0;
+        foreach (var (query, relevantSource) in cases)
+        {
+            var results = await store.SearchAsync(query, limit: 5);
+            var rank = results.ToList().FindIndex(hit => hit.SourceName == relevantSource) + 1;
+            if (rank is > 0 and <= 3) hitsAtThree++;
+            reciprocalRanks.Add(rank > 0 ? 1d / rank : 0d);
+        }
+
+        var recallAtThree = (double)hitsAtThree / cases.Length;
+        var meanReciprocalRank = reciprocalRanks.Average();
+        Assert.Equal(1d, recallAtThree);
+        Assert.Equal(1d, meanReciprocalRank);
+    }
+
+    [Fact]
     public async Task StorageMetricsReportKnowledgeDocumentsAndIndexSize()
     {
         var store = await CreateAsync();
