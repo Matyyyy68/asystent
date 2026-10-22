@@ -106,6 +106,10 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         processSnapshot.Add(1234, "browser");
         Assert.Equal(1, await processMonitor.CollectAsync(store, paused: false, excludedApplications: ""));
 
+        // The in-memory process correlation map is rebuilt from local history after an Engine restart.
+        processMonitor = new ProcessSnapshotMonitor(() => new(processSnapshot));
+        Assert.Equal(0, await processMonitor.CollectAsync(store, paused: false, excludedApplications: ""));
+
         var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
         IReadOnlyCollection<ConnectionSnapshot> sample = [];
         var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock,

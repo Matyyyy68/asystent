@@ -829,7 +829,7 @@ public sealed class StoreTests : IDisposable
         await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await c.OpenAsync(); using var command = c.CreateCommand();
-            command.CommandText = "DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
+            command.CommandText = "DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
             await command.ExecuteNonQueryAsync();
         }
         await store.InitializeAsync();
@@ -847,7 +847,7 @@ public sealed class StoreTests : IDisposable
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync(); using var command = connection.CreateCommand();
-            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
+            command.CommandText = "DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -868,7 +868,7 @@ public sealed class StoreTests : IDisposable
         await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
         {
             await backup.OpenAsync(); using var command = backup.CreateCommand();
-            command.CommandText = "ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
+            command.CommandText = "DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 

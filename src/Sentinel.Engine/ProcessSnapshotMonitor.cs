@@ -14,6 +14,7 @@ public sealed class ProcessSnapshotMonitor
     private bool storeBaselineTruncated;
     private bool knownSnapshotTruncated;
     private long droppedEvents;
+    private bool recentStartsLoaded;
     private readonly Dictionary<int, (DateTimeOffset Timestamp, Guid CorrelationId, string ProcessName)> recentlyObservedStarts = [];
     private readonly Func<Dictionary<int, string>> capture;
     private readonly Func<int, string, string?>? resolveExecutablePath;
@@ -78,6 +79,15 @@ public sealed class ProcessSnapshotMonitor
                 knownSnapshotTruncated = saved.Truncated;
             }
             storeBaselineLoaded = true;
+        }
+
+        if (!recentStartsLoaded)
+        {
+            if (!paused)
+                foreach (var start in await store.ReadRecentProcessStartsAsync(DateTimeOffset.UtcNow, cancellationToken))
+                    if (!recentlyObservedStarts.TryGetValue(start.ProcessId, out var existing) || existing.Timestamp < start.Timestamp)
+                        recentlyObservedStarts[start.ProcessId] = (start.Timestamp, start.CorrelationId, start.ProcessName);
+            recentStartsLoaded = true;
         }
 
         var previousSnapshotTruncated = knownSnapshotTruncated;

@@ -75,15 +75,19 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     }
     private static async Task EnsureColumnAsync(SqliteConnection connection, string table, string column, string definition, CancellationToken ct)
     {
-        var found = false;
+        if (!await HasColumnAsync(connection, table, column, ct))
+            await Execute(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition}", ct);
+    }
+    private static async Task<bool> HasColumnAsync(SqliteConnection connection, string table, string column, CancellationToken ct)
+    {
         using (var inspect = connection.CreateCommand())
         {
             inspect.CommandText = $"PRAGMA table_info({table})";
             await using var reader = await inspect.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
-                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+                if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return true;
         }
-        if (!found) await Execute(connection, $"ALTER TABLE {table} ADD COLUMN {column} {definition}", ct);
+        return false;
     }
     public Task InitializeAsync(CancellationToken ct = default) => InitializeAsync(null, ct);
     public async Task InitializeAsync(InstalledProductProfile? initialProfile, CancellationToken ct = default)
@@ -252,6 +256,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
+        // Keep restart-time correlation lookup bounded on large retained event histories.
+        if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
+            await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
+            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source='process-snapshot' AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -464,6 +472,22 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         using var reader = await query.ExecuteReaderAsync(ct); var processes = new Dictionary<int, string>();
         while (await reader.ReadAsync(ct)) processes.Add(reader.GetInt32(0), reader.GetString(1));
         return new(initialized, processes, truncated);
+    }
+    public async Task<IReadOnlyList<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>> ReadRecentProcessStartsAsync(
+        DateTimeOffset now, CancellationToken ct = default)
+    {
+        var current = now.ToUniversalTime();
+        var cutoff = current.AddSeconds(-60);
+        await using var c = await Open(ct); using var command = c.CreateCommand();
+        command.CommandText = "SELECT process_id,process_name,timestamp,correlation_id FROM events WHERE source='process-snapshot' AND category='Proces zaobserwowany' AND process_id IS NOT NULL AND process_name IS NOT NULL AND correlation_id IS NOT NULL AND timestamp >= $cutoff AND timestamp <= $now ORDER BY timestamp DESC LIMIT 10000";
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$now", current.ToString("O", CultureInfo.InvariantCulture));
+        var results = new List<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            if (Guid.TryParse(reader.GetString(3), out var correlationId))
+                results.Add((reader.GetInt32(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), correlationId));
+        return results;
     }
     /// <summary>Atomically records process events and advances the persisted process baseline.</summary>
     public async Task CommitProcessMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
