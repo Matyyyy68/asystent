@@ -85,6 +85,11 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     'invalid IP/CIDR import must be rejected through Engine IPC');
   assert.equal((await call('status')).result.ipReputation.networkCount, 3,
     'rejected IP/CIDR import must preserve the last accepted feed');
+  const clearedIpFeed = await call('ipReputationClear');
+  assert.equal(clearedIpFeed.ok, true, clearedIpFeed.error);
+  assert.deepEqual(clearedIpFeed.result, { networkCount: 0, importedAt: null });
+  assert.deepEqual((await call('status')).result.ipReputation, { networkCount: 0, importedAt: null },
+    'clearing IP/CIDR reputation must remove the persisted feed and import metadata');
   assert.equal((await call('aiSettings', { useLocalAI: true, endpoint: 'http://example.com:11434', model: 'remote' })).ok, false);
   assert.equal((await call('status')).result.settings.useLocalAI, false);
   ollamaServer = createServer((request, response) => {

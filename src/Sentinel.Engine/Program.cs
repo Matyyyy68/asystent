@@ -319,6 +319,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var ipFeedPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano listy IP.");
                 result = await ipReputation.ImportFileAsync(ipFeedPath);
                 break;
+            case "ipReputationClear": result = ipReputation.Clear(); break;
             case "collect":
                 var detections = new List<string>();
                 var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);

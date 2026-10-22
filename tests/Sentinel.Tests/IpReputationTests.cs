@@ -54,6 +54,21 @@ public sealed class IpReputationTests : IDisposable
         Assert.True(reputation.Contains(mapped));
     }
 
+    [Fact]
+    public void ClearingFeedRemovesNetworksAndImportMetadataAcrossRestart()
+    {
+        var reputation = new IpReputation(directory);
+        reputation.Import("203.0.113.0/24\n", DateTimeOffset.Parse("2026-10-22T12:00:00Z"));
+
+        var status = reputation.Clear();
+
+        Assert.Equal(new IpReputationStatus(0, null), status);
+        Assert.False(reputation.Contains("203.0.113.42"));
+        var reopened = new IpReputation(directory);
+        Assert.Equal(new IpReputationStatus(0, null), reopened.Status());
+        Assert.False(reopened.Contains("203.0.113.42"));
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
