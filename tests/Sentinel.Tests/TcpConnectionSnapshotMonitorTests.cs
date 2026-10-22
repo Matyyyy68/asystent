@@ -1,4 +1,5 @@
 using Sentinel.Core;
+using Sentinel.Core.Analysis;
 using Xunit;
 
 namespace Sentinel.Tests;
@@ -60,6 +61,30 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Equal(RiskLevel.Information, item.Risk);
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, "excluded-app"));
         Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task RaisesLocalHighRiskEvidenceOnlyWhenNewTcpAddressMatchesImportedIpFeed()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var feed = new IpReputation(Path.Combine(directory, "ip-feed"));
+        feed.Import("198.51.100.0/24\n", DateTimeOffset.UtcNow);
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample = [Connection(443)];
+        var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock,
+            matchesLocalIpFeed: feed.Contains);
+
+        await monitor.CollectAsync(store, enabled: true, paused: false, "");
+        sample = [Connection(443), Connection(8443)];
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var alert = Assert.Single(await store.ReadAsync());
+        Assert.Equal(RiskLevel.High, alert.Risk);
+        Assert.Equal("Połączenie z adresem na lokalnej liście IP", alert.Category);
+        Assert.Contains("198.51.100.7:8443", alert.Explanation);
+        Assert.Contains("reputation.ip-feed.match", alert.EvidenceCodes!);
+        Assert.Contains("nie blokuje ruchu", alert.Recommendation);
     }
 
     [Fact]

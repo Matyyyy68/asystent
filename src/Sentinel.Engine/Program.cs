@@ -42,6 +42,7 @@ var urlAnalyzer = new UrlAnalyzer(domainNames);
 var rules = new ThreatAnalysisEngine(urlAnalyzer);
 var reputation = new DomainReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
+var ipReputation = new IpReputation(directory);
 await using var processImageInspectionQueue = new ProcessImageInspectionQueue(store, fileHashReputation, ReadAuthenticodeSignatureAsync);
 var processMonitor = new ProcessSnapshotMonitor(ProcessImageInspectionQueue.ResolveExecutablePath, processImageInspectionQueue.TryEnqueue);
 using var persistenceMonitor = new WindowsPersistenceSnapshotMonitor();
@@ -50,7 +51,8 @@ foreach (var pendingInspection in await store.ReadPendingProcessImageInspections
         await store.UpdateProcessImageInspectionAsync(pendingInspection.EventId, null, "QueueFull", null);
 var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationToken =>
     await ReadConnectionSnapshotBatchAsync(cancellationToken),
-    wasRecentlyObservedStart: processMonitor.WasRecentlyObservedStart);
+    wasRecentlyObservedStart: processMonitor.WasRecentlyObservedStart,
+    matchesLocalIpFeed: ipReputation.Contains);
 using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
@@ -251,12 +253,17 @@ while (await Console.In.ReadLineAsync() is { } line)
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
+                    ipReputation = ipReputation.Status(),
                     downloadedFiles = downloadedFileMonitor.State,
                     browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "rollbackFeed": reputation.Rollback(); result = reputation.Status(DateTimeOffset.UtcNow); break;
+            case "ipReputationImport":
+                var ipFeedPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano listy IP.");
+                result = await ipReputation.ImportFileAsync(ipFeedPath);
+                break;
             case "collect":
                 var detections = new List<string>();
                 var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);

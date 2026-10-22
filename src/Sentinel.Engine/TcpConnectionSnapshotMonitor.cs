@@ -27,6 +27,7 @@ public sealed class TcpConnectionSnapshotMonitor
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(1);
     private readonly Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture;
     private readonly Func<int, string?, DateTimeOffset, Guid?> wasRecentlyObservedStart;
+    private readonly Func<string, bool> matchesLocalIpFeed;
     private readonly TimeProvider timeProvider;
     private HashSet<string>? knownConnections;
     private HashSet<string>? knownUdpEndpoints;
@@ -41,11 +42,13 @@ public sealed class TcpConnectionSnapshotMonitor
     public TcpConnectionSnapshotMonitor(
         Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture,
         TimeProvider? timeProvider = null,
-        Func<int, string?, DateTimeOffset, Guid?>? wasRecentlyObservedStart = null)
+        Func<int, string?, DateTimeOffset, Guid?>? wasRecentlyObservedStart = null,
+        Func<string, bool>? matchesLocalIpFeed = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.wasRecentlyObservedStart = wasRecentlyObservedStart ?? ((_, _, _) => null);
+        this.matchesLocalIpFeed = matchesLocalIpFeed ?? (_ => false);
     }
 
     public async Task<int> CollectAsync(LocalStore store, bool enabled, bool paused, string excludedApplications,
@@ -170,24 +173,31 @@ public sealed class TcpConnectionSnapshotMonitor
         var events = added.Select(item =>
         {
             var connection = item.Connection;
+            var ipReputationMatch = !item.IsUdp && connection.RemoteAddress is { } remoteAddress && SafeMatchesIpFeed(remoteAddress);
             var correlationId = connection.ProcessId >= 0 ? wasRecentlyObservedStart(connection.ProcessId, connection.ProcessName, now) : null;
             var processContext = !item.IsUdp && correlationId is not null
                 ? " W ostatnich 60 sekundach zapisano zdarzenie pojawienia się tego PID; to wyłącznie korelacja czasowa, nie ocena zagrożenia."
                 : "";
-            var category = item.IsUdp ? "Zaobserwowano endpoint UDP" : "Zaobserwowano połączenie TCP";
+            var category = item.IsUdp ? "Zaobserwowano endpoint UDP" : ipReputationMatch ? "Połączenie z adresem na lokalnej liście IP" : "Zaobserwowano połączenie TCP";
             var explanation = item.IsUdp
                 ? $"Nowa migawka endpointu UDP: {connection.LocalAddress}:{connection.LocalPort}, PID {connection.ProcessId}. Tabela Windows nie pokazuje adresu zdalnego ani nie potwierdza wysłania datagramu."
-                : $"Nowa migawka TCP: {connection.LocalAddress}:{connection.LocalPort} → {connection.RemoteAddress}:{connection.RemotePort}, stan {connection.State}, PID {connection.ProcessId}.{processContext}";
+                : ipReputationMatch
+                    ? $"Nowe połączenie TCP do {connection.RemoteAddress}:{connection.RemotePort} pasuje do lokalnie zaimportowanej listy adresów IP; proces: {connection.ProcessName ?? "unknown"} (PID {connection.ProcessId}).{processContext}"
+                    : $"Nowa migawka TCP: {connection.LocalAddress}:{connection.LocalPort} → {connection.RemoteAddress}:{connection.RemotePort}, stan {connection.State}, PID {connection.ProcessId}.{processContext}";
             var recommendation = item.IsUdp
                 ? "To lokalny endpoint UDP, nie dowód ruchu ani werdykt zagrożenia. Zweryfikuj proces i jego przeznaczenie."
-                : "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.";
-            return new SecurityEvent(0, now, RiskLevel.Information, category, connection.ProcessName ?? "unknown",
+                : ipReputationMatch
+                    ? "Sprawdź źródło i datę importowanej listy oraz zweryfikuj proces. Sentinel nie blokuje ruchu, a dopasowanie zależy od jakości tej listy."
+                    : "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.";
+            return new SecurityEvent(0, now, ipReputationMatch ? RiskLevel.High : RiskLevel.Information, category, connection.ProcessName ?? "unknown",
                 explanation, recommendation, EventStatus.New,
                 EventId: Guid.NewGuid(), Source: item.IsUdp ? "udp-endpoint-snapshot" : "tcp-connection-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName,
                 CorrelationId: correlationId,
-                EvidenceCodes: [item.IsUdp ? "network.udp.local-endpoint-seen" : "network.tcp.connection-snapshot"]);
+                EvidenceCodes: item.IsUdp ? ["network.udp.local-endpoint-seen"] : ipReputationMatch
+                    ? ["network.tcp.connection-snapshot", "reputation.ip-feed.match"]
+                    : ["network.tcp.connection-snapshot"]);
         }).ToArray();
 
         var truncationChanged = knownTcpTruncated != tcpTruncated || knownUdpTruncated != udpTruncated;
@@ -243,6 +253,12 @@ public sealed class TcpConnectionSnapshotMonitor
             connection.State is not ("Established" or "SynSent")) return false;
         if (!IPAddress.TryParse(connection.RemoteAddress, out var address)) return false;
         return !IPAddress.Any.Equals(address) && !IPAddress.IPv6Any.Equals(address) && !IPAddress.IsLoopback(address);
+    }
+
+    private bool SafeMatchesIpFeed(string address)
+    {
+        try { return matchesLocalIpFeed(address); }
+        catch { return false; }
     }
 
     private static bool IsTrackableUdpEndpoint(ConnectionSnapshot connection) =>
