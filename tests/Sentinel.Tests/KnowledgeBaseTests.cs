@@ -84,6 +84,19 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchExpandsLongPolishTermsByBoundedPrefix()
+    {
+        var store = await CreateAsync();
+        var path = Path.Combine(directory, "logowanie.md");
+        await File.WriteAllTextAsync(path, "Nigdy nie logować się do banku przez link z wiadomości.");
+        var document = await store.ImportAsync(path);
+
+        var results = await store.SearchAsync("logowania");
+
+        Assert.Equal(document.Id, Assert.Single(results).DocumentId);
+    }
+
+    [Fact]
     public async Task StorageMetricsReportKnowledgeDocumentsAndIndexSize()
     {
         var store = await CreateAsync();

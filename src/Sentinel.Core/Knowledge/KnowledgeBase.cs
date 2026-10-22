@@ -179,7 +179,13 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
             .Select(term => new string(term.Where(char.IsLetterOrDigit).ToArray()))
             .Where(term => term.Length >= 2).Distinct(StringComparer.OrdinalIgnoreCase).Take(16).ToArray();
         if (terms.Length == 0) return [];
-        var match = string.Join(" OR ", terms.Select(term => $"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
+        var match = string.Join(" OR ", terms.Select(term =>
+        {
+            var quoted = $"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+            // A bounded prefix alternative helps with common Polish inflection while preserving
+            // the exact token for ranking. Short tokens stay exact to avoid broad matches.
+            return term.Length >= 8 ? $"({quoted} OR \"{term[..^3]}\"*)" : quoted;
+        }));
 
         await using var connection = await OpenAsync(cancellationToken);
         using var command = connection.CreateCommand();
