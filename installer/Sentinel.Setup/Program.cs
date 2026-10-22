@@ -755,10 +755,10 @@ internal sealed class SetupWizard : Form
     private readonly TextBox folder = new() { Text = Program.GetPreferredInstallDirectory(), Location = new Point(34, 197), Size = new Size(430, 32), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     private readonly Button browse = new() { Text = "Wybierz…", Size = new Size(104, 32), Location = new Point(475, 197), Anchor = AnchorStyles.Top | AnchorStyles.Right };
     private readonly Label spaceInfo = new() { AutoSize = false, ForeColor = Color.FromArgb(190, 204, 222), Location = new Point(34, 244), Size = new Size(540, 68) };
-    private readonly CheckBox startMenu = new() { Text = "Utwórz skrót w menu Start", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-    private readonly CheckBox desktop = new() { Text = "Utwórz skrót na pulpicie", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-    private readonly CheckBox start = new() { Text = "Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
-    private readonly CheckBox launchAfter = new() { Text = "Uruchom Sentinel AI po zakończeniu", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox startMenu = new() { Text = "Utwórz skrót w menu &Start", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox desktop = new() { Text = "Utwórz skrót na &pulpicie", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox start = new() { Text = "&Uruchamiaj przy logowaniu do Windows", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
+    private readonly CheckBox launchAfter = new() { Text = "Uruchom Sentinel AI po &zakończeniu", Checked = true, AutoSize = true, ForeColor = Color.White, BackColor = Color.Transparent };
     private readonly Label summary = new() { AutoSize = false, ForeColor = Color.White, Location = new Point(34, 178), Size = new Size(420, 180) };
     private readonly Label status = new() { AutoSize = false, ForeColor = Color.White, Location = new Point(34, 292), Size = new Size(570, 42) };
     private readonly Label errorDetails = new() { AutoSize = false, ForeColor = Color.FromArgb(255, 185, 185), Location = new Point(34, 166), Size = new Size(420, 175) };
@@ -1058,7 +1058,8 @@ internal sealed class SetupWizard : Form
         if (!wizard.folder.Visible || !wizard.browse.Visible || !wizard.spaceInfo.Visible)
             throw new InvalidDataException("Ekran lokalizacji nie pokazuje ścieżki i informacji o miejscu.");
         wizard.ShowPage(WizardPage.Options);
-        if (!wizard.startMenu.Visible || !wizard.desktop.Visible || !wizard.start.Visible || !wizard.launchAfter.Visible || !wizard.startMenu.Checked || !wizard.desktop.Checked || !wizard.start.Checked || !wizard.launchAfter.Checked)
+        if (!wizard.startMenu.Visible || !wizard.desktop.Visible || !wizard.start.Visible || !wizard.launchAfter.Visible || !wizard.startMenu.Checked || !wizard.desktop.Checked || !wizard.start.Checked || !wizard.launchAfter.Checked
+            || !wizard.startMenu.Text.Contains('&') || !wizard.desktop.Text.Contains('&') || !wizard.start.Text.Contains('&') || !wizard.launchAfter.Text.Contains('&'))
             throw new InvalidDataException("Ekran ustawień nie pokazuje domyślnych opcji instalacji.");
         wizard.ShowPage(WizardPage.Summary);
         if (!wizard.summary.Visible || !wizard.summary.Text.Contains("Autostart Windows", StringComparison.Ordinal) || !wizard.summary.Text.Contains("Uruchom po instalacji", StringComparison.Ordinal))
