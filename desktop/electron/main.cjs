@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, Notification } = require('electron');
 const { EngineClient } = require('./engine-client.cjs');
+const { readFailures, recordFailure } = require('./diagnostic-log.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
@@ -11,7 +12,8 @@ else {
 app.on('second-instance', () => win?.show());
 app.whenReady().then(() => {
   const executable = app.isPackaged ? path.join(process.resourcesPath, 'engine/Sentinel.Engine.exe') : path.join(__dirname, '../../artifacts/engine/Sentinel.Engine.exe');
-  const engine = new EngineClient(executable);
+  const lifecycleLogDirectory = path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'Sentinel AI', 'Logs');
+  const engine = new EngineClient(executable, { onDiagnostic: failure => recordFailure(lifecycleLogDirectory, failure) });
   engine.start();
   const call = (method, data) => engine.call(method, data);
   ipcMain.handle('sentinel', async (event, method, data) => {
@@ -51,7 +53,7 @@ app.whenReady().then(() => {
       const choice = await dialog.showSaveDialog(win, { defaultPath: `Sentinel-diagnostics-${date}.json`, filters: [{ name: 'JSON', extensions: ['json'] }] });
       if (choice.canceled || !choice.filePath) return null;
       if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać diagnostyki.');
-      return call(method, { path: choice.filePath, hostLifecycle: engine.diagnostics() });
+      return call(method, { path: choice.filePath, hostLifecycle: engine.diagnostics(), hostFailures: readFailures(lifecycleLogDirectory) });
     }
     if (!allowed.has(method) || JSON.stringify(data).length > 23000) throw new Error('Nieprawidłowe żądanie');
     return call(method, data);

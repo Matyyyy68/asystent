@@ -12,6 +12,8 @@ class EngineClient {
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
     this.onState = options.onState ?? (() => {});
+    this.onDiagnostic = options.onDiagnostic ?? (() => {});
+    this.now = options.now ?? (() => new Date());
     this.engine = null;
     this.pending = new Map();
     this.sequence = 0;
@@ -22,6 +24,7 @@ class EngineClient {
     this.lastExitCode = null;
     this.stderrObserved = false;
     this.stderrExceptionType = null;
+    this.currentExceptionType = null;
     this.stderrExceptionCaptured = false;
     this.stderrPrefix = '';
     this.state('starting');
@@ -61,6 +64,7 @@ class EngineClient {
     this.engine = child;
     this.stderrObserved = false;
     this.stderrExceptionCaptured = false;
+    this.currentExceptionType = null;
     this.stderrPrefix = '';
     child.on('error', error => this.failed(child, error?.code ?? 'spawn-error'));
     child.on('exit', (code, signal) => this.failed(child, code ?? signal ?? 'unknown'));
@@ -75,6 +79,7 @@ class EngineClient {
         const match = /^Unhandled exception\.\s+([A-Za-z_][A-Za-z0-9_.+`]{0,159})(?::|$)/.exec(line);
         if (match) {
           this.stderrExceptionType = match[1];
+          this.currentExceptionType = match[1];
           this.stderrExceptionCaptured = true;
           this.stderrPrefix = '';
           break;
@@ -107,6 +112,16 @@ class EngineClient {
 
   scheduleRestart(reason) {
     if (this.disposed || this.restartTimer) return;
+    try {
+      const reasonCode = Number.isSafeInteger(reason) ? String(reason) :
+        typeof reason === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(reason) ? reason : 'unknown';
+      this.onDiagnostic({
+        occurredAtUtc: this.now().toISOString(),
+        reasonCode,
+        stderrObserved: this.stderrObserved,
+        exceptionType: this.currentExceptionType
+      });
+    } catch { /* Diagnostic persistence must not destabilize the engine lifecycle. */ }
     const delay = Math.min(INITIAL_RESTART_DELAY_MS * (2 ** this.restartAttempt), MAX_RESTART_DELAY_MS);
     this.restartAttempt = Math.min(this.restartAttempt + 1, 16);
     this.state('restarting');

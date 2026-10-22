@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Net.Security;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
@@ -370,6 +371,31 @@ while (await Console.In.ReadLineAsync() is { } line)
                     && char.IsAsciiLetter(requestedExceptionType[0])
                     && requestedExceptionType.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '+' or '`')
                     ? requestedExceptionType : null;
+                var safeHostFailures = new List<object>();
+                if (request.TryGetProperty("hostFailures", out var requestedHostFailures) && requestedHostFailures.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var failure in requestedHostFailures.EnumerateArray())
+                    {
+                        if (safeHostFailures.Count >= 64) break;
+                        if (failure.ValueKind != JsonValueKind.Object || !failure.TryGetProperty("occurredAtUtc", out var occurredAtElement) ||
+                            occurredAtElement.ValueKind != JsonValueKind.String || !occurredAtElement.TryGetDateTimeOffset(out var occurredAt)) continue;
+                        var requestedReasonCode = failure.TryGetProperty("reasonCode", out var reasonElement)
+                            ? reasonElement.ValueKind == JsonValueKind.String ? reasonElement.GetString()
+                                : reasonElement.ValueKind == JsonValueKind.Number && reasonElement.TryGetInt64(out var numericCode) ? numericCode.ToString(CultureInfo.InvariantCulture)
+                                : null
+                            : null;
+                        var safeReasonCode = requestedReasonCode is { Length: > 0 and <= 40 } && requestedReasonCode.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
+                            ? requestedReasonCode : "unknown";
+                        var requestedFailureException = failure.TryGetProperty("exceptionType", out var failureExceptionElement) && failureExceptionElement.ValueKind == JsonValueKind.String
+                            ? failureExceptionElement.GetString() : null;
+                        var safeFailureException = requestedFailureException is { Length: > 0 and <= 160 } && requestedFailureException.EndsWith("Exception", StringComparison.Ordinal)
+                            && char.IsAsciiLetter(requestedFailureException[0])
+                            && requestedFailureException.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '+' or '`')
+                            ? requestedFailureException : null;
+                        var stderrObserved = failure.TryGetProperty("stderrObserved", out var stderrElement) && stderrElement.ValueKind == JsonValueKind.True;
+                        safeHostFailures.Add(new { occurredAtUtc = occurredAt.ToUniversalTime(), reasonCode = safeReasonCode, stderrObserved, exceptionType = safeFailureException });
+                    }
+                }
                 var diagnostics = new
                 {
                     exportedAtUtc = DateTimeOffset.UtcNow,
@@ -377,6 +403,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     operatingSystem = new { version = Environment.OSVersion.Version.ToString(), architecture = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture.ToString() },
                     runtime = new { framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, architecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString() },
                     hostLifecycle = new { status = safeHostStatus, lastExitCode = safeExitCode, stderrObserved = hostStderrObserved, stderrExceptionType = safeExceptionType },
+                    recentEngineFailures = safeHostFailures,
                     monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                         processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
                     settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,

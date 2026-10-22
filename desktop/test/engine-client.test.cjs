@@ -126,6 +126,52 @@ test('updates the diagnostic exception type after a later engine crash', () => {
   client.dispose();
 });
 
+test('reports redacted restart diagnostics to the local persistence hook', () => {
+  const child = makeEngine();
+  const diagnostics = [];
+  const client = new EngineClient('engine.exe', {
+    spawnProcess: () => child,
+    setTimer: () => 1,
+    clearTimer: () => {},
+    now: () => new Date('2026-10-22T12:00:00.000Z'),
+    onDiagnostic: entry => diagnostics.push(entry)
+  });
+  client.start();
+  child.stderr.write('Unhandled exception. System.InvalidOperationException: private path or token\n');
+  child.emit('exit', 3765269347, null);
+  assert.deepEqual(diagnostics, [{
+    occurredAtUtc: '2026-10-22T12:00:00.000Z',
+    reasonCode: '3765269347',
+    stderrObserved: true,
+    exceptionType: 'System.InvalidOperationException'
+  }]);
+  assert.equal(JSON.stringify(diagnostics).includes('private'), false);
+  client.dispose();
+});
+
+test('does not attribute a previous crash exception to a later restart failure', () => {
+  const engines = [];
+  const timers = new Map();
+  const diagnostics = [];
+  let nextTimer = 0;
+  const client = new EngineClient('engine.exe', {
+    spawnProcess: () => { const child = makeEngine(); engines.push(child); return child; },
+    setTimer: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, delay }); return id; },
+    clearTimer: id => timers.delete(id),
+    onDiagnostic: entry => diagnostics.push(entry)
+  });
+  client.start();
+  engines[0].stderr.write('Unhandled exception. System.InvalidOperationException: private details\n');
+  engines[0].emit('exit', 1, null);
+  const [restartId, restart] = timers.entries().next().value;
+  timers.delete(restartId);
+  restart.callback();
+  engines[1].emit('exit', 2, null);
+  assert.deepEqual(diagnostics.map(entry => entry.exceptionType), ['System.InvalidOperationException', null]);
+  assert.equal(client.diagnostics().stderrExceptionType, 'System.InvalidOperationException');
+  client.dispose();
+});
+
 test('kills and restarts a hung engine after a request timeout', async () => {
   const timers = new Map();
   let nextTimer = 0;
