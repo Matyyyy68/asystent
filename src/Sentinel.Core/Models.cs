@@ -31,7 +31,8 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     bool StartWithWindows = false,
     int DnsPollIntervalSeconds = 15,
     bool MonitorNetworkConnections = false,
-    bool MonitorDownloadedFiles = false);
+    bool MonitorDownloadedFiles = false,
+    bool MonitorPersistenceChanges = false);
 public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys,
     bool TcpTruncated = false, bool UdpTruncated = false);
 public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false);

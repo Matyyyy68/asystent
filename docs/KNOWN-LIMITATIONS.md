@@ -1,4 +1,4 @@
-# Znane ograniczenia — 2026-10-21
+# Znane ograniczenia — 2026-10-22
 
 Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego produktu ochronnego. Brak ostrzeżenia nie potwierdza bezpieczeństwa; reguły i pomiary testowe nie dowodzą skuteczności na rzeczywistych atakach.
 
@@ -22,6 +22,8 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 
 ## Enterprise, dane i prywatność
 
+- Monitoring autostartu Windows jest opt-in i obejmuje wyłącznie HKCU Run/RunOnce oraz bezpośrednie pliki w Startup bieżącego użytkownika. Snapshot co ≥30 s może pominąć zmiany, gdy aplikacja jest zamknięta; cichy baseline nie alarmuje o już istniejących wpisach. HKLM i Scheduled Tasks nie są monitorowane. Zdarzenia nie zawierają komendy ani pełnej ścieżki; reguła lokalizacji jest heurystyczna.
+
 - Serwer Enterprise jest osobnym projektem. Wdrożenie poza loopback wymaga HTTPS z certyfikatem zaufanym przez Windows; repozytorium nie dostarcza publicznego serwera ani zaufanego certyfikatu. Instalator serwera nie konfiguruje TLS ani zapory.
 - Klient przesyła metadane zdarzeń wyłącznie po jawnej zgodzie. Nie obejmują one treści, pełnych URL-i, zawartości plików, nazw aplikacji ani lokalnych wyjaśnień. Podczas rejestracji serwer otrzymuje kod zaproszenia, nazwę komputera i wersję klienta. Szczegóły opisuje [konfiguracja klienta Enterprise](ENTERPRISE-CLIENT-SETUP.md).
 - Polityka klienta Enterprise obsługuje obecnie tryb lokalny i ograniczony interwał. Serwerowa analiza treści oraz rozszerzone statusy zgodności pozostają poza zwykłym przepływem agenta. Urządzenie oczekujące na akceptację wymaga działania administratora.
@@ -31,6 +33,8 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 - Inwentaryzacja obejmuje 23 pary NuGet oraz wszystkie 290 par npm z lockfile; 240 jest zainstalowanych lokalnie, a 50 lockfile-only. Każdy wpis npm ma deklarację w lockfile, ale warunki redystrybucji 50 pakietów niedostępnych lokalnie i deklaracje nietypowe wymagają ręcznego przeglądu. Pełna zgodność redystrybucji nie została ustalona. Szczegóły i CSV: [inwentaryzacja licencji zależności](DEPENDENCY-LICENSE-AUDIT.md).
 
 ## Ostatnia walidacja źródła
+
+Po dodaniu monitora autostartu pełna lokalna bramka `scripts/build-user.ps1 -Installer` PASS: .NET 241/241 bez pominięć, Electron 14/14, `npm audit` 0, Engine IPC, testy Windows DNS/TCP/UDP, UI production build oraz installer self-test PASS. Lokalny, nieopublikowany instalator v0.15.38 ma SHA-256 `10C1A2AC400C5251BD218E19F4772F3D4C1C54334745D1A98FEE7E878684E3F4`. Pełna walidacja GUI pozostaje osobnym ograniczeniem.
 
 Pełne `scripts/build-user.ps1 -Installer` dla bieżących zmian monitorowania Downloads przeszło ponownie 2026-10-22 poza sandboxem: .NET 234/234 bez pominięć, Electron 14/14, Engine IPC, testy Windows procesów/DNS/TCP/UDP, produkcyjny build UI, `npm audit` 0 i self-test instalatora PASS. Self-test obejmuje odrzucenie zmienionego payloadu, preflight braku miejsca i zachowanie poprzedniej instalacji po wstrzykniętym błędzie stagingu; nie używa fizycznie pełnego woluminu. Lokalny, nieopublikowany instalator v0.15.38 ma SHA-256 `BFFD8DFFE60BADEECBC1C17296CFA533D468081512E538A8D8DC8CB4680D52C0`. Windows CI dla commita `ea54f3b` PASS: [run 39779854381](https://github.com/Matyyyy68/asystent/actions/runs/39779854381); klient, Enterprise API i HTTP smoke przeszły. Nowy transytywny skan NuGet nie znalazł podatności w `Sentinel.sln` ani `server/Sentinel.Server.sln`. Lokalny skan nadal blokuje odmowa dostępu do `api.nuget.org:443`. Self-test nie zastępuje pełnej interakcji GUI ani zaufanego podpisu wydawcy.
 # Process image inspection

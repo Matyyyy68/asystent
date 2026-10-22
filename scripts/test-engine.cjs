@@ -31,6 +31,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.enterprise.paired, false);
   assert.equal(initialStatus.result.settings.monitorNetworkConnections, false, 'continuous TCP monitoring must default to off');
   assert.equal(initialStatus.result.settings.monitorDownloadedFiles, false, 'Downloads monitoring must default to off');
+  assert.equal(initialStatus.result.settings.monitorPersistenceChanges, false, 'Windows persistence monitoring must default to off');
+  assert.equal(initialStatus.result.persistence, 'Monitor zmian autostartu jest wyłączony.');
   assert.equal((await call('malwareBazaarLookup', { sha256: 'a'.repeat(64), consent: false })).ok, false,
     'MalwareBazaar hash lookup must require explicit consent');
   assert.equal((await call('malwareBazaarConfigure', { apiKey: 'synthetic-test-key', consent: false })).ok, false,
@@ -118,6 +120,21 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   downloadedHistory = (await call('history')).result;
   assert.equal(downloadedHistory.filter(event => event.source === 'downloads-local-hash').length, 2,
     'disabled Downloads monitoring must stop processing new files');
+  await call('settings', { retentionDays: 30, notifications: true, monitorPersistenceChanges: true });
+  const persistenceBaseline = await call('collect'); assert.equal(persistenceBaseline.ok, true, persistenceBaseline.error);
+  assert.match(persistenceBaseline.result.persistence, /ustawiono baseline/,
+    'opt-in Windows persistence monitor must take a silent per-user baseline');
+  assert.equal((await call('history')).result.filter(event => event.source === 'windows-persistence-snapshot').length, 0,
+    'taking a persistence baseline must not create events for existing entries');
+  await call('pause', { paused: true });
+  const persistencePaused = await call('collect'); assert.equal(persistencePaused.ok, true, persistencePaused.error);
+  assert.match(persistencePaused.result.persistence, /wstrzymany/,
+    'global pause must stop per-user persistence monitoring');
+  await call('pause', { paused: false });
+  await call('settings', { retentionDays: 30, notifications: true, monitorPersistenceChanges: false });
+  const persistenceDisabled = await call('collect'); assert.equal(persistenceDisabled.ok, true, persistenceDisabled.error);
+  assert.match(persistenceDisabled.result.persistence, /wyłączony/,
+    'disabling Windows persistence monitoring must clear its baseline');
   const snapshotStarted = performance.now();
   const connectionSnapshot = await call('connections'); assert.equal(connectionSnapshot.ok, true, connectionSnapshot.error);
   assert.ok(performance.now() - snapshotStarted < 5000, 'IP Helper connection snapshot exceeded 5 seconds');

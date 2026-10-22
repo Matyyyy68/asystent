@@ -44,6 +44,7 @@ var reputation = new DomainReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
 await using var processImageInspectionQueue = new ProcessImageInspectionQueue(store, fileHashReputation, ReadAuthenticodeSignatureAsync);
 var processMonitor = new ProcessSnapshotMonitor(ProcessImageInspectionQueue.ResolveExecutablePath, processImageInspectionQueue.TryEnqueue);
+using var persistenceMonitor = new WindowsPersistenceSnapshotMonitor();
 foreach (var pendingInspection in await store.ReadPendingProcessImageInspectionsAsync())
     if (!processImageInspectionQueue.TryEnqueue(pendingInspection.EventId, pendingInspection.Path))
         await store.UpdateProcessImageInspectionAsync(pendingInspection.EventId, null, "QueueFull", null);
@@ -244,6 +245,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
+                    persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
                     runtime = ReadRuntimeMetrics(),
@@ -261,6 +263,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
                     settings.ExcludedApplications);
                 var downloadedFileMatches = await downloadedFileMonitor.CollectAsync(store, fileHashReputation);
+                var persistenceChanges = await persistenceMonitor.CollectAsync(store, settings.MonitorPersistenceChanges, settings.Paused);
                 if (settings.Paused) dnsState = "Obserwacja wstrzymana";
                 else if (OperatingSystem.IsWindows() && (lastDnsAttempt is not { } previousDnsAttempt || DateTimeOffset.UtcNow - previousDnsAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
                 {
@@ -309,7 +312,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     ? await SyncEnterpriseAsync(force: false) : null;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState,
                     processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
-                    downloadedFileMatches, downloadedFiles = downloadedFileMonitor.State, enterpriseSync };
+                    downloadedFileMatches, downloadedFiles = downloadedFileMonitor.State,
+                    persistenceChanges, persistence = persistenceMonitor.State, enterpriseSync };
                 break;
             case "history": result = await store.ReadAsync(); break;
             case "eventStatus":
@@ -405,7 +409,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     hostLifecycle = new { status = safeHostStatus, lastExitCode = safeExitCode, stderrObserved = hostStderrObserved, stderrExceptionType = safeExceptionType },
                     recentEngineFailures = safeHostFailures,
                     monitors = new { dns = dnsState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
-                        processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State },
+                        processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State, downloadedFiles = downloadedFileMonitor.State,
+                        persistence = persistenceMonitor.State },
                     settings = new { retentionDays = settings.RetentionDays, notifications = settings.Notifications, paused = settings.Paused, useLocalAI = settings.UseLocalAI,
                         monitorForegroundChanges = settings.MonitorForegroundChanges, monitorNetworkConnections = settings.MonitorNetworkConnections,
                         monitorDownloadedFiles = settings.MonitorDownloadedFiles, dnsPollIntervalSeconds = settings.DnsPollIntervalSeconds },
@@ -492,7 +497,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     Notifications = request.GetProperty("notifications").GetBoolean(),
                     DnsPollIntervalSeconds = request.TryGetProperty("dnsPollIntervalSeconds", out var interval) ? interval.GetInt32() : settings.DnsPollIntervalSeconds,
                     MonitorNetworkConnections = request.TryGetProperty("monitorNetworkConnections", out var monitorNetwork) ? monitorNetwork.GetBoolean() : settings.MonitorNetworkConnections,
-                    MonitorDownloadedFiles = request.TryGetProperty("monitorDownloadedFiles", out var monitorDownloads) ? monitorDownloads.GetBoolean() : settings.MonitorDownloadedFiles };
+                    MonitorDownloadedFiles = request.TryGetProperty("monitorDownloadedFiles", out var monitorDownloads) ? monitorDownloads.GetBoolean() : settings.MonitorDownloadedFiles,
+                    MonitorPersistenceChanges = request.TryGetProperty("monitorPersistenceChanges", out var monitorPersistence) ? monitorPersistence.GetBoolean() : settings.MonitorPersistenceChanges };
                 await store.SaveSettingsAsync(updatedSettings);
                 settings = updatedSettings;
                 await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);
