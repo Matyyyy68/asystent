@@ -7,7 +7,7 @@
 
 **Ostrzeżenie F03 w aplikacji (2026-10-23):** ręczny ekran analizy pokazuje, że brak alertu nie potwierdza bezpieczeństwa i analiza nie blokuje stron ani nie zastępuje Defendera. Dla aktualnych reguł `2026.10.6` widoczny jest również rzeczywisty wynik PhishVN v3.1.0 test: 0/487 phishingowych adresów gold/silver wykrytych przy progu Moderate. `npm test` 14/14, produkcyjny build UI PASS i Windows CI `39908296663` PASS.
 
-**Spójność publicznej strony (2026-10-23):** skorygowano opis częstotliwości próbkowania z 10 s do około 1 s, dodano lokalne UDP endpoints i jego ograniczenia oraz wynik testu phishingu `0/487` dla `2026.10.6`. Website test, lint i produkcyjny build PASS. Deployment Pages oczekuje na push.
+**Spójność publicznej strony (2026-10-23):** skorygowano opis częstotliwości próbkowania z 10 s do około 1 s, dodano lokalne punkty UDP i ich ograniczenia oraz wynik testu phishingu `0/487` dla `2026.10.6`. Website test, lint i produkcyjny build PASS. Pages run `39909475483` PASS wdrożył stronę; live check potwierdził HTTP 200, instalator, sidecar SHA-256 i cztery linki zewnętrzne.
 
 **Enterprise API CI (2026-10-23):** run `39906511631` ujawnił, że Windows runner przekroczył 60-sekundowy limit w teście aktywnego retry TLS po restarcie API (21/22). Scenariusz celowo czeka 31 s na interwał Enterprise po konfiguracji DPAPI i enrollment; limit zwiększono do 3 min. Lokalnie test przeszedł 1/1, pełny serwer 22/22 bez pominięć i Release build bez ostrzeżeń. Run `39907563169` dla poprawki zakończył się PASS, obejmując aplikację, instalator i Enterprise API.
 
