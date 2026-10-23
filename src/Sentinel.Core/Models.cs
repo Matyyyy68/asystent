@@ -11,9 +11,10 @@ public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel 
     IReadOnlyList<string>? EvidenceCodes = null, [property: JsonIgnore] string? SignalHash = null,
     IReadOnlyList<EventObservation>? Observations = null,
     string? ProcessImagePath = null, string? ProcessImageSha256 = null,
-    string? ProcessImageSignatureStatus = null, bool? ProcessImageLocalHashMatch = null);
+    string? ProcessImageSignatureStatus = null, bool? ProcessImageLocalHashMatch = null,
+    DateTimeOffset? ProcessedAt = null);
 public sealed record EventObservation(Guid EventId, DateTimeOffset ObservedAt, string Source,
-    IReadOnlyList<string> EvidenceCodes);
+    IReadOnlyList<string> EvidenceCodes, DateTimeOffset? ProcessedAt = null);
 public sealed record AppSettings(int RetentionDays = 30, bool Notifications = true, bool Paused = true,
     int MinimumIntervalSeconds = 10,
     string ExcludedApplications = "1password;bitwarden;keepass;keepassxc;credentialuibroker;logonui",

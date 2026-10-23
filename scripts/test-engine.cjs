@@ -297,7 +297,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const historyCsvPath = path.join(backups, 'history.csv');
   const csvExportResult = await call('historyExportCsv', { path: historyCsvPath }); assert.equal(csvExportResult.ok, true, csvExportResult.error);
   const exportedCsv = readFileSync(historyCsvPath, 'utf8');
-  assert.ok(exportedCsv.includes('timestamp_utc,risk,category'));
+  assert.ok(exportedCsv.includes('timestamp_utc,processed_at_utc,risk,category'));
   assert.ok(exportedCsv.includes(history[0].id));
   assert.ok(!exportedCsv.includes('https://paypal.com.evil.test/login'));
   assert.ok(!exportedCsv.includes('Pilnie zaloguj się i podaj hasło'));

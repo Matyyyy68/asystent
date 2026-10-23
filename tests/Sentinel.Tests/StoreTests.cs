@@ -67,7 +67,48 @@ public sealed class StoreTests : IDisposable
         Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
+    }
+    [Fact] public async Task VersionTwentyTwoMigrationAddsProcessingTimesWithoutInventingLegacyValuesAndPreservesNewValues()
+    {
+        var store = await Store();
+        var legacyId = Guid.NewGuid();
+        await store.AddLocalOnlyAsync(Event() with { EventId = legacyId, Source = "legacy" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "DROP TRIGGER trg_events_add_observation; ALTER TABLE events DROP COLUMN processed_at; ALTER TABLE event_observations DROP COLUMN processed_at; PRAGMA user_version=22;";
+            await command.ExecuteNonQueryAsync();
+        }
+        await store.InitializeAsync();
+        var legacy = Assert.Single(await store.ReadAsync());
+        Assert.Null(legacy.ProcessedAt);
+        Assert.Null(Assert.Single(legacy.Observations!).ProcessedAt);
+
+        var processedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var at = DateTimeOffset.UtcNow;
+        var signal = LocalStore.CreateHostSignalHash("clock.example.test");
+        await store.AddLocalOnlyAsync(Event(at) with { EventId = Guid.NewGuid(), Source = "browser-extension", Risk = RiskLevel.High, EvidenceCodes = ["reputation.cert"], SignalHash = signal, ProcessedAt = processedAt });
+        await store.AddLocalOnlyAsync(Event(at.AddSeconds(1)) with { EventId = Guid.NewGuid(), Source = "dns-cache", Risk = RiskLevel.High, EvidenceCodes = ["reputation.cert"], SignalHash = signal });
+        var merged = (await store.ReadAsync()).Single(item => item.Source == "browser-extension");
+        Assert.Equal(processedAt, merged.ProcessedAt);
+        Assert.Equal(2, merged.Observations!.Count);
+        Assert.Contains(merged.Observations, observation => observation.Source == "dns-cache" && observation.ProcessedAt is not null);
+
+        var backup = Path.Combine(dir, "v23-processing-times.db");
+        await store.BackupAsync(backup);
+        var restored = await Store();
+        await restored.RestoreAsync(backup);
+        var restoredMerged = (await restored.ReadAsync()).Single(item => item.Source == "browser-extension");
+        Assert.Equal(processedAt, restoredMerged.ProcessedAt);
+        Assert.All(restoredMerged.Observations!, observation => Assert.NotNull(observation.ProcessedAt));
+
+        var json = Path.Combine(dir, "processing-times.json");
+        await restored.ExportAsync(json);
+        Assert.Contains("ProcessedAt", await File.ReadAllTextAsync(json));
+        var csv = Path.Combine(dir, "processing-times.csv");
+        await restored.ExportCsvAsync(csv);
+        Assert.Contains("processed_at_utc", await File.ReadAllTextAsync(csv));
     }
     [Fact] public async Task ContinuousTcpMonitoringOptInSurvivesReopening()
     {
@@ -380,7 +421,7 @@ public sealed class StoreTests : IDisposable
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync(); using var command = connection.CreateCommand();
-            command.CommandText = "DROP INDEX ix_domain_correlation_last_seen; DROP TABLE domain_correlation; PRAGMA user_version=12;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX ix_domain_correlation_last_seen; DROP TABLE domain_correlation; PRAGMA user_version=12;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -389,7 +430,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -1019,7 +1060,7 @@ public sealed class StoreTests : IDisposable
         await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await c.OpenAsync(); using var command = c.CreateCommand();
-            command.CommandText = "DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
             await command.ExecuteNonQueryAsync();
         }
         await store.InitializeAsync();
@@ -1028,7 +1069,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -1037,7 +1078,7 @@ public sealed class StoreTests : IDisposable
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync(); using var command = connection.CreateCommand();
-            command.CommandText = "DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -1047,7 +1088,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(22L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
@@ -1058,7 +1099,7 @@ public sealed class StoreTests : IDisposable
         await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
         {
             await backup.OpenAsync(); using var command = backup.CreateCommand();
-            command.CommandText = "DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -1078,7 +1119,7 @@ public sealed class StoreTests : IDisposable
         await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
         {
             await backup.OpenAsync(); using var command = backup.CreateCommand();
-            command.CommandText = "ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=11;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=11;";
             await command.ExecuteNonQueryAsync();
         }
 

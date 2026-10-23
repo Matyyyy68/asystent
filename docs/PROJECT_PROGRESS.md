@@ -1,3 +1,5 @@
+**Wspólny schemat zdarzeń (SQLite v23; pełna bramka 2026-10-23):** nowe rekordy zapisują osobno czas zdarzenia i czas przetworzenia; każda scalona obserwacja ma własny czas przetworzenia. JSON/CSV i backup/restore zachowują nowe pola. Migracja pozostawia czas historycznych wpisów jako nieznany (NULL). Test v22→v23 obejmuje migrację, deduplikację między źródłami, eksport i odtworzenie kopii.
+
 # Postęp projektu Sentinel AI
 
 **Aktualizacja:** 2026-10-23

@@ -1,3 +1,6 @@
+## Unreleased
+- Dodano lokalny czas przetworzenia zdarzeń i scalonych obserwacji (SQLite v23), widoczny w JSON/CSV i zachowywany przez backup/restore. Czasów starych rekordów nie odtwarza się wstecz.
+
 # CHANGELOG
 
 ## Unreleased
