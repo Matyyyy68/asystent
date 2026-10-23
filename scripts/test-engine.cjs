@@ -75,6 +75,10 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(matchedFile.ok, true, matchedFile.error); assert.equal(matchedFile.result.reputation.feedImported, true);
   assert.equal(matchedFile.result.reputation.match, true);
   assert.match(matchedFile.result.reputation.explanation, /nie zostało niezależnie zweryfikowane/);
+  const repeatedMatchedFile = await call('file', { path: unsignedFixture });
+  assert.equal(repeatedMatchedFile.ok, true, repeatedMatchedFile.error);
+  assert.equal((await call('history')).result.filter(event => event.source === 'manual-file-analysis').length, 1,
+    'repeated manual scans of the same locally listed file must not create duplicate alerts within the deduplication window');
   const ipFeedPath = path.join(root, 'ip-addresses.txt');
   writeFileSync(ipFeedPath, '192.0.2.17\n198.51.100.0/24 # TEST-NET fixture\n2001:db8::/32\n');
   const importedIpFeed = await call('ipReputationImport', { path: ipFeedPath });
