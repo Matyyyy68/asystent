@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Test prywatności watchera Downloads: junction wewnątrz katalogu wskazuje na tymczasowy katalog poza nim. Test potwierdza, że baseline i skan nie obejmują istniejącego ani nowego pliku spoza Downloads, a prawidłowy plik wewnątrz nadal jest wykrywany. Zestaw `DownloadedFileMonitorTests` PASS 8/8; osobny test junction PASS.
 - Uzupełniono regresję awarii pierwszej migawki procesu o wznowienie z istniejącym baseline'em SQLite: po błędzie przy konstrukcji monitor nadal wykrywa procesy uruchomione podczas przerwy. Oba testy startowej awarii PASS; pełny .NET run: 313 PASS, 2 testy Windows pominięte w niepodniesionej sesji. Nie zmieniono kodu produkcyjnego ani artefaktu.
 - Pełna bramka po odporności monitora procesów na błąd startowej migawki: .NET 314/314 bez pominięć, guardy ewaluatorów PASS, Engine IPC/DNS/TCP/UDP PASS, Electron 16/16, `npm audit` 0, UI production build i self-test instalatora PASS. Artefakt testowy v0.15.38 ma 281354617 B i SHA-256 `86517F33BD1C7C4E09D10F8C4613CFD4CD4C64A62A63F58E2D013B3B02EF96DE`; sidecar zgodny. Nie wykonano GUI ani publikacji.
 - Błąd jednorazowego odczytu procesów w konstruktorze `ProcessSnapshotMonitor` nie przerywa już startu Engine. Gdy brak trwałego baseline'u, pierwsza dostępna migawka tworzy go bez generowania fałszywych zdarzeń dla już działających procesów; przy istniejącym baseline'u nadal porównywane są zmiany od poprzedniego uruchomienia. Regresja sprawdza odzyskanie źródła i późniejszy nowy PID.

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Xunit;
@@ -152,6 +153,57 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task JunctionInsideDownloadsDoesNotExpandScanScopeOutsideDownloads()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var downloads = Path.Combine(root, "Downloads");
+        var outside = Path.Combine(root, "outside");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        Directory.CreateDirectory(outside);
+        var junction = Path.Combine(downloads, "linked-folder");
+        CreateJunction(junction, outside);
+
+        try
+        {
+            var payload = "matching file outside the selected Downloads tree";
+            var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+            var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+            reputation.Import(payloadHash, DateTimeOffset.UtcNow);
+            var store = new LocalStore(data);
+            await store.InitializeAsync();
+            await File.WriteAllTextAsync(Path.Combine(outside, "already-there.bin"), payload);
+
+            using var monitor = new DownloadedFileMonitor(downloads);
+            await monitor.SetEnabledAsync(store, true);
+            Assert.Empty((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
+
+            await File.WriteAllTextAsync(Path.Combine(outside, "arrived-later.bin"), payload);
+            await File.WriteAllTextAsync(Path.Combine(downloads, "inside.bin"), payload);
+            await Task.Delay(TimeSpan.FromMilliseconds(900));
+            var detected = 0;
+            for (var attempt = 0; attempt < 40 && detected == 0; attempt++)
+            {
+                detected += await monitor.CollectAsync(store, reputation);
+                if (detected == 0) await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
+
+            Assert.Equal(1, detected);
+            var events = await store.ReadAsync();
+            Assert.Single(events);
+            Assert.DoesNotContain("linked-folder", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("already-there.bin", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("arrived-later.bin", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.OrdinalIgnoreCase);
+            Assert.All((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files,
+                item => Assert.DoesNotContain("linked-folder", item.Key, StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            if (Directory.Exists(junction)) Directory.Delete(junction);
+        }
+    }
+
+    [Fact]
     public async Task MonitorRetriesStartupAfterDatabaseFailure()
     {
         var downloads = Path.Combine(root, "Downloads");
@@ -219,5 +271,27 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+
+    private static void CreateJunction(string path, string target)
+    {
+        var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"))
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add("/d");
+        start.ArgumentList.Add("/c");
+        start.ArgumentList.Add("mklink");
+        start.ArgumentList.Add("/J");
+        start.ArgumentList.Add(path);
+        start.ArgumentList.Add(target);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Nie uruchomiono tworzenia junction testowego.");
+        var output = process.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(process.ExitCode == 0 && Directory.Exists(path), $"Nie utworzono junction testowego. {output} {error}");
     }
 }
