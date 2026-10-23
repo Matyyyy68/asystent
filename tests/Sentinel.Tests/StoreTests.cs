@@ -67,7 +67,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(24L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTwentyTwoMigrationAddsProcessingTimesWithoutInventingLegacyValuesAndPreservesNewValues()
     {
@@ -77,7 +77,7 @@ public sealed class StoreTests : IDisposable
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync(); using var command = connection.CreateCommand();
-            command.CommandText = "DROP TRIGGER trg_events_add_observation; ALTER TABLE events DROP COLUMN processed_at; ALTER TABLE event_observations DROP COLUMN processed_at; PRAGMA user_version=22;";
+            command.CommandText = "DROP TRIGGER trg_events_add_observation; ALTER TABLE events DROP COLUMN analysis_limitations; ALTER TABLE event_observations DROP COLUMN analysis_limitations; ALTER TABLE events DROP COLUMN processed_at; ALTER TABLE event_observations DROP COLUMN processed_at; PRAGMA user_version=22;";
             await command.ExecuteNonQueryAsync();
         }
         await store.InitializeAsync();
@@ -88,12 +88,14 @@ public sealed class StoreTests : IDisposable
         var processedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
         var at = DateTimeOffset.UtcNow;
         var signal = LocalStore.CreateHostSignalHash("clock.example.test");
-        await store.AddLocalOnlyAsync(Event(at) with { EventId = Guid.NewGuid(), Source = "browser-extension", Risk = RiskLevel.High, EvidenceCodes = ["reputation.cert"], SignalHash = signal, ProcessedAt = processedAt });
-        await store.AddLocalOnlyAsync(Event(at.AddSeconds(1)) with { EventId = Guid.NewGuid(), Source = "dns-cache", Risk = RiskLevel.High, EvidenceCodes = ["reputation.cert"], SignalHash = signal });
+        var limitations = new[] { "analysis.sender-intent-unverified", "analysis.ai-unavailable-rule-only" };
+        await store.AddLocalOnlyAsync(Event(at) with { EventId = Guid.NewGuid(), Source = "browser-extension", Risk = RiskLevel.High, EvidenceCodes = ["reputation.cert"], SignalHash = signal, ProcessedAt = processedAt, AnalysisLimitations = limitations });
+        await store.AddLocalOnlyAsync(Event(at.AddSeconds(1)) with { EventId = Guid.NewGuid(), Source = "dns-cache", Risk = RiskLevel.High, EvidenceCodes = ["reputation.cert"], SignalHash = signal, AnalysisLimitations = ["analysis.navigation-target-unverified"] });
         var merged = (await store.ReadAsync()).Single(item => item.Source == "browser-extension");
         Assert.Equal(processedAt, merged.ProcessedAt);
+        Assert.Equal(limitations, merged.AnalysisLimitations);
         Assert.Equal(2, merged.Observations!.Count);
-        Assert.Contains(merged.Observations, observation => observation.Source == "dns-cache" && observation.ProcessedAt is not null);
+        Assert.Contains(merged.Observations, observation => observation.Source == "dns-cache" && observation.ProcessedAt is not null && observation.AnalysisLimitations!.Contains("analysis.navigation-target-unverified"));
 
         var backup = Path.Combine(dir, "v23-processing-times.db");
         await store.BackupAsync(backup);
@@ -101,7 +103,23 @@ public sealed class StoreTests : IDisposable
         await restored.RestoreAsync(backup);
         var restoredMerged = (await restored.ReadAsync()).Single(item => item.Source == "browser-extension");
         Assert.Equal(processedAt, restoredMerged.ProcessedAt);
+        Assert.Equal(limitations, restoredMerged.AnalysisLimitations);
         Assert.All(restoredMerged.Observations!, observation => Assert.NotNull(observation.ProcessedAt));
+
+        var v23Backup = Path.Combine(dir, "legacy-v23-processing-times.db");
+        File.Copy(backup, v23Backup);
+        await using (var connection = new SqliteConnection($"Data Source={v23Backup};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "DROP TRIGGER trg_events_add_observation; ALTER TABLE events DROP COLUMN analysis_limitations; ALTER TABLE event_observations DROP COLUMN analysis_limitations; PRAGMA user_version=23;";
+            await command.ExecuteNonQueryAsync();
+        }
+        var restoredV23 = await Store();
+        await restoredV23.RestoreAsync(v23Backup);
+        var fromV23 = (await restoredV23.ReadAsync()).Single(item => item.Source == "browser-extension");
+        Assert.Equal(processedAt, fromV23.ProcessedAt);
+        Assert.Null(fromV23.AnalysisLimitations);
+        Assert.All(fromV23.Observations!, observation => Assert.Null(observation.AnalysisLimitations));
 
         var json = Path.Combine(dir, "processing-times.json");
         await restored.ExportAsync(json);
@@ -109,6 +127,7 @@ public sealed class StoreTests : IDisposable
         var csv = Path.Combine(dir, "processing-times.csv");
         await restored.ExportCsvAsync(csv);
         Assert.Contains("processed_at_utc", await File.ReadAllTextAsync(csv));
+        Assert.Contains("analysis_limitations", await File.ReadAllTextAsync(csv));
     }
     [Fact] public async Task ContinuousTcpMonitoringOptInSurvivesReopening()
     {
@@ -430,7 +449,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(24L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -1069,7 +1088,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(24L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -1088,7 +1107,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(23L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(24L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {

@@ -1,5 +1,5 @@
 ## Unreleased
-- Dodano lokalny czas przetworzenia zdarzeń i scalonych obserwacji (SQLite v23), widoczny w JSON/CSV i zachowywany przez backup/restore. Czasów starych rekordów nie odtwarza się wstecz.
+- Dodano lokalny czas przetworzenia zdarzeń i scalonych obserwacji (SQLite v23), widoczny w JSON/CSV i zachowywany przez backup/restore. Czasów starych rekordów nie odtwarza się wstecz. SQLite v24 zapisuje ograniczenia analizy jako allowlistowane kody; historia i UI nie przechowują swobodnego tekstu niepewności ani nazw źródeł wiedzy.
 
 # CHANGELOG
 

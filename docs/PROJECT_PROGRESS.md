@@ -1,4 +1,4 @@
-**Wspólny schemat zdarzeń (SQLite v23; pełna bramka 2026-10-23):** nowe rekordy zapisują osobno czas zdarzenia i czas przetworzenia; każda scalona obserwacja ma własny czas przetworzenia. JSON/CSV i backup/restore zachowują nowe pola. Migracja pozostawia czas historycznych wpisów jako nieznany (NULL). Test v22→v23 obejmuje migrację, deduplikację między źródłami, eksport i odtworzenie kopii.
+**Wspólny schemat zdarzeń (SQLite v24; pełna bramka 2026-10-23):** nowe rekordy zapisują czas zdarzenia i czas przetworzenia; każda obserwacja zachowuje własny czas oraz privacy-safe kody ograniczeń analizy. JSON/CSV, UI i backup/restore zachowują te metadane. Legacy pozostaje NULL. Testy obejmują migrację v22→v24, restore kopii v23/v24 i redakcję ograniczeń. Najnowsza bramka: .NET 319/319, ewaluatory domen/PhishVN, Engine IPC/DNS/TCP/UDP, Electron 16/16, npm audit 0, UI i autotest instalatora PASS. Nowy testowy v0.15.38: 281357689 B, SHA-256 `A7443B27C518025BB40FABEB91C5BCC841BB3485DD457BB7AC8403F18D15D932`; nie uruchomiono instalacji dla tego hasha.
 
 # Postęp projektu Sentinel AI
 

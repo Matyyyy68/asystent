@@ -619,6 +619,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                         EventId: Guid.NewGuid(), Source: "manual-analysis", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                         CorrelationId: correlationId,
                         EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
+                        AnalysisLimitations: AnalysisLimitationCodes.FromUncertainties(assessment.Uncertainties),
                         SignalHash: assessment.Indicators.Any(indicator => indicator.Id == "reputation.cert")
                             ? LocalStore.CreateHostSignalHash(reputationMatchHost ?? urlAnalysis?.Host)
                             : assessment.Indicators.Any(indicator => indicator.Id == "reputation.url-feed")

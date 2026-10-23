@@ -218,6 +218,17 @@ public sealed class AnalysisTests
     {
         var r=Engine().Analyze(Input("Zwykła notatka")); Assert.Equal(RiskLevel.Information,r.Risk); Assert.Contains("nie jest potwierdzenie",r.Explanation); Assert.NotEmpty(r.Uncertainties);
     }
+    [Fact] public void PersistedAnalysisLimitationsUseOnlyKnownPrivacySafeCodes()
+    {
+        var codes = AnalysisLimitationCodes.FromUncertainties([
+            "Reguły nie potwierdzają intencji nadawcy ani bezpieczeństwa strony.",
+            "Adresy HTTP/HTTPS zapisane w treści przeanalizowano lokalnie; faktyczny cel kliknięcia nie został potwierdzony.",
+            "Lokalne źródła wiedzy: private-client-name.txt.",
+            "Model wygenerował nieznaną niepewność zawierającą prywatny tekst."
+        ]);
+
+        Assert.Equal(["analysis.embedded-link-target-unverified", "analysis.sender-intent-unverified"], codes);
+    }
     [Fact] public void EmbeddedUrlIsAnalyzedWithoutBeingAssumedToBeTheActualDestination()
     {
         var result = Engine().Analyze(Input("Opis https://paypal.com.evil.test"));

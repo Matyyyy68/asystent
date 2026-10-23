@@ -283,6 +283,9 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.ok(!JSON.stringify(history).includes(embeddedPhishingUrl));
   assert.equal(history[0].schemaVersion, 1); assert.equal(history[0].source, 'manual-analysis');
   assert.ok(history[0].correlationId, 'manual URL warning should receive a short-lived domain correlation id');
+  assert.ok(history[0].analysisLimitations.includes('analysis.sender-intent-unverified'));
+  assert.ok(history[0].analysisLimitations.includes('analysis.embedded-link-target-unverified'));
+  assert.ok(!JSON.stringify(history[0].analysisLimitations).includes('paypal.com.evil.test'));
   assert.equal((await call('eventStatus', { eventId: history[0].id, status: 'FalsePositive' })).ok, true);
   assert.equal((await call('history')).result[0].status, 'FalsePositive');
   assert.equal((await call('eventStatus', { eventId: history[0].id, status: 'Bogus' })).ok, false);
@@ -297,7 +300,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const historyCsvPath = path.join(backups, 'history.csv');
   const csvExportResult = await call('historyExportCsv', { path: historyCsvPath }); assert.equal(csvExportResult.ok, true, csvExportResult.error);
   const exportedCsv = readFileSync(historyCsvPath, 'utf8');
-  assert.ok(exportedCsv.includes('timestamp_utc,processed_at_utc,risk,category'));
+  assert.ok(exportedCsv.includes('timestamp_utc,processed_at_utc,risk,category') && exportedCsv.includes('analysis_limitations'));
   assert.ok(exportedCsv.includes(history[0].id));
   assert.ok(!exportedCsv.includes('https://paypal.com.evil.test/login'));
   assert.ok(!exportedCsv.includes('Pilnie zaloguj się i podaj hasło'));
