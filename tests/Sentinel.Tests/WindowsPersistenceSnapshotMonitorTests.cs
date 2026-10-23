@@ -415,6 +415,32 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task AppInitChangeIsRecordedWithoutPersistingLibraryPath()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["registry.machine64.appinit:" + new string('A', 64)] = Entry("registry.machine64.appinit", "initial-library.dll|load=0", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries["registry.machine64.appinit:" + new string('A', 64)] = Entry("registry.machine64.appinit", @"C:\Users\Alice\AppData\Local\Temp\payload.dll|load=1", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana autostartu Windows", item.Category);
+        Assert.Equal("Autostart Windows · HKLM AppInit_DLLs (64-bit)", item.Application);
+        Assert.Contains("persistence.machine64.appinit.changed", item.EvidenceCodes!);
+        Assert.Contains("persistence.target.user-writable-location", item.EvidenceCodes!);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = await store.ReadAsync(), Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("payload.dll", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alice", persisted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task NewlyAvailableServiceSourceGetsSilentBaseline()
     {
         var store = await CreateStore();
@@ -573,6 +599,29 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task SchemaV28BaselineMigratesToAppInitSources()
+    {
+        var store = await CreateStore();
+        var fingerprint = Entry("registry.user.run", "existing command", false).Fingerprint;
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE windows_persistence_snapshot; CREATE TABLE windows_persistence_snapshot(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot VALUES('existing-run','registry.user.run','" + fingerprint + "',0); UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1; PRAGMA user_version=28;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new("existing-run", "registry.user.run", fingerprint, false),
+            new("registry.machine64.appinit:" + new string('A', 64), "registry.machine64.appinit", fingerprint, false)
+        ]);
+        var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.run");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.appinit");
+    }
+
+    [Fact]
     public async Task LiveReadOnlyServiceRegistryEnumerationWhenExplicitlyEnabled()
     {
         if (!OperatingSystem.IsWindows() || !string.Equals(Environment.GetEnvironmentVariable("SENTINEL_LIVE_SERVICES"), "1", StringComparison.Ordinal)) return;
@@ -614,6 +663,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
                 "registry.user.run", "registry.user.runonce", "registry.user.policy.run", "registry.user.winlogon",
                 "registry.machine64.run", "registry.machine64.runonce", "registry.machine64.policy.run", "registry.machine64.winlogon",
                 "registry.machine32.run", "registry.machine32.runonce", "registry.machine32.policy.run", "registry.machine32.winlogon",
+                "registry.machine64.appinit", "registry.machine32.appinit",
                 "startup.user", "startup.common", "scheduled.task", "registry.service", "registry.driver"
             });
         });

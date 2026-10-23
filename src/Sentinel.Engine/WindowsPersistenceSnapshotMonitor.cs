@@ -249,6 +249,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.user.winlogon" => "HKCU Winlogon",
                 "registry.machine64.winlogon" => "HKLM Winlogon (64-bit)",
                 "registry.machine32.winlogon" => "HKLM Winlogon (32-bit)",
+                "registry.machine64.appinit" => "HKLM AppInit_DLLs (64-bit)",
+                "registry.machine32.appinit" => "HKLM AppInit_DLLs (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
@@ -271,6 +273,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
                 "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" => "Sprawdź konfigurację logowania Windows. Sentinel nie zmienia powłoki ani skryptów logowania.",
+                "registry.machine64.appinit" or "registry.machine32.appinit" => "Sprawdź konfigurację AppInit_DLLs Windows. Sentinel nie zmienia rejestru ani nie ładuje wskazanych bibliotek.",
                 _ => "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów."
             };
             var evidenceScope = source switch
@@ -287,6 +290,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.user.winlogon" => "user.winlogon",
                 "registry.machine64.winlogon" => "machine64.winlogon",
                 "registry.machine32.winlogon" => "machine32.winlogon",
+                "registry.machine64.appinit" => "machine64.appinit",
+                "registry.machine32.appinit" => "machine32.appinit",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
@@ -365,6 +370,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var runOncePath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
         var policyRunPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
         var winlogonPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
+        var appInitPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
@@ -378,6 +384,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
+            CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
         }
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);
@@ -502,6 +509,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             {
                 string text => text,
                 string[] values => string.Join("\0", values),
+                int number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                long number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 _ => null
             };
             if (command is null) continue;
