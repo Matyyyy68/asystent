@@ -13,6 +13,7 @@ public sealed class ProcessSnapshotMonitor
     private bool storeBaselineInitialized;
     private bool storeBaselineTruncated;
     private bool knownSnapshotTruncated;
+    private bool initialSnapshotCaptured;
     private long droppedEvents;
     private bool recentStartsLoaded;
     private readonly Dictionary<int, (DateTimeOffset Timestamp, Guid CorrelationId, string ProcessName)> recentlyObservedStarts = [];
@@ -39,7 +40,18 @@ public sealed class ProcessSnapshotMonitor
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.resolveExecutablePath = resolveExecutablePath;
         this.enqueueImageInspection = enqueueImageInspection;
-        (knownProcesses, knownSnapshotTruncated) = CaptureSnapshot();
+        try
+        {
+            (knownProcesses, knownSnapshotTruncated) = CaptureSnapshot();
+            initialSnapshotCaptured = true;
+        }
+        catch (Exception exception)
+        {
+            // A transient source failure must not prevent the Engine from starting.
+            knownProcesses = [];
+            knownSnapshotTruncated = false;
+            State = "Snapshot procesów niedostępny: " + exception.GetType().Name;
+        }
     }
 
     public Guid? WasRecentlyObservedStart(int processId, DateTimeOffset timestamp)
@@ -77,6 +89,13 @@ public sealed class ProcessSnapshotMonitor
                 persistedProcesses = new(saved.Processes);
                 knownProcesses = new(saved.Processes);
                 knownSnapshotTruncated = saved.Truncated;
+            }
+            else if (!initialSnapshotCaptured)
+            {
+                // With no persisted baseline, the first available sample establishes the
+                // baseline instead of reporting every already-running process as new.
+                knownProcesses = current;
+                knownSnapshotTruncated = currentTruncated;
             }
             storeBaselineLoaded = true;
         }
