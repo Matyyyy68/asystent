@@ -51,9 +51,10 @@
           <article>
             <img src="./media/illustrations/infrastructure/trusted-network.png" width="512" height="341" alt="Urządzenia połączone przez zaufany punkt sieciowy" loading="lazy" />
             <h3>Sygnały Windows</h3>
-            <p>Cache DNS jest próbkowany po włączeniu obserwacji. Opcjonalny monitoring TCP (domyślnie wyłączony) próbuje co 10 sekund wykrywać nowe połączenia i zapisuje wyłącznie metadane lokalnie; krótkie połączenia mogą zostać pominięte. Bez przechwytywania treści TLS, sterownika ani zmiany ustawień sieci.</p>
+            <p>Cache DNS jest próbkowany po włączeniu obserwacji, a procesy co około 1 sekundę. Opcjonalny monitoring TCP/UDP (domyślnie wyłączony) porównuje migawki Windows co około 1 sekundę: zapisuje nowe zewnętrzne połączenia TCP w stanach Established/SynSent i pojawienie się lokalnych punktów UDP, wyłącznie jako metadane. Krótkie połączenia mogą zostać pominięte; punkt UDP nie potwierdza wysłania datagramu ani zdalnego celu. Bez przechwytywania treści TLS, sterownika ani zmiany ustawień sieci.</p>
           </article>
         </div>
+        <p class="warning-note"><strong>Ograniczenia analizy URL:</strong> dla reguł `2026.10.6` niezależny test PhishVN v3.1.0 wykazał 0 wykryć na 487 oznaczonych phishingowych adresach w części testowej gold/silver (próg Moderate). To wynik konkretnego zbioru, nie miara wszystkich zagrożeń. Brak alarmu nie potwierdza bezpieczeństwa; Sentinel nie blokuje stron i nie zastępuje Defendera.</p>
         <p>Cache DNS nie pokazuje pełnych URL, procesów ani całego ruchu. DoH, VPN, połączenia po IP i krótkotrwałe wpisy mogą pozostać niewidoczne. WFP nie jest wdrożone. Narzędzie nie zastępuje Defendera.</p>
         <figure class="product-shot">
           <img src="./desktop.png" width="1164" height="761" alt="Rzeczywisty zrzut nowego klienta Sentinel AI: obserwacja wstrzymana, silnik dostępny i brak pobranego feedu" loading="lazy" />

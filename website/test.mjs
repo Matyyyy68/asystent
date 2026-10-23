@@ -13,4 +13,9 @@ for (const [, resource] of html.matchAll(/(?:src|href)="\.\/([^"]+)"/g)) {
 for (const [, illustration] of html.matchAll(/src="\.\/media\/([^"]+\.png)"/g))
   assert.ok(fs.existsSync(new URL(`../media/${illustration}`, import.meta.url)), illustration);
 assert.ok(html.includes('lang="pl"')); assert.ok(html.includes('alt="'));
+const windowsSignals = html.match(/<h3>Sygnały Windows<\/h3>\s*<p>([^<]*)<\/p>/)?.[1] ?? '';
+assert.ok(windowsSignals.includes('procesy co około 1 sekundę'), 'website must describe current process sampling cadence');
+assert.ok(windowsSignals.includes('monitoring TCP/UDP'), 'website must describe supported TCP and UDP metadata');
+assert.ok(!windowsSignals.includes('co 10 sekund'), 'website must not retain the obsolete TCP sampling cadence');
+assert.ok(html.includes('0 wykryć na 487 oznaczonych phishingowych adresach'), 'website must disclose the measured URL detection limitation');
 console.log(`PASS: release ${version}, local links, anchors, assets, language and screenshot alternative text`);
