@@ -279,6 +279,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         if (v < 22)
             await Execute(c, "BEGIN IMMEDIATE; PRAGMA user_version=22; COMMIT;", ct);
+        await Execute(c, "CREATE INDEX IF NOT EXISTS ix_event_observations_source_time ON event_observations(source,observed_at,event_row_id)", ct);
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
             await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
@@ -383,6 +384,22 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(category));
         var result = await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken, category, ruleCode);
         return result.EnterpriseQueueFull;
+    }
+
+    /// <summary>Persists a detection unless the same source reported the same signal within the requested interval.</summary>
+    public async Task<(bool Duplicate, bool EnterpriseQueueFull)> AddWithEnterpriseMetadataDeduplicatedAsync(
+        SecurityEvent item, string category, string ruleCode, TimeSpan sourceSignalWindow,
+        CancellationToken cancellationToken = default)
+    {
+        if (item.SignalHash is null) throw new ArgumentException("Trwała deduplikacja wymaga skrótu sygnału.", nameof(item));
+        if (sourceSignalWindow < TimeSpan.FromSeconds(1) || sourceSignalWindow > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(sourceSignalWindow), "Okno deduplikacji musi mieścić się w zakresie 1 s–1 h.");
+        if (category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
+            string.IsNullOrEmpty(ruleCode) || ruleCode.Length > 80 ||
+            ruleCode.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(category));
+        var result = await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken, category, ruleCode, sourceSignalWindow);
+        return (result.WasDeduplicated, result.EnterpriseQueueFull);
     }
 
     /// <summary>Returns a short-lived local correlation id for the registrable domain, storing only its SHA-256 key.</summary>
@@ -808,14 +825,16 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         await transaction.CommitAsync(ct);
     }
-    private async Task<(long EventRowId, bool EnterpriseQueueFull)> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise,
-        CancellationToken cancellationToken, string? enterpriseCategoryOverride = null, string? enterpriseRuleCodeOverride = null)
+    private async Task<(long EventRowId, bool EnterpriseQueueFull, bool WasDeduplicated)> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise,
+        CancellationToken cancellationToken, string? enterpriseCategoryOverride = null, string? enterpriseRuleCodeOverride = null,
+        TimeSpan? sameSourceSignalWindow = null)
     {
         var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(cancellationToken);
         using var transaction = c.BeginTransaction();
         long id;
         var enterpriseQueueFull = false;
+        var wasDeduplicated = false;
         // A retried event id may already be either a canonical event or a merged observation.
         using (var prior = c.CreateCommand())
         {
@@ -826,40 +845,51 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (priorId is not null) id = Convert.ToInt64(priorId, CultureInfo.InvariantCulture);
             else
             {
-                var duplicateId = await FindCrossSourceDuplicateAsync(c, transaction, item, source, cancellationToken);
-                if (duplicateId is not null)
+                var sameSourceDuplicateId = sameSourceSignalWindow is { } window
+                    ? await FindRecentSameSourceSignalAsync(c, transaction, item, source, window, cancellationToken)
+                    : null;
+                if (sameSourceDuplicateId is { } sameSourceId)
                 {
-                    using var observation = c.CreateCommand(); observation.Transaction = transaction;
-                    observation.CommandText = "INSERT INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes) VALUES($eventId,$rowId,$timestamp,$source,$evidence)";
-                    observation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
-                    observation.Parameters.AddWithValue("$rowId", duplicateId.Value);
-                    observation.Parameters.AddWithValue("$timestamp", item.Timestamp.ToUniversalTime().ToString("O"));
-                    observation.Parameters.AddWithValue("$source", source);
-                    observation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
-                    await observation.ExecuteNonQueryAsync(cancellationToken);
-                    id = duplicateId.Value;
+                    id = sameSourceId;
+                    wasDeduplicated = true;
                 }
                 else
                 {
-                    using var insert = c.CreateCommand(); insert.Transaction = transaction;
-                    insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
-                    AddEventParameters(insert, item, eventId, source);
-                    await insert.ExecuteNonQueryAsync(cancellationToken);
-                    using var get = c.CreateCommand(); get.Transaction = transaction;
-                    get.CommandText = "SELECT id FROM events WHERE event_id=$eventId";
-                    get.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
-                    var storedId = await get.ExecuteScalarAsync(cancellationToken);
-                    if (storedId is null) throw new InvalidDataException("Nie udało się odczytać zapisanego zdarzenia.");
-                    id = Convert.ToInt64(storedId, CultureInfo.InvariantCulture);
-                    using var updateObservation = c.CreateCommand(); updateObservation.Transaction = transaction;
-                    updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
-                    updateObservation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
-                    updateObservation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
-                    await updateObservation.ExecuteNonQueryAsync(cancellationToken);
+                    var duplicateId = await FindCrossSourceDuplicateAsync(c, transaction, item, source, cancellationToken);
+                    if (duplicateId is not null)
+                    {
+                        using var observation = c.CreateCommand(); observation.Transaction = transaction;
+                        observation.CommandText = "INSERT INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes) VALUES($eventId,$rowId,$timestamp,$source,$evidence)";
+                        observation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                        observation.Parameters.AddWithValue("$rowId", duplicateId.Value);
+                        observation.Parameters.AddWithValue("$timestamp", item.Timestamp.ToUniversalTime().ToString("O"));
+                        observation.Parameters.AddWithValue("$source", source);
+                        observation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+                        await observation.ExecuteNonQueryAsync(cancellationToken);
+                        id = duplicateId.Value;
+                    }
+                    else
+                    {
+                        using var insert = c.CreateCommand(); insert.Transaction = transaction;
+                        insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
+                        AddEventParameters(insert, item, eventId, source);
+                        await insert.ExecuteNonQueryAsync(cancellationToken);
+                        using var get = c.CreateCommand(); get.Transaction = transaction;
+                        get.CommandText = "SELECT id FROM events WHERE event_id=$eventId";
+                        get.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                        var storedId = await get.ExecuteScalarAsync(cancellationToken);
+                        if (storedId is null) throw new InvalidDataException("Nie udało się odczytać zapisanego zdarzenia.");
+                        id = Convert.ToInt64(storedId, CultureInfo.InvariantCulture);
+                        using var updateObservation = c.CreateCommand(); updateObservation.Transaction = transaction;
+                        updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+                        updateObservation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+                        updateObservation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                        await updateObservation.ExecuteNonQueryAsync(cancellationToken);
+                    }
                 }
             }
         }
-        if (enqueueEnterprise && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
+        if (enqueueEnterprise && !wasDeduplicated && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
         {
             using var profileRead = c.CreateCommand(); profileRead.Transaction = transaction;
             profileRead.CommandText = "SELECT json FROM installation_profile WHERE id=1";
@@ -876,7 +906,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
         }
         await transaction.CommitAsync(cancellationToken);
-        return (id, enterpriseQueueFull);
+        return (id, enterpriseQueueFull, wasDeduplicated);
     }
     private static bool HasCertEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
         string.Equals(code, "reputation.cert", StringComparison.Ordinal) ||
@@ -885,6 +915,19 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         string.Equals(code, "file.sha256.matches-local-list", StringComparison.Ordinal)) == true;
     private static bool HasUrlRuleEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
         code.StartsWith("url.", StringComparison.Ordinal)) == true;
+    private static async Task<long?> FindRecentSameSourceSignalAsync(SqliteConnection c, SqliteTransaction transaction,
+        SecurityEvent item, string source, TimeSpan window, CancellationToken ct)
+    {
+        var from = item.Timestamp.ToUniversalTime().Subtract(window).ToString("O");
+        var to = item.Timestamp.ToUniversalTime().Add(window).ToString("O");
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT e.id FROM event_observations o JOIN events e ON e.id=o.event_row_id WHERE o.source=$source AND e.signal_hash=$hash AND o.observed_at BETWEEN $from AND $to ORDER BY o.observed_at DESC LIMIT 1";
+        command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$hash", item.SignalHash!.ToUpperInvariant());
+        command.Parameters.AddWithValue("$from", from); command.Parameters.AddWithValue("$to", to);
+        var existing = await command.ExecuteScalarAsync(ct);
+        return existing is null ? null : Convert.ToInt64(existing, CultureInfo.InvariantCulture);
+    }
     private static async Task<long?> FindCrossSourceDuplicateAsync(SqliteConnection c, SqliteTransaction transaction,
         SecurityEvent item, string source, CancellationToken ct)
     {

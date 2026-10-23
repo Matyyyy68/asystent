@@ -61,6 +61,35 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(eventId, saved.EventId);
         Assert.Equal("test.retry", saved.Source);
     }
+    [Fact] public async Task PersistentSourceSignalDeduplicationSurvivesStoreReopenAndRespectsSourceHashAndWindow()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var hash = new string('A', 64);
+        var basis = new SecurityEvent(0, at, RiskLevel.High, "Domena na liście", "DNS", "Synthetic match", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "dns-cache", EvidenceCodes: ["dns.windows-cache-entry"], SignalHash: hash);
+
+        var first = await store.AddWithEnterpriseMetadataDeduplicatedAsync(basis, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        Assert.False(first.Duplicate);
+        var reopened = await Store();
+        var repeated = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        Assert.True(repeated.Duplicate);
+
+        var otherSource = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), Source = "dns-other", Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        var otherSignal = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), SignalHash = new string('B', 64), Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        var afterWindow = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(11) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+
+        Assert.False(otherSource.Duplicate);
+        Assert.False(otherSignal.Duplicate);
+        Assert.False(afterWindow.Duplicate);
+        Assert.Equal(4, await reopened.CountEventsAsync());
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis, "url", "reputation.cert", TimeSpan.Zero));
+    }
     [Fact] public async Task CERTDetectionsFromDifferentSourcesMergeAndKeepEveryObservation()
     {
         var store = await Store();

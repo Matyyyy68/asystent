@@ -165,11 +165,15 @@ async Task<object> SyncEnterpriseAsync(bool force)
         return new { paired = true, synchronized = 0, reason = enterpriseError, lastSync = lastEnterpriseSync };
     }
 }
-async Task RecordDetectionAsync(SecurityEvent item, string category, string ruleCode)
+async Task<bool> RecordDetectionAsync(SecurityEvent item, string category, string ruleCode, TimeSpan? sameSourceSignalWindow = null)
 {
-    var queueFull = await store.AddWithEnterpriseMetadataAsync(item, category, ruleCode);
+    var record = sameSourceSignalWindow is { } window
+        ? await store.AddWithEnterpriseMetadataDeduplicatedAsync(item, category, ruleCode, window)
+        : (Duplicate: false, EnterpriseQueueFull: await store.AddWithEnterpriseMetadataAsync(item, category, ruleCode));
+    var queueFull = record.EnterpriseQueueFull;
     if (queueFull)
         enterpriseError = "queue_full";
+    return !record.Duplicate;
 }
 DateTimeOffset? lastDnsRead = null;
 DateTimeOffset? lastDnsError = null;
@@ -356,14 +360,14 @@ while (await Console.In.ReadLineAsync() is { } line)
                                 if (!deduplicator.TryMark(name, dnsObservedAt)) continue;
                                 var correlationDomain = domainNames.RegistrableDomain(name) ?? DomainNames.Ascii(name);
                                 var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, dnsObservedAt);
-                                await RecordDetectionAsync(new SecurityEvent(0, dnsObservedAt, RiskLevel.High,
+                                var recorded = await RecordDetectionAsync(new SecurityEvent(0, dnsObservedAt, RiskLevel.High,
                                     "Domena na liście CERT Polska", "Cache DNS Windows", "Zaobserwowano domenę z aktualnej listy: " + name,
                                     "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New,
                                     EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                                     CorrelationId: correlationId,
                                     EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"],
-                                    SignalHash: LocalStore.CreateHostSignalHash(name)), "url", "reputation.cert");
-                                detections.Add(name!);
+                                    SignalHash: LocalStore.CreateHostSignalHash(name)), "url", "reputation.cert", TimeSpan.FromMinutes(10));
+                                if (recorded) detections.Add(name!);
                             }
                         }
                         lastDnsRead = DateTimeOffset.UtcNow; dnsState = "Odczyt cache DNS działa; bez DoH, pełnych URL i PID";
