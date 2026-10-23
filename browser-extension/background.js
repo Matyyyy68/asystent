@@ -7,7 +7,9 @@ let port = null;
 let nextId = 0;
 let hostAvailable = null;
 let integrationEnabled = true;
-chrome.storage.local.get('integrationEnabled').then(data => { integrationEnabled = data.integrationEnabled !== false; });
+const integrationSettingsReady = chrome.storage.local.get('integrationEnabled')
+  .then(data => { integrationEnabled = data.integrationEnabled !== false; })
+  .catch(() => {});
 
 function warningTargetKey(token) {
   return typeof token === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)
@@ -80,34 +82,37 @@ function request(type, url = null) {
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((event) => {
-  if (!integrationEnabled || event.frameId !== 0 || !/^https?:\/\//i.test(event.url)) return;
-  const allow = oneTimeAllow.get(event.tabId);
-  if (allow) {
-    oneTimeAllow.delete(event.tabId);
-    if (allow.url === event.url && allow.expiresAt >= Date.now()) {
-      latestByTab.set(event.tabId, event.url);
-      return;
+  void (async () => {
+    await integrationSettingsReady;
+    if (!integrationEnabled || event.frameId !== 0 || !/^https?:\/\//i.test(event.url)) return;
+    const allow = oneTimeAllow.get(event.tabId);
+    if (allow) {
+      oneTimeAllow.delete(event.tabId);
+      if (allow.url === event.url && allow.expiresAt >= Date.now()) {
+        latestByTab.set(event.tabId, event.url);
+        return;
+      }
     }
-  }
-  latestByTab.set(event.tabId, event.url);
-  request("analyze", event.url).then(async (result) => {
-    if (!result || !result.available || latestByTab.get(event.tabId) !== event.url || !result.shouldWarn) return;
-    const token = crypto.randomUUID();
-    const target = {
-      tabId: event.tabId,
-      url: event.url,
-      risk: result.risk,
-      indicators: result.indicators ?? [],
-      rulesVersion: result.rulesVersion,
-      expiresAt: Date.now() + 10 * 60 * 1000
-    };
-    try {
-      await chrome.storage.session.set({ [`${WARNING_TARGET_PREFIX}${token}`]: target });
-      await chrome.tabs.update(event.tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}`) });
-    } catch {
-      await removeWarningTarget(token).catch(() => {});
-    }
-  });
+    latestByTab.set(event.tabId, event.url);
+    request("analyze", event.url).then(async (result) => {
+      if (!result || !result.available || latestByTab.get(event.tabId) !== event.url || !result.shouldWarn) return;
+      const token = crypto.randomUUID();
+      const target = {
+        tabId: event.tabId,
+        url: event.url,
+        risk: result.risk,
+        indicators: result.indicators ?? [],
+        rulesVersion: result.rulesVersion,
+        expiresAt: Date.now() + 10 * 60 * 1000
+      };
+      try {
+        await chrome.storage.session.set({ [`${WARNING_TARGET_PREFIX}${token}`]: target });
+        await chrome.tabs.update(event.tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}`) });
+      } catch {
+        await removeWarningTarget(token).catch(() => {});
+      }
+    });
+  })();
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -124,11 +129,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('warning.html')].some(url => sender.url?.startsWith(url))) return false;
   if (message?.type === 'toggle') {
-    integrationEnabled = message.enabled === true;
-    chrome.storage.local.set({ integrationEnabled });
-    request('status');
-    sendResponse({ enabled: integrationEnabled });
-    return false;
+    integrationSettingsReady.then(async () => {
+      integrationEnabled = message.enabled === true;
+      await chrome.storage.local.set({ integrationEnabled });
+      request('status');
+      sendResponse({ enabled: integrationEnabled });
+    }).catch(() => sendResponse({ enabled: integrationEnabled }));
+    return true;
   }
   if (message?.type === "details" && typeof message.token === "string") {
     getWarningTarget(message.token).then((target) =>

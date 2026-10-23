@@ -8,7 +8,7 @@ const { webcrypto } = require('node:crypto');
 const backgroundPath = path.resolve(__dirname, '../../browser-extension/background.js');
 const backgroundSource = readFileSync(backgroundPath, 'utf8');
 
-function createWorker(sessionStorage, shared) {
+function createWorker(sessionStorage, shared, { integrationSettings = Promise.resolve({ integrationEnabled: true }) } = {}) {
   const listeners = {};
   const portListeners = {};
   const port = {
@@ -24,7 +24,7 @@ function createWorker(sessionStorage, shared) {
       onMessage: { addListener(listener) { listeners.message = listener; } }
     },
     storage: {
-      local: { get: async () => ({ integrationEnabled: true }), set: async () => {} },
+      local: { get: () => integrationSettings, set: async () => {} },
       session: {
         get: async (keys) => {
           if (keys === null) return Object.fromEntries(sessionStorage);
@@ -64,12 +64,28 @@ function createWorker(sessionStorage, shared) {
   };
 }
 
+test('navigation waits for saved integration setting before contacting the native host', async () => {
+  let resolveSettings;
+  const integrationSettings = new Promise((resolve) => { resolveSettings = resolve; });
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared, { integrationSettings });
+
+  worker.navigate({ tabId: 3, frameId: 0, url: 'https://paypal.com.evil.test/login' });
+  resolveSettings({ integrationEnabled: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 0,
+    'a navigation arriving during service-worker startup must respect the persisted disabled setting');
+  assert.equal(shared.tabUpdates.length, 0);
+});
+
 test('warning details and actions survive a service worker restart within the browser session', async () => {
   const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
   const firstWorker = createWorker(sessionStorage, shared);
   const targetUrl = 'https://paypal.com.evil.test/login?account=private';
   firstWorker.navigate({ tabId: 7, frameId: 0, url: targetUrl });
+  await new Promise((resolve) => setImmediate(resolve));
 
   const request = shared.nativeRequests[0];
   assert.equal(request.type, 'analyze');
