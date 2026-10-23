@@ -79,6 +79,19 @@ test('navigation waits for saved integration setting before contacting the nativ
   assert.equal(shared.tabUpdates.length, 0);
 });
 
+test('navigation stays local when the saved integration setting cannot be read', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared, {
+    integrationSettings: Promise.reject(new Error('storage unavailable'))
+  });
+
+  worker.navigate({ tabId: 4, frameId: 0, url: 'https://paypal.com.evil.test/login' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 0,
+    'a storage read failure must not enable browser analysis or contact the native host');
+});
+
 test('warning details and actions survive a service worker restart within the browser session', async () => {
   const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };

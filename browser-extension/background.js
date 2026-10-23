@@ -6,7 +6,7 @@ const oneTimeAllow = new Map();
 let port = null;
 let nextId = 0;
 let hostAvailable = null;
-let integrationEnabled = true;
+let integrationEnabled = false;
 const integrationSettingsReady = chrome.storage.local.get('integrationEnabled')
   .then(data => { integrationEnabled = data.integrationEnabled !== false; })
   .catch(() => {});
