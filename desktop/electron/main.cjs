@@ -81,11 +81,18 @@ app.whenReady().then(() => {
         const select = document.querySelector('select');
         if (!select) throw new Error('Brak kreatora pierwszego uruchomienia');
         select.value = 'resources'; select.dispatchEvent(new Event('change', { bubbles: true }));
-        [...document.querySelectorAll('button')].find(button => button.textContent.includes('Zastosuj i sprawdź'))?.click();
+        const button = [...document.querySelectorAll('button')].find(button => button.textContent.includes('Zastosuj i sprawdź'));
+        if (!button || button.disabled) throw new Error('Przycisk konfiguracji pierwszego uruchomienia jest niedostępny');
+        button.click();
       })()`);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const configured = await win.webContents.executeJavaScript('window.sentinel.call("status")');
-      if (configured.settings.dnsPollIntervalSeconds !== 60 || configured.settings.paused) throw new Error('Kreator nie zapisał priorytetu');
+      let configured;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        configured = await win.webContents.executeJavaScript('window.sentinel.call("status")');
+        if (configured.settings.dnsPollIntervalSeconds === 60 && !configured.settings.paused) break;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      if (configured.settings.dnsPollIntervalSeconds !== 60 || configured.settings.paused)
+        throw new Error(`Kreator nie zapisał priorytetu (DNS=${configured.settings.dnsPollIntervalSeconds}, paused=${configured.settings.paused})`);
       const assessment = await win.webContents.executeJavaScript('window.sentinel.call("analyze", {text:"Pilnie zaloguj się i podaj hasło",url:"https://paypal.com.evil.test/login"})');
       if (!['High','Critical'].includes(assessment.risk)) throw new Error('Nieprawidłowa ocena');
       await new Promise(resolve => setTimeout(resolve, 1500));
