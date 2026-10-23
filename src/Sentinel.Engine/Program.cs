@@ -214,18 +214,19 @@ async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToke
     foreach (var record in records)
     {
         if (record.QueryName is null || record.Timestamp is not { } observedAt ||
-            !reputation.FindMatches([record.QueryName], observedAt).Any() || !deduplicator.TryMark(record.QueryName, observedAt)) continue;
+            !reputation.FindMatches([record.QueryName], observedAt).Any()) continue;
         var correlationDomain = domainNames.RegistrableDomain(record.QueryName) ?? record.QueryName;
         var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt, ct: cancellationToken);
         var eventId = WindowsDnsOperationalEventParser.CreateEventId(record);
-        await RecordDetectionAsync(new SecurityEvent(0, observedAt, RiskLevel.High,
+        var recorded = await RecordDetectionAsync(new SecurityEvent(0, observedAt, RiskLevel.High,
             "Domena na liście CERT Polska", "Windows DNS Client Operational", "Zaobserwowano zapytanie o domenę z aktualnej listy: " + record.QueryName,
             "Ostrzeżenie, bez blokowania. Zdarzenie nie wskazuje procesu; odpowiedź DNS nie jest przechowywana.", EventStatus.New,
             EventId: eventId, Source: "dns-operational", RuleVersion: ThreatAnalysisEngine.RulesVersion,
             CorrelationId: correlationId,
             EvidenceCodes: ["dns.windows-operational-query", "reputation.cert.current-feed-match"],
-            SignalHash: LocalStore.CreateHostSignalHash(record.QueryName)), "url", "reputation.cert");
-        matches.Add(record.QueryName);
+            SignalHash: LocalStore.CreateHostSignalHash(record.QueryName)), "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        // Keep source observations in history even when another DNS source already consumed the notification window.
+        if (recorded && deduplicator.TryMark(record.QueryName, observedAt)) matches.Add(record.QueryName);
     }
     if (records.Count > 0)
         await store.SetDnsOperationalRecordCursorAsync(records[^1].RecordId, cancellationToken);
@@ -357,7 +358,6 @@ while (await Console.In.ReadLineAsync() is { } line)
                             foreach (var name in reputation.FindMatches(names.OfType<string>(), DateTimeOffset.UtcNow))
                             {
                                 var dnsObservedAt = DateTimeOffset.UtcNow;
-                                if (!deduplicator.TryMark(name, dnsObservedAt)) continue;
                                 var correlationDomain = domainNames.RegistrableDomain(name) ?? DomainNames.Ascii(name);
                                 var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, dnsObservedAt);
                                 var recorded = await RecordDetectionAsync(new SecurityEvent(0, dnsObservedAt, RiskLevel.High,
@@ -367,7 +367,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                                     CorrelationId: correlationId,
                                     EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"],
                                     SignalHash: LocalStore.CreateHostSignalHash(name)), "url", "reputation.cert", TimeSpan.FromMinutes(10));
-                                if (recorded) detections.Add(name!);
+                                // The shared in-memory limiter controls notifications, not which sources are persisted.
+                                if (recorded && deduplicator.TryMark(name, dnsObservedAt)) detections.Add(name!);
                             }
                         }
                         lastDnsRead = DateTimeOffset.UtcNow; dnsState = "Odczyt cache DNS działa; bez DoH, pełnych URL i PID";

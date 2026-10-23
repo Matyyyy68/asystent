@@ -76,6 +76,10 @@ public sealed class StoreTests : IDisposable
             basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
         Assert.True(repeated.Duplicate);
 
+        var operational = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), Source = "dns-operational", Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        var repeatedOperational = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), Source = "dns-operational", Timestamp = at.AddMinutes(6) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
         var otherSource = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis with { EventId = Guid.NewGuid(), Source = "dns-other", Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
         var otherSignal = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
@@ -83,10 +87,12 @@ public sealed class StoreTests : IDisposable
         var afterWindow = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(11) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
 
+        Assert.False(operational.Duplicate);
+        Assert.True(repeatedOperational.Duplicate);
         Assert.False(otherSource.Duplicate);
         Assert.False(otherSignal.Duplicate);
         Assert.False(afterWindow.Duplicate);
-        Assert.Equal(4, await reopened.CountEventsAsync());
+        Assert.Equal(5, await reopened.CountEventsAsync());
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis, "url", "reputation.cert", TimeSpan.Zero));
     }
