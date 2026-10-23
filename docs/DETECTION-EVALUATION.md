@@ -4,6 +4,23 @@
 **Wersja reguł:** `2026.10.6`
 **Zakres:** wyłącznie kolumny `URL` i `label`; żaden adres nie został otwarty, rozwiązany przez DNS ani wysłany do usługi.
 
+## Dodatkowy test domenowy URL-Phish v1 (2026-10-23)
+
+Pobrano `Dataset.csv` z oficjalnego [Mendeley Data URL-Phish v1](https://data.mendeley.com/datasets/65z9twcx3r/1), autorzy Dam Minh Linh i Tran Cong Hung, DOI `10.17632/65z9twcx3r.1`, licencja [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Artykuł opisuje 100 000 URL-i benign pochodzących z ROR i 11 660 phishingowych z PhishTank z okresu 2024-11–2025-09, a opublikowany podział 75/10/15 jest losowy. Ten test nie używa tamtego podziału ani przygotowanych cech: bierze wyłącznie surowe `url` i `label`, po czym tworzy deterministyczny podział 70/30 po domenie rejestrowalnej, bez przenoszenia domen między grupami.
+
+Snapshot CSV: 15 149 338 B, SHA-256 `D68B3CD0648DCF9C775347416AD1A8995E8A025921FBE3871CA6158D4DB3C3A1`. Plik pozostaje w katalogu tymczasowym i nie jest częścią repozytorium. Powtarzalne odtworzenie wymaga pobrania CSV z oficjalnej strony, zbudowania Core i uruchomienia:
+
+```powershell
+dotnet build src/Sentinel.Core/Sentinel.Core.csproj -c Release
+pwsh -NoProfile -File scripts/evaluate-url-phish.ps1 -CsvPath C:\ścieżka\Dataset.csv
+```
+
+Przy regułach `2026.10.8`, progu `Moderate`, bez feedu i bez otwierania URL-i, ewaluator dwukrotnie zwrócił identyczne wyniki. `DomainTrain`: TP=491, FP=72, TN=69 698, FN=10 380, recall=4,52%, FPR=0,1032%. `DomainHoldout`: TP=1 395, FP=50, TN=30 180, FN=4 334, recall=24,35%, FPR=0,1654%, precision=96,54%. W żadnej próbce nie wykryto niepoprawnego URL-a; żadna domena rejestrowalna nie przecina obu grup.
+
+To pomiar diagnostyczny, nie walidacja produkcyjna ani ślepy test: źródła i etykiety różnią się od PhishVN, część benign pochodzi z wiarygodnych instytucji, a sam wynik holdoutu jest już obejrzany. Nie zmieniano reguł po pomiarze. Wynik nie usuwa krytycznej luki F03 ani niskiego recall na PhishVN; nie należy go uogólniać na rzeczywisty ruch ani interpretować precision jako prawdopodobieństwa bezpieczeństwa.
+
+Źródła: [rekord zbioru i licencja](https://data.mendeley.com/datasets/65z9twcx3r/1), [artykuł opisujący dane i losowy split](https://doi.org/10.1016/j.dib.2025.112162).
+
 **Zmiany po pomiarze:** wersja `2026.10.7` dodaje analizę do 10 surowych adresów HTTP/HTTPS osadzonych w treści wiadomości, a `2026.10.8` sprawdza te linki oraz jawny URL względem świeżej, lokalnie zaimportowanej listy CERT Polska. Testy benchmarkowe tworzą `ThreatAnalysisEngine` bez feedu, więc wyniki poniżej mierzą wyłącznie reguły URL i nie obejmują dopasowań do lokalnej listy. Metryki nadal dotyczą heurystyk URL; nie są pomiarem nowej kontroli reputacyjnej. F03 pozostaje częściowe.
 
 ## Zestaw i odtwarzanie
