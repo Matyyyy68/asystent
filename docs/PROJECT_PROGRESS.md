@@ -1,5 +1,9 @@
 # Postęp projektu Sentinel AI
 
+**Najnowsza walidacja F03 (2026-10-23):** odtwarzalny screening 12 dodatkowych marek na oficjalnych checksumowanych PhishVN train/validation nie wykrył phishingu (train TP=0/2 076; validation TP=0/24; FP=0), więc reguł nie zmieniono. Test split jest blokowany. Ewaluator, guard i szczegóły są w `scripts/evaluate-phishvn-brand-candidates.ps1` oraz `docs/DETECTION-EVALUATION.md`.
+
+**Bramka po dodaniu guardu F03 (2026-10-23):** `scripts/build-user.ps1` PASS bez pakowania instalatora: .NET 340/340 bez pominięć, wszystkie ewaluatory i plany 13/13, Engine IPC/DNS/TCP/UDP, Electron 16/16, `npm audit` 0 i produkcyjny UI build. Nie wygenerowano nowego instalatora ani wydania.
+
 **Najnowsza zmiana F02 (2026-10-23):** ograniczono aktualizacje UI podczas lokalnego rozpakowywania do jednej na 200 ms. Autotest symuluje 1000 aktualizacji w 1 s i potwierdza limit oraz natychmiastowe pokazanie końcowego 100%. EXE zawiera aplikację; pobieranie nie jest wymagane. `installer/build-installer.ps1`, self-test i integracyjny install/verify/uninstall PASS; po teście nie pozostały wpisy HKCU, pliki, autostart ani skróty. Artefakt v0.15.38 ma SHA-256 `FBF4C4BB9305DFAF06673AEEA594915C038E3AF93E07B2E3FC4865D1BF5E1D48`. Ręczny test GUI tej poprawki pozostaje niewykonany.
 
 **Aktualizacja:** 2026-10-23

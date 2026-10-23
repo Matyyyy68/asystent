@@ -19,6 +19,8 @@ try {
   if ($LASTEXITCODE) { throw 'PhishVN train/validation brand-token diagnostic guard failed' }
   pwsh -NoProfile -File scripts/test-evaluate-phishvn-feature-candidates.ps1
   if ($LASTEXITCODE) { throw 'PhishVN URL feature candidate diagnostic guard failed' }
+  pwsh -NoProfile -File scripts/test-evaluate-phishvn-brand-candidates.ps1
+  if ($LASTEXITCODE) { throw 'PhishVN brand candidate diagnostic guard failed' }
   pwsh -NoProfile -File scripts/test-evaluate-phishvn-cert-feed.ps1
   if ($LASTEXITCODE) { throw 'PhishVN CERT feed evaluation guard failed' }
   pwsh -NoProfile -File scripts/test-evaluate-url-phish-feature-candidates.ps1
