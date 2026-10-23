@@ -24,7 +24,7 @@ internal static class Program
     {
         if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase)) return IntegrationTest();
         if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase)) return SelfTest();
-        if (args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase))
+        if (IsUninstallInvocation(args, Environment.ProcessPath))
         {
             ApplicationConfiguration.Initialize();
             if (MessageBox.Show($"Czy na pewno odinstalować Sentinel AI?\n\nTwoje lokalne dane i historia pozostaną na tym komputerze.", Product, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return 0;
@@ -35,6 +35,10 @@ internal static class Program
         Application.Run(new SetupWizard());
         return 0;
     }
+
+    private static bool IsUninstallInvocation(string[] args, string? executablePath) =>
+        args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase)
+        || string.Equals(Path.GetFileName(executablePath), "Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase);
 
     private static int IntegrationTest()
     {
@@ -169,6 +173,12 @@ internal static class Program
         var data = Path.Combine(localAppData, "SentinelAI-Setup-SelfTest-" + testId);
         try
         {
+            if (!IsUninstallInvocation(new[] { "--uninstall" }, Path.Combine(root, "Sentinel.AI.Setup.exe"))
+                || !IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Uninstall Sentinel AI.exe"))
+                || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel AI.exe"))
+                || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel.AI.Setup.exe")))
+                throw new InvalidDataException("Uruchomienie pliku deinstalatora bez parametru nie rozpoznaje trybu odinstalowania.");
+
             long previousProgressTick = long.MinValue;
             var progressUpdates = 0;
             for (var tick = 0; tick < 1_000; tick++)
@@ -340,7 +350,7 @@ internal static class Program
             VerifySmokeDatabase(databaseDirectory, "sentinel.db");
             VerifySmokeDatabase(databaseDirectory, "knowledge.db");
 
-            Log("SELF_TEST_SUCCESS progressThrottle=true payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
+            Log("SELF_TEST_SUCCESS uninstallInvocation=true progressThrottle=true payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
             return 0;
         }
         catch (Exception ex)
