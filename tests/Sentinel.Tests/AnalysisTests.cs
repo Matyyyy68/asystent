@@ -122,7 +122,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.7", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
@@ -132,7 +132,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", url));
         Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
         Assert.True(result.Risk >= RiskLevel.Moderate);
-        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.7", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -153,7 +153,7 @@ public sealed class AnalysisTests
 
         Assert.Contains(result.Indicators, item => item.Id == "url.structure_combination");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.7", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -197,7 +197,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.6", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.7", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]
@@ -218,9 +218,30 @@ public sealed class AnalysisTests
     {
         var r=Engine().Analyze(Input("Zwykła notatka")); Assert.Equal(RiskLevel.Information,r.Risk); Assert.Contains("nie jest potwierdzenie",r.Explanation); Assert.NotEmpty(r.Uncertainties);
     }
-    [Fact] public void UrlInTextIsNotAssumedToBeDestination()
+    [Fact] public void EmbeddedUrlIsAnalyzedWithoutBeingAssumedToBeTheActualDestination()
     {
-        var r=Engine().Analyze(Input("Opis https://paypal.com.evil.test")); Assert.DoesNotContain(r.Indicators,i=>i.Id.StartsWith("url.",StringComparison.Ordinal)); Assert.Contains(r.Uncertainties,u=>u.Contains("Nie ustalono"));
+        var result = Engine().Analyze(Input("Opis https://paypal.com.evil.test"));
+
+        Assert.Contains(result.Indicators, item => item.Id == "url.brand");
+        Assert.Contains(result.Uncertainties, item => item.Contains("Nie ustalono wiarygodnego adresu docelowego"));
+        Assert.Contains(result.Uncertainties, item => item.Contains("faktyczny cel kliknięcia nie został potwierdzony"));
+        Assert.DoesNotContain("paypal.com.evil.test", result.Explanation);
+    }
+    [Fact]
+    public void OrdinaryEmbeddedUrlDoesNotCreateThreatSignal()
+    {
+        var result = Engine().Analyze(Input("Dokumentacja jest dostępna pod https://example.com/guide."));
+
+        Assert.Empty(result.Indicators);
+        Assert.Contains(result.Uncertainties, item => item.Contains("Adresy HTTP/HTTPS zapisane w treści"));
+    }
+    [Fact]
+    public void EmbeddedUrlAnalysisIsBoundedAndReportsOmittedLinks()
+    {
+        var links = string.Join(' ', Enumerable.Range(1, 12).Select(index => $"https://example{index}.test/guide"));
+        var result = Engine().Analyze(Input(links));
+
+        Assert.Contains(result.Uncertainties, item => item.Contains("najwyżej 10 różnych adresów"));
     }
     [Fact] public void TemporalContextOnlyAppliesToSameWindow()
     {

@@ -4,6 +4,8 @@
 **Wersja reguł:** `2026.10.6`
 **Zakres:** wyłącznie kolumny `URL` i `label`; żaden adres nie został otwarty, rozwiązany przez DNS ani wysłany do usługi.
 
+**Zmiana po pomiarze:** wersja `2026.10.7` dodaje analizę do 10 surowych adresów HTTP/HTTPS osadzonych w treści wiadomości. Klasyfikator URL-only oraz jego próg nie uległy zmianie; powyższe metryki dotyczą wersji `2026.10.6` i nie są dowodem skuteczności nowej obsługi tekstu. F03 pozostaje częściowe.
+
 ## Zestaw i odtwarzanie
 
 Użyto [PhiUSIIL Phishing URL (Website) z UCI](https://archive.ics.uci.edu/dataset/967/phiusiil%2Bphishing%2Burl%2Bdataset), autorzy Arvind Prasad i Shalini Chandra, 2024, DOI [10.1016/j.cose.2023.103545](https://doi.org/10.1016/j.cose.2023.103545). UCI opisuje 235 795 rekordów: 100 945 phishingowych (`label=0`) i 134 850 legalnych (`label=1`). Zbiór ma licencję [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

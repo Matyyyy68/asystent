@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using Sentinel.Core.Context;
 
 namespace Sentinel.Core.Analysis;
@@ -7,7 +8,10 @@ namespace Sentinel.Core.Analysis;
 /// <summary>Deterministic rules; untrusted content cannot invoke tools or alter the rules.</summary>
 public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
 {
-    public const string RulesVersion = "2026.10.6";
+    public const string RulesVersion = "2026.10.7";
+    private const int MaximumEmbeddedUrls = 10;
+    private static readonly Regex EmbeddedHttpUrl = new(
+        @"\bhttps?://[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private readonly object gate = new();
     private readonly Dictionary<string, (DateTimeOffset Seen, DateTimeOffset? UrgencyAt)> sessions = new(StringComparer.Ordinal);
     public ThreatAssessment Analyze(AnalysisContext context)
@@ -47,6 +51,14 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         if (Has("uruchom plik", "zainstaluj program", "pobierz i uruchom", "run this file", "install this application", ".exe", ".ps1", ".scr"))
             Add("text.download", "Treść zachęca do uruchomienia pliku lub instalacji programu.", 2, ThreatCategory.UnsafeExecution);
         if (context.Navigation is { } navigation) indicators.AddRange(urls.Compare(navigation));
+        var embeddedUrls = EmbeddedHttpUrl.Matches(context.Text)
+            .Select(match => TrimUrlBoundaryPunctuation(match.Value))
+            .Where(candidate => candidate.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaximumEmbeddedUrls + 1)
+            .ToArray();
+        foreach (var embeddedUrl in embeddedUrls.Take(MaximumEmbeddedUrls))
+            indicators.AddRange(urls.Analyze(embeddedUrl).Indicators);
         bool priorUrgency = false;
         if (context.CorrelationKey is { Length: > 0 and <= 200 } key)
         {
@@ -68,6 +80,10 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         if (indicators.Any(i => i.Id == "text.payment") && !indicators.Any(i => i.Id == "text.credentials") && !indicators.Any(i => i.Weight >= 4)) category = ThreatCategory.PaymentFraud;
         if (indicators.Any(i => i.Id == "text.credentials") && indicators.Any(i => i.Id.StartsWith("url.", StringComparison.Ordinal) && i.Weight >= 3)) category = ThreatCategory.CredentialPhishing;
         var uncertainty = new List<string> { "Reguły nie potwierdzają intencji nadawcy ani bezpieczeństwa strony. Brak sygnałów nie oznacza bezpieczeństwa." };
+        if (embeddedUrls.Length > 0)
+            uncertainty.Add("Adresy HTTP/HTTPS zapisane w treści przeanalizowano lokalnie; faktyczny cel kliknięcia nie został potwierdzony.");
+        if (embeddedUrls.Length > MaximumEmbeddedUrls)
+            uncertainty.Add($"Przeanalizowano najwyżej {MaximumEmbeddedUrls} różnych adresów z treści; pozostałe pominięto.");
         if (context.Navigation is null) uncertainty.Add("Nie ustalono wiarygodnego adresu docelowego ani przekierowań; UI Automation nie potwierdza nawigacji.");
         else if (!urls.Analyze(context.Navigation.Target).IsValid) uncertainty.Add("Podany adres nie jest poprawnym adresem HTTP/HTTPS.");
         if (context.Navigation?.DisplayedUrl is { } displayed && !urls.Analyze(displayed).IsValid)
@@ -80,6 +96,19 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         var explanation = indicators.Count == 0 ? "Nie wykryto sygnałów obsługiwanych przez reguły. To nie jest potwierdzenie bezpieczeństwa." :
             string.Join(" ", indicators.Select(i => i.Description)) + " Możliwe konsekwencje obejmują utratę danych, pieniędzy lub kontroli nad urządzeniem.";
         return new(category, risk, indicators, uncertainty, recommendations, explanation);
+    }
+    private static string TrimUrlBoundaryPunctuation(string value)
+    {
+        var end = value.Length;
+        while (end > 0 && value[end - 1] is '.' or ',' or '!' or '?' or ';' or ':') end--;
+        while (end > 0 && value[end - 1] is ')' or ']' or '}')
+        {
+            var closing = value[end - 1];
+            var opening = closing switch { ')' => '(', ']' => '[', _ => '{' };
+            if (value.AsSpan(0, end).Count(closing) <= value.AsSpan(0, end).Count(opening)) break;
+            end--;
+        }
+        return value[..end];
     }
     private static string Fold(string value)
     {

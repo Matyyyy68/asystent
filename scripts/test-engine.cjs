@@ -232,10 +232,13 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     await call('clearHistory');
   }
   assert.equal((await call('history')).result.length, 0);
-  const result = await call('analyze', { text: 'Pilnie zaloguj się i podaj hasło', url: 'https://paypal.com.evil.test/login' });
+  const embeddedPhishingUrl = 'https://paypal.com.evil.test/login';
+  const result = await call('analyze', { text: `Pilnie zaloguj się i podaj hasło: ${embeddedPhishingUrl}`, url: 'https://example.com' });
   assert.equal(result.ok, true); assert.ok(['High','Critical'].includes(result.result.risk));
+  assert.ok(result.result.indicators.some(indicator => indicator.id === 'url.brand'), 'embedded suspicious URL must contribute rule evidence');
+  assert.ok(result.result.uncertainties.some(item => item.includes('faktyczny cel kliknięcia nie został potwierdzony')));
   const history = (await call('history')).result; assert.equal(history.length, 1);
-  assert.ok(!JSON.stringify(history).includes('https://paypal.com.evil.test/login'));
+  assert.ok(!JSON.stringify(history).includes(embeddedPhishingUrl));
   assert.equal(history[0].schemaVersion, 1); assert.equal(history[0].source, 'manual-analysis');
   assert.ok(history[0].correlationId, 'manual URL warning should receive a short-lived domain correlation id');
   assert.equal((await call('eventStatus', { eventId: history[0].id, status: 'FalsePositive' })).ok, true);
@@ -246,7 +249,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const exportResult = await call('historyExport', { path: historyExportPath }); assert.equal(exportResult.ok, true, exportResult.error);
   const exportedHistory = readFileSync(historyExportPath, 'utf8');
   assert.ok(exportedHistory.includes(history[0].id));
-  assert.ok(!exportedHistory.includes('https://paypal.com.evil.test/login'));
+  assert.ok(!exportedHistory.includes(embeddedPhishingUrl));
   assert.ok(!exportedHistory.includes('Pilnie zaloguj się i podaj hasło'));
   assert.ok(!exportedHistory.includes('dont-send-me'));
   const historyCsvPath = path.join(backups, 'history.csv');
