@@ -1,5 +1,7 @@
 # Audyt luk i plan realizacji Sentinel AI
 
+**F03 — odtworzenie oficjalnego baseline'u (2026-10-23):** ponownie pobrano PhishVN v4 do katalogu tymczasowego (5 813 309 B; SHA-256 `308351E9D0C0FCA13A81F2F63524A7DEE08CCBA6C775848D125B3DA5525D0AB5`). Sumy train i validation zgadzają się z oficjalnym `MANIFEST.txt`; test nie był wyodrębniany. Reguły `2026.10.9` dały ponownie train TP=0/FP=3 oraz validation TP=0/FP=0. F03 pozostaje częściowe.
+
 **F02 — częściowy test GUI aktualnego instalatora (2026-10-23):** artefakt v0.15.38 o SHA-256 `D2416104E1D35503352A12D2F711AE15E192C88A8711D03574953E3C2132D518` zainstalował i zweryfikował aplikację w `.SentinelAI-GUI-Test-20261023`. Przed instalacją potwierdzono brak autostartu, skrótów i startu aplikacji po zakończeniu. Pełny GUI uninstall nie został ukończony: Computer Use odmówił uruchomienia skopiowanego deinstalatora, a Ustawienia Windows nie udostępniły okna. Katalog testowy pozostał; istniejący folder Sentinel AI nie był modyfikowany. Nie uznajemy F02 za w pełni zweryfikowane.
 
 **F03 — aktualizacja źródła PhishVN (2026-10-23):** oficjalna v4 (v3.1.0) jest dokumentacyjną aktualizacją danych v3, więc istniejące checksumy i pomiary train/validation pozostają aktualne; nie jest to nowy holdout. Uzupełniony audyt etykiet 200 próbek wykrył szacowane 12,1% błędów w pozytywach (95% CI 7,1–20,0%; głównie bronze) i 4,0% w benign. Wyniki gold/silver traktujemy jako lepszy, lecz nie doskonały podzbiór. Szczegóły i źródła pierwotne są w [DETECTION-EVALUATION.md](DETECTION-EVALUATION.md).

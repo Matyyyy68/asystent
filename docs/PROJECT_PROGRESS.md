@@ -2,6 +2,8 @@
 
 **F03 — stan aktualnego źródła (2026-10-23):** oficjalna PhishVN v4 (v3.1.0) nie zmienia plików danych, ale dołącza ukończony audyt etykiet: 12,1% szacowanego szumu w pozytywach (95% CI 7,1–20,0%, głównie bronze) i 4,0% w benign. Dotychczasowe checksums train/validation pozostają aktualne; gold/silver to filtr wiarygodności, nie gwarancja bezbłędnych etykiet. Pełny opis: `docs/DETECTION-EVALUATION.md`.
 
+**F03 — niezależne odtworzenie wejściowych sum (2026-10-23):** oficjalne PhishVN v4 pobrano ponownie do katalogu tymczasowego. SHA-256 archiwum `308351E9D0C0FCA13A81F2F63524A7DEE08CCBA6C775848D125B3DA5525D0AB5`; train i validation zgadzają się z `MANIFEST.txt`, baseline reguł `2026.10.9` odtworzono identycznie. Test split nie był wyodrębniany. Nie zmieniono reguł; F03 pozostaje krytyczną luką.
+
 **Najnowsza walidacja F03 (2026-10-23):** odtwarzalny screening 12 dodatkowych marek na oficjalnych checksumowanych PhishVN train/validation nie wykrył phishingu (train TP=0/2 076; validation TP=0/24; FP=0), więc reguł nie zmieniono. Test split jest blokowany. Ewaluator, guard i szczegóły są w `scripts/evaluate-phishvn-brand-candidates.ps1` oraz `docs/DETECTION-EVALUATION.md`.
 
 **Bramka po dodaniu guardu F03 (2026-10-23):** `scripts/build-user.ps1` PASS bez pakowania instalatora: .NET 340/340 bez pominięć, wszystkie ewaluatory i plany 13/13, Engine IPC/DNS/TCP/UDP, Electron 16/16, `npm audit` 0 i produkcyjny UI build. Nie wygenerowano nowego instalatora ani wydania.
