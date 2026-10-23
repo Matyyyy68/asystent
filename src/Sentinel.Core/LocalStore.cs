@@ -373,6 +373,17 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
     public async Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) =>
         (await AddCoreAsync(item, enqueueEnterprise: false, cancellationToken)).EventRowId;
+    /// <summary>Persists a local-only event unless its source already reported the same signal in the requested interval.</summary>
+    public async Task<bool> AddLocalOnlyDeduplicatedAsync(SecurityEvent item, TimeSpan sourceSignalWindow,
+        CancellationToken cancellationToken = default)
+    {
+        if (item.SignalHash is null || item.SignalHash.Length != 64 || item.SignalHash.Any(character => !Uri.IsHexDigit(character)))
+            throw new ArgumentException("Trwała deduplikacja wymaga 64-znakowego skrótu sygnału.", nameof(item));
+        if (sourceSignalWindow < TimeSpan.FromSeconds(1) || sourceSignalWindow > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(sourceSignalWindow), "Okno deduplikacji musi mieścić się w zakresie 1 s–1 h.");
+        var result = await AddCoreAsync(item, enqueueEnterprise: false, cancellationToken, sameSourceSignalWindow: sourceSignalWindow);
+        return !result.WasDeduplicated;
+    }
     /// <summary>Atomically persists a detection and its explicitly categorized Enterprise outbox entry when sharing is enabled.</summary>
     /// <returns>True when Enterprise sharing is enabled but the bounded outbox is full; the local detection remains saved.</returns>
     public async Task<bool> AddWithEnterpriseMetadataAsync(SecurityEvent item, string category, string ruleCode,

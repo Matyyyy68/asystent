@@ -5,7 +5,6 @@ namespace Sentinel.UrlHost;
 
 public sealed class BrowserHistoryRecorder
 {
-    private readonly NotificationDeduplicator deduplicator = new(TimeSpan.FromMinutes(10), 512);
     private readonly string pointer;
 
     public BrowserHistoryRecorder(string? pointerPath = null) => pointer = pointerPath ?? Path.Combine(
@@ -13,15 +12,13 @@ public sealed class BrowserHistoryRecorder
 
     public async Task<bool> RecordAsync(BrowserResponse result, CancellationToken cancellationToken = default)
     {
-        if (!result.ShouldWarn || result.HistoryKey is not { Length: 64 } key) return false;
+        if (!result.ShouldWarn || result.HistoryKey is not { Length: 64 }) return false;
 
         if (!File.Exists(pointer)) return false;
         var directory = (await File.ReadAllTextAsync(pointer, cancellationToken)).Trim();
         if (directory.Length is 0 or > 4096 || directory.StartsWith('\\') || !Path.IsPathFullyQualified(directory)) return false;
         var database = Path.Combine(directory, "sentinel.db");
         if (!File.Exists(database)) return false;
-        if (!deduplicator.TryMark(key, DateTimeOffset.UtcNow)) return false;
-
         var store = new LocalStore(directory);
         await store.InitializeAsync(cancellationToken);
         var observedAt = DateTimeOffset.UtcNow;
@@ -37,7 +34,7 @@ public sealed class BrowserHistoryRecorder
             Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion, CorrelationId: correlationId,
             EvidenceCodes: result.Indicators.Select(i => i.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
             SignalHash: result.SignalHash);
-        await store.AddLocalOnlyAsync(item, cancellationToken);
+        if (!await store.AddLocalOnlyDeduplicatedAsync(item, TimeSpan.FromMinutes(10), cancellationToken)) return false;
         try
         {
             var settings = await store.LoadSettingsAsync(cancellationToken);

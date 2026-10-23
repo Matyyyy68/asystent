@@ -104,12 +104,17 @@ public sealed class BrowserIntegrationTests : IDisposable
         var pointer = Path.Combine(directory, "data-path.txt");
         await File.WriteAllTextAsync(pointer, directory);
         var result = new BrowserResponse("1", true, ThreatAnalysisEngine.RulesVersion, "Moderate", "SuspiciousNavigation", true,
-            [new BrowserIndicator("url.brand", "Domena przypomina znaną markę.")], "Niepewny adres.", new string('a', 64), "Sygnał lokalny.", "login.example.test");
+            [new BrowserIndicator("url.brand", "Domena przypomina znaną markę.")], "Niepewny adres.", new string('a', 64), "Sygnał lokalny.", "login.example.test",
+            new string('b', 64));
         var recorder = new BrowserHistoryRecorder(pointer);
 
         Assert.True(await recorder.RecordAsync(result));
-        Assert.False(await recorder.RecordAsync(result with { Id = "2" }));
-        var eventRow = Assert.Single(await store.ReadAsync());
+        var restartedRecorder = new BrowserHistoryRecorder(pointer);
+        Assert.False(await restartedRecorder.RecordAsync(result with { Id = "2" }));
+        Assert.True(await restartedRecorder.RecordAsync(result with { Id = "3", HistoryKey = new string('c', 64), SignalHash = new string('d', 64) }));
+        var events = await store.ReadAsync();
+        Assert.Equal(2, events.Count);
+        var eventRow = Assert.Single(events, item => item.SignalHash == new string('B', 64));
         Assert.Equal("Przeglądarka · SuspiciousNavigation", eventRow.Category);
         Assert.Equal("browser-extension", eventRow.Source);
         Assert.Equal(ThreatAnalysisEngine.RulesVersion, eventRow.RuleVersion);

@@ -90,6 +90,24 @@ public sealed class StoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis, "url", "reputation.cert", TimeSpan.Zero));
     }
+    [Fact] public async Task PersistentLocalOnlySignalDeduplicationSurvivesStoreReopenAndValidatesInputs()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var basis = Event(at) with { Risk = RiskLevel.Moderate, EventId = Guid.NewGuid(), Source = "browser-extension", SignalHash = new string('A', 64) };
+
+        Assert.True(await store.AddLocalOnlyDeduplicatedAsync(basis, TimeSpan.FromMinutes(10)));
+        var reopened = await Store();
+        Assert.False(await reopened.AddLocalOnlyDeduplicatedAsync(basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(5) }, TimeSpan.FromMinutes(10)));
+        Assert.True(await reopened.AddLocalOnlyDeduplicatedAsync(basis with { EventId = Guid.NewGuid(), SignalHash = new string('B', 64) }, TimeSpan.FromMinutes(10)));
+        Assert.True(await reopened.AddLocalOnlyDeduplicatedAsync(basis with { EventId = Guid.NewGuid(), Source = "manual-analysis" }, TimeSpan.FromMinutes(10)));
+        Assert.True(await reopened.AddLocalOnlyDeduplicatedAsync(basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(11) }, TimeSpan.FromMinutes(10)));
+
+        Assert.Equal(4, await reopened.CountEventsAsync());
+        await Assert.ThrowsAsync<ArgumentException>(() => reopened.AddLocalOnlyDeduplicatedAsync(
+            basis with { SignalHash = "not-a-hash" }, TimeSpan.FromMinutes(10)));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddLocalOnlyDeduplicatedAsync(basis, TimeSpan.Zero));
+    }
     [Fact] public async Task PersistentSourceSignalDeduplicationIsAtomicForConcurrentWriters()
     {
         var store = await Store();
