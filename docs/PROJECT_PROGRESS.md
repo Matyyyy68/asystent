@@ -1,5 +1,7 @@
 # Postęp projektu Sentinel AI
 
+**F11 — ponowna weryfikacja lokalnej Ollama (2026-10-24):** `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~AIProviderTests` zakończył się 15/15 PASS. To testy z lokalnym mock HTTP, nie rzeczywistym modelem. Read-only kontrola bieżącego środowiska nie znalazła polecenia `ollama`, procesu Ollama ani nasłuchującego `127.0.0.1:11434`; rzeczywistego chat/embedding E2E nie dało się wykonać bez działającej lokalnej usługi i modelu. Nie instalowano modelu ani nie zmieniano konfiguracji systemu.
+
 **F03 — stan aktualnego źródła (2026-10-23):** oficjalna PhishVN v4 (v3.1.0) nie zmienia plików danych, ale dołącza ukończony audyt etykiet: 12,1% szacowanego szumu w pozytywach (95% CI 7,1–20,0%, głównie bronze) i 4,0% w benign. Dotychczasowe checksums train/validation pozostają aktualne; gold/silver to filtr wiarygodności, nie gwarancja bezbłędnych etykiet. Pełny opis: `docs/DETECTION-EVALUATION.md`.
 
 **F03 — niezależne odtworzenie wejściowych sum (2026-10-23):** oficjalne PhishVN v4 pobrano ponownie do katalogu tymczasowego. SHA-256 archiwum `308351E9D0C0FCA13A81F2F63524A7DEE08CCBA6C775848D125B3DA5525D0AB5`; train i validation zgadzają się z `MANIFEST.txt`, baseline reguł `2026.10.9` odtworzono identycznie. Test split nie był wyodrębniany. Nie zmieniono reguł; F03 pozostaje krytyczną luką.
