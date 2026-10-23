@@ -5,17 +5,33 @@ public sealed class ReputationTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), "sentinel-reputation-" + Guid.NewGuid());
     [Fact]
-    public void MatchesOnlyExactFreshDomainAndDeduplicates()
+    public void MatchesListedDomainAndSubdomainsButNotParentsOrLookalikes()
     {
         var store = new DomainReputation(directory); var now = DateTimeOffset.UtcNow;
-        store.Import("EVIL.test\nevil.test\nżółw.test", now);
-        Assert.Equal(2, store.Status(now).Count);
+        store.Import("EVIL.test\nevil.test\nżółw.test\nlogin.only.test\nco.uk", now);
+        Assert.Equal(4, store.Status(now).Count);
         Assert.True(store.Contains("evil.test.", now));
+        Assert.True(store.Contains("www.evil.test", now));
         Assert.True(store.Contains(DomainReputation.Normalize("żółw.test"), now));
         Assert.False(store.Contains("notevil.test", now));
         Assert.False(store.Contains("evil.test.example.test", now));
+        Assert.True(store.Contains("child.login.only.test", now));
+        Assert.False(store.Contains("only.test", now));
+        Assert.False(store.Contains("tenant.co.uk", now));
         Assert.False(store.Contains("192.0.2.1", now));
         Assert.False(store.Contains("evil.test", now.AddDays(3)));
+    }
+    [Fact]
+    public void FindMatchesIncludesSubdomainsWithoutLeakingParentOrLookalikeMatches()
+    {
+        var store = new DomainReputation(directory); var now = DateTimeOffset.UtcNow;
+        store.Import("evil.test\nlogin.only.test", now);
+
+        var matches = store.FindMatches([
+            "www.evil.test", "notevil.test", "only.test", "child.login.only.test", "safe.test"
+        ], now);
+
+        Assert.Equal(new[] { "www.evil.test", "child.login.only.test" }, matches);
     }
     [Fact]
     public void EmptyImportedDomainTableIsNeverReportedAsCurrent()

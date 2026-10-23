@@ -8,11 +8,12 @@ namespace Sentinel.Core.Analysis;
 
 public sealed record ReputationStatus(int Count, DateTimeOffset? FetchedAt, string? Version, bool Expired);
 
-/// <summary>Exact domain reputation only. Never infer IP reputation from a domain.</summary>
+/// <summary>CERT domain and subdomain reputation. Never infer IP reputation from a domain.</summary>
 public sealed class DomainReputation
 {
     public const string FeedUrl = "https://hole.cert.pl/domains/v2/domains.txt";
     private readonly string connectionString;
+    private readonly DomainNames domains = new();
     public DomainReputation(string directory)
     {
         Directory.CreateDirectory(directory);
@@ -52,8 +53,9 @@ public sealed class DomainReputation
         string normalized;
         try { normalized = Normalize(domain); } catch (ArgumentException) { return false; } catch (InvalidDataException) { return false; }
         using var c = Open(); using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT 1 FROM domains WHERE value=$value"; cmd.Parameters.AddWithValue("$value", normalized);
-        return cmd.ExecuteScalar() is not null;
+        cmd.CommandText = "SELECT 1 FROM domains WHERE value=$value";
+        var parameter = cmd.Parameters.Add("$value", SqliteType.Text);
+        return HasListedDomainAncestor(normalized, cmd, parameter);
     }
     public IReadOnlyList<string> FindMatches(IEnumerable<string> candidates, DateTimeOffset now)
     {
@@ -64,12 +66,26 @@ public sealed class DomainReputation
         var matches = new List<string>();
         foreach (var candidate in candidates.Take(2000).Where(s => !string.IsNullOrWhiteSpace(s)))
         {
-            try { parameter.Value = Normalize(candidate); }
+            string normalized;
+            try { normalized = Normalize(candidate); }
             catch (ArgumentException) { continue; }
             catch (InvalidDataException) { continue; }
-            if (cmd.ExecuteScalar() is not null) matches.Add((string)parameter.Value);
+            if (HasListedDomainAncestor(normalized, cmd, parameter)) matches.Add(normalized);
         }
         return matches.Distinct().ToArray();
+    }
+    private bool HasListedDomainAncestor(string host, SqliteCommand command, SqliteParameter parameter)
+    {
+        var labels = host.Split('.');
+        for (var start = 0; start < labels.Length - 1; start++)
+        {
+            var candidate = string.Join('.', labels, start, labels.Length - start);
+            // Never let a feed entry that is itself a public suffix match all its tenants.
+            if (domains.RegistrableDomain(candidate) is null) continue;
+            parameter.Value = candidate;
+            if (command.ExecuteScalar() is not null) return true;
+        }
+        return false;
     }
     public void Import(string content, DateTimeOffset fetched)
     {

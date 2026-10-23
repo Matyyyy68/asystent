@@ -9,16 +9,20 @@ $expectedTitlePatterns = @(
     'Stan obecny',
     'Braki',
     'Decyzje',
-    'Zależności',
+    'Zaleznosci',
     'Etapy',
     'Pliki|Zmiany w plikach',
-    'Prywatność|Bezpieczeństwo',
+    'Prywatnosc|Bezpieczenstwo',
     'Testy',
     'Akceptacj',
     'Ryzyka',
     'Status'
 )
 $headingPattern = '^\s*(?<number>1[0-2]|[1-9])\.\s+\*\*(?<title>[^*]+)\*\*'
+function Remove-TitleDiacritics([string]$text) {
+    $decomposed = $text.Normalize([Text.NormalizationForm]::FormD)
+    return [regex]::Replace($decomposed, '\p{Mn}', '')
+}
 foreach ($plan in $planFiles) {
     $headings = @(Select-String -LiteralPath $plan.FullName -Pattern $headingPattern | ForEach-Object {
         [pscustomobject]@{ Number = [int]$_.Matches[0].Groups['number'].Value; Title = $_.Matches[0].Groups['title'].Value }
@@ -28,9 +32,10 @@ foreach ($plan in $planFiles) {
         if ($matchesForSection.Count -ne 1) {
             throw "$($plan.Name) must contain exactly one numbered section $number; found $($matchesForSection.Count)."
         }
-        $titlePattern = $expectedTitlePatterns[$number - 1]
-        if ($matchesForSection[0].Title -notmatch $titlePattern) {
-            throw "$($plan.Name) section $number has unexpected title '$($matchesForSection[0].Title)'."
+        $titlePattern = Remove-TitleDiacritics $expectedTitlePatterns[$number - 1]
+        $actualTitle = Remove-TitleDiacritics $matchesForSection[0].Title
+        if ($actualTitle -notmatch $titlePattern) {
+            throw "$($plan.Name) section $number has unexpected title '$($matchesForSection[0].Title)' (expected '$titlePattern'; normalized '$actualTitle')."
         }
     }
     if (-not ($headings | Where-Object Number -eq 12 | Select-Object -First 1).Title.Contains('Status')) {
