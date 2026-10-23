@@ -815,6 +815,34 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(detection.EventId, Assert.Single(await s.ReadAsync()).EventId);
     }
     [Fact] public async Task RetentionRemovesOnlyOldEvents() { var s = await Store(); await s.AddAsync(Event(DateTimeOffset.UtcNow.AddDays(-60))); await s.AddAsync(Event()); await s.ApplyRetentionAsync(30); Assert.Single(await s.ReadAsync()); }
+    [Fact] public async Task RetentionRemovesObservationsForExpiredMergedEvents()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow.AddDays(-60);
+        var signalHash = LocalStore.CreateHostSignalHash("expired.example.test");
+        var oldDetection = new SecurityEvent(0, at, RiskLevel.High, "URL", "Browser", "Synthetic CERT match", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "browser-extension", EvidenceCodes: ["reputation.cert"], SignalHash: signalHash);
+        await store.AddLocalOnlyAsync(oldDetection);
+        await store.AddLocalOnlyAsync(oldDetection with
+        {
+            EventId = Guid.NewGuid(),
+            Timestamp = at.AddSeconds(5),
+            Source = "dns-cache",
+            EvidenceCodes = ["reputation.cert.current-feed-match"]
+        });
+
+        var merged = Assert.Single(await store.ReadAsync());
+        Assert.Equal(2, merged.Observations!.Count);
+
+        await store.ApplyRetentionAsync(30);
+
+        Assert.Empty(await store.ReadAsync());
+        await using var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await connection.OpenAsync();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM event_observations";
+        Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
+    }
     [Fact] public async Task InvalidRetentionRejected() { var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(0))); }
     [Fact] public async Task BackupCanReopenAndExportIsValid() { var s = await Store(); await s.AddAsync(Event()); var export = Path.Combine(dir,"events.json"); await s.ExportAsync(export); Assert.Contains("Synthetic",await File.ReadAllTextAsync(export)); var backupDir = Path.Combine(dir,"backup"); Directory.CreateDirectory(backupDir); await s.BackupAsync(Path.Combine(backupDir,"sentinel.db")); var backup = new LocalStore(backupDir); await backup.InitializeAsync(); Assert.Single(await backup.ReadAsync()); }
     [Fact] public async Task ProcessImageInspectionPersistsAndRestoresLocallyButNeverExportsPathOrHash()
