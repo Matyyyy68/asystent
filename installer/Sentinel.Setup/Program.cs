@@ -151,6 +151,15 @@ internal static class Program
             throw new IOException($"Za mało wolnego miejsca na dysku. Wymagane: {requiredBytes / 1_048_576:N0} MB, dostępne: {availableBytes / 1_048_576:N0} MB.");
     }
 
+    internal static bool ShouldPublishProgressUpdate(ref long previousTick, long currentTick, int value)
+    {
+        const long minimumIntervalMilliseconds = 200;
+        var previous = Interlocked.Read(ref previousTick);
+        if (value < 100 && previous != long.MinValue && currentTick - previous < minimumIntervalMilliseconds) return false;
+        Interlocked.Exchange(ref previousTick, currentTick);
+        return true;
+    }
+
     private static int SelfTest()
     {
         ApplicationConfiguration.Initialize();
@@ -160,6 +169,13 @@ internal static class Program
         var data = Path.Combine(localAppData, "SentinelAI-Setup-SelfTest-" + testId);
         try
         {
+            long previousProgressTick = long.MinValue;
+            var progressUpdates = 0;
+            for (var tick = 0; tick < 1_000; tick++)
+                if (ShouldPublishProgressUpdate(ref previousProgressTick, tick, 50)) progressUpdates++;
+            if (progressUpdates != 5 || !ShouldPublishProgressUpdate(ref previousProgressTick, 1_000, 100))
+                throw new InvalidDataException("Ograniczenie aktualizacji postępu UI nie utrzymuje limitu 200 ms albo blokuje końcowy postęp.");
+
             var samplePayload = Encoding.UTF8.GetBytes("sentinel-installer-integrity-test");
             var sampleHash = Convert.ToHexString(SHA256.HashData(samplePayload));
             using (var validPayload = new MemoryStream(samplePayload))
@@ -324,7 +340,7 @@ internal static class Program
             VerifySmokeDatabase(databaseDirectory, "sentinel.db");
             VerifySmokeDatabase(databaseDirectory, "knowledge.db");
 
-            Log("SELF_TEST_SUCCESS payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
+            Log("SELF_TEST_SUCCESS progressThrottle=true payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
             return 0;
         }
         catch (Exception ex)
@@ -964,15 +980,13 @@ internal sealed class SetupWizard : Form
         installCancellation = new CancellationTokenSource();
         progress.Value = 0;
         ShowPage(WizardPage.Installing);
-        long lastProgressUiUpdate = 0;
+        long lastProgressUiUpdate = long.MinValue;
         try
         {
             var selectedPath = Program.ValidateInstallSelection(folder.Text);
             await Task.Run(() => Program.Install(selectedPath, startMenu.Checked, desktop.Checked, start.Checked, (message, value) =>
             {
-                var now = Environment.TickCount64;
-                if (value < 100 && now - Interlocked.Read(ref lastProgressUiUpdate) < 200) return;
-                Interlocked.Exchange(ref lastProgressUiUpdate, now);
+                if (!Program.ShouldPublishProgressUpdate(ref lastProgressUiUpdate, Environment.TickCount64, value)) return;
                 BeginInvoke(() =>
                 {
                     status.Text = message;

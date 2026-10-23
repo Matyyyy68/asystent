@@ -1,6 +1,6 @@
 # Postęp projektu Sentinel AI
 
-**Najnowsza zmiana F02 (2026-10-23):** rozwiązano możliwą przyczynę „Brak odpowiedzi” w kreatorze: UI nie zapełnia już kolejką wiadomości podczas rozpakowywania. EXE zawiera lokalny pakiet; instalacja nie pobiera aplikacji. Aktualizacje postępu są ograniczone do jednej na 200 ms, tekst informuje o lokalnym rozpakowywaniu. `installer/build-installer.ps1` i autotest PASS; nowy lokalny artefakt v0.15.38 ma SHA-256 `8141DCC6CDB389A1BCC531CC2B10FE6CF52B26E9D7A4D0D7E222F338A7720AFC`. Ręczny test GUI tej poprawki pozostaje niewykonany.
+**Najnowsza zmiana F02 (2026-10-23):** ograniczono aktualizacje UI podczas lokalnego rozpakowywania do jednej na 200 ms. Autotest symuluje 1000 aktualizacji w 1 s i potwierdza limit oraz natychmiastowe pokazanie końcowego 100%. EXE zawiera aplikację; pobieranie nie jest wymagane. `installer/build-installer.ps1` i autotest PASS; nowy lokalny artefakt v0.15.38 ma SHA-256 `FBF4C4BB9305DFAF06673AEEA594915C038E3AF93E07B2E3FC4865D1BF5E1D48`. Ręczny test GUI tej poprawki pozostaje niewykonany.
 
 **Aktualizacja:** 2026-10-23
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
