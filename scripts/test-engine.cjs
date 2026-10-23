@@ -34,6 +34,16 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.deepEqual(initialStatus.result.ipReputation, { networkCount: 0, importedAt: null }, 'IP reputation must start empty and local');
   assert.equal(initialStatus.result.settings.monitorDownloadedFiles, false, 'Downloads monitoring must default to off');
   assert.equal(initialStatus.result.settings.monitorPersistenceChanges, false, 'Windows persistence monitoring must default to off');
+  assert.equal(initialStatus.result.settings.autoUpdateCertFeed, false, 'CERT feed auto-refresh must default to off');
+  assert.deepEqual(initialStatus.result.certFeedRefresh, { enabled: false, state: 'Wyłączone', lastAttemptAt: null, lastErrorCode: null });
+  const enabledFeedRefresh = await call('settings', { retentionDays: initialStatus.result.settings.retentionDays,
+    notifications: initialStatus.result.settings.notifications, autoUpdateCertFeed: true });
+  assert.equal(enabledFeedRefresh.ok, true, enabledFeedRefresh.error);
+  assert.equal((await call('status')).result.settings.autoUpdateCertFeed, true, 'explicit opt-in must be saved');
+  const disabledFeedRefresh = await call('settings', { retentionDays: initialStatus.result.settings.retentionDays,
+    notifications: initialStatus.result.settings.notifications, autoUpdateCertFeed: false });
+  assert.equal(disabledFeedRefresh.ok, true, disabledFeedRefresh.error);
+  assert.equal((await call('status')).result.settings.autoUpdateCertFeed, false, 'user must be able to turn auto-refresh off');
   assert.equal(initialStatus.result.persistence, 'Monitor zmian autostartu jest wyłączony.');
   assert.equal((await call('malwareBazaarLookup', { sha256: 'a'.repeat(64), consent: false })).ok, false,
     'MalwareBazaar hash lookup must require explicit consent');

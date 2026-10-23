@@ -7,12 +7,14 @@ using Microsoft.Data.Sqlite;
 namespace Sentinel.Core.Analysis;
 
 public sealed record ReputationStatus(int Count, DateTimeOffset? FetchedAt, string? Version, bool Expired);
+public sealed record DomainFeedRefreshCheckpoint(DateTimeOffset? LastAttemptAt, string? LastErrorCode);
 
 /// <summary>CERT domain and subdomain reputation. Never infer IP reputation from a domain.</summary>
 public sealed class DomainReputation
 {
     public const string FeedUrl = "https://hole.cert.pl/domains/v2/domains.txt";
     private readonly string connectionString;
+    private readonly SemaphoreSlim updateGate = new(1, 1);
     private readonly DomainNames domains = new();
     public DomainReputation(string directory)
     {
@@ -24,11 +26,31 @@ public sealed class DomainReputation
             CREATE TABLE IF NOT EXISTS domains(value TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS previous_domains(value TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS metadata(id INTEGER PRIMARY KEY CHECK(id IN (1,2)), fetched TEXT NOT NULL, version TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS auto_refresh_checkpoint(id INTEGER PRIMARY KEY CHECK(id=1), attempted TEXT NOT NULL, error_code TEXT);
             PRAGMA user_version=1;
             """;
         cmd.ExecuteNonQuery();
     }
     private SqliteConnection Open() { var c = new SqliteConnection(connectionString); c.Open(); return c; }
+    public DomainFeedRefreshCheckpoint AutoRefreshCheckpoint()
+    {
+        using var c = Open(); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT attempted,error_code FROM auto_refresh_checkpoint WHERE id=1";
+        using var reader = cmd.ExecuteReader();
+        return reader.Read()
+            ? new(DateTimeOffset.Parse(reader.GetString(0), CultureInfo.InvariantCulture), reader.IsDBNull(1) ? null : reader.GetString(1))
+            : new(null, null);
+    }
+    public void SaveAutoRefreshCheckpoint(DateTimeOffset attemptedAt, string? errorCode)
+    {
+        if (errorCode is { Length: > 64 } || errorCode is not null && errorCode.Any(character => !char.IsAsciiLetterOrDigit(character)))
+            throw new ArgumentException("Invalid automatic-refresh error code.", nameof(errorCode));
+        using var c = Open(); using var cmd = c.CreateCommand();
+        cmd.CommandText = "INSERT OR REPLACE INTO auto_refresh_checkpoint(id,attempted,error_code) VALUES(1,$attempted,$error)";
+        cmd.Parameters.AddWithValue("$attempted", attemptedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        cmd.Parameters.AddWithValue("$error", (object?)errorCode ?? DBNull.Value);
+        cmd.ExecuteNonQuery();
+    }
     public static string Normalize(string domain)
     {
         var value = new IdnMapping().GetAscii(domain.Trim().TrimEnd('.')).ToLowerInvariant();
@@ -115,15 +137,20 @@ public sealed class DomainReputation
     }
     public async Task UpdateAsync(CancellationToken ct = default)
     {
-        var now = DateTimeOffset.UtcNow;
-        if (Status(now).FetchedAt is { } last && now - last < TimeSpan.FromMinutes(5))
-            throw new InvalidDataException("Poczekaj 5 minut między aktualizacjami.");
-        using var handler = new HttpClientHandler { AllowAutoRedirect = false };
-        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30), MaxResponseContentBufferSize = 20 * 1024 * 1024 };
-        // This fixed source receives no browsing data. Redirects and arbitrary URLs are forbidden.
-        using var response = await http.GetAsync(FeedUrl, ct);
-        response.EnsureSuccessStatusCode();
-        var content = await response.Content.ReadAsStringAsync(ct);
-        Import(content, now);
+        await updateGate.WaitAsync(ct);
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (Status(now).FetchedAt is { } last && now - last < TimeSpan.FromMinutes(5))
+                throw new InvalidDataException("Poczekaj 5 minut między aktualizacjami.");
+            using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30), MaxResponseContentBufferSize = 20 * 1024 * 1024 };
+            // This fixed source receives no browsing data. Redirects and arbitrary URLs are forbidden.
+            using var response = await http.GetAsync(FeedUrl, ct);
+            response.EnsureSuccessStatusCode();
+            var content = await response.Content.ReadAsStringAsync(ct);
+            Import(content, now);
+        }
+        finally { updateGate.Release(); }
     }
 }

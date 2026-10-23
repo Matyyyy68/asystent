@@ -42,6 +42,7 @@ var domainNames = new DomainNames();
 var urlAnalyzer = new UrlAnalyzer(domainNames);
 var rules = new ThreatAnalysisEngine(urlAnalyzer);
 var reputation = new DomainReputation(directory);
+var certFeedRefreshScheduler = new DomainFeedRefreshScheduler(reputation.AutoRefreshCheckpoint());
 var urlReputation = new UrlReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
 var ipReputation = new IpReputation(directory);
@@ -314,6 +315,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
+                    certFeedRefresh = certFeedRefreshScheduler.Status,
                     ipReputation = ipReputation.Status(), urlReputation = urlReputation.Status(DateTimeOffset.UtcNow),
                     downloadedFiles = downloadedFileMonitor.State,
                     browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
@@ -333,6 +335,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                 break;
             case "ipReputationClear": result = ipReputation.Clear(); break;
             case "collect":
+                certFeedRefreshScheduler.Evaluate(settings.AutoUpdateCertFeed, reputation.Status(DateTimeOffset.UtcNow),
+                    DateTimeOffset.UtcNow, reputation.UpdateAsync, reputation.SaveAutoRefreshCheckpoint);
                 var detections = new List<string>();
                 var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
                 var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
@@ -583,7 +587,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     DnsPollIntervalSeconds = request.TryGetProperty("dnsPollIntervalSeconds", out var interval) ? interval.GetInt32() : settings.DnsPollIntervalSeconds,
                     MonitorNetworkConnections = request.TryGetProperty("monitorNetworkConnections", out var monitorNetwork) ? monitorNetwork.GetBoolean() : settings.MonitorNetworkConnections,
                     MonitorDownloadedFiles = request.TryGetProperty("monitorDownloadedFiles", out var monitorDownloads) ? monitorDownloads.GetBoolean() : settings.MonitorDownloadedFiles,
-                    MonitorPersistenceChanges = request.TryGetProperty("monitorPersistenceChanges", out var monitorPersistence) ? monitorPersistence.GetBoolean() : settings.MonitorPersistenceChanges };
+                    MonitorPersistenceChanges = request.TryGetProperty("monitorPersistenceChanges", out var monitorPersistence) ? monitorPersistence.GetBoolean() : settings.MonitorPersistenceChanges,
+                    AutoUpdateCertFeed = request.TryGetProperty("autoUpdateCertFeed", out var autoUpdateCertFeed) ? autoUpdateCertFeed.GetBoolean() : settings.AutoUpdateCertFeed };
                 await store.SaveSettingsAsync(updatedSettings);
                 settings = updatedSettings;
                 await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);

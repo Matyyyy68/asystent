@@ -12,6 +12,16 @@ public sealed class StoreTests : IDisposable
     private readonly string dir = Path.Combine(Path.GetTempPath(), "sentinel-test-" + Guid.NewGuid());
     private async Task<LocalStore> Store() { var s = new LocalStore(dir); await s.InitializeAsync(); return s; }
     private static SecurityEvent Event(DateTimeOffset? time = null) => new(0,time ?? DateTimeOffset.UtcNow,RiskLevel.Information,"Test","Synthetic","Synthetic test only","No action",EventStatus.New);
+    [Fact] public async Task CertFeedAutomaticRefreshIsOptInAndSurvivesRestart()
+    {
+        var store = await Store();
+        Assert.False((await store.LoadSettingsAsync()).AutoUpdateCertFeed);
+
+        await store.SaveSettingsAsync(new AppSettings(AutoUpdateCertFeed: true));
+
+        Assert.True((await (await Store()).LoadSettingsAsync()).AutoUpdateCertFeed);
+    }
+
     [Fact] public async Task DataDirectoryPointerBoundsReadsAndRejectsInvalidOrNonLocalPaths()
     {
         Directory.CreateDirectory(dir);
