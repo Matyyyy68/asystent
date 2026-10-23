@@ -145,6 +145,21 @@ public sealed class BrowserIntegrationTests : IDisposable
         Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
     }
 
+    [Fact]
+    public async Task CorruptDataDirectoryPointerDisablesBrowserHistoryWithoutCreatingFallbackData()
+    {
+        Directory.CreateDirectory(directory);
+        var pointer = Path.Combine(directory, "data-path.txt");
+        await File.WriteAllTextAsync(pointer, new string('x', DataDirectoryPointer.MaximumPointerBytes + 1));
+        var fallback = Path.Combine(directory, "data");
+        var result = new BrowserResponse("1", true, ThreatAnalysisEngine.RulesVersion, "Moderate", "SuspiciousNavigation", true,
+            [new BrowserIndicator("url.brand", "Domena przypomina markę.")], "Niepewny adres.", new string('a', 64), "Sygnał lokalny.", "login.example.test",
+            new string('b', 64));
+
+        Assert.False(await new BrowserHistoryRecorder(pointer).RecordAsync(result));
+        Assert.False(Directory.Exists(fallback));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);

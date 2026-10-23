@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Sentinel.Core;
 using Sentinel.Core.Analysis;
 
 namespace Sentinel.UrlHost;
@@ -52,8 +53,11 @@ public static class Program
             var pointer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI", "data-path.txt");
             if (File.Exists(pointer))
             {
-                var directory = (await File.ReadAllTextAsync(pointer, cancellationToken)).Trim();
-                if (Path.IsPathFullyQualified(directory) && !directory.StartsWith('\\') && File.Exists(Path.Combine(directory, "reputation.db")))
+                string? directory = null;
+                try { directory = await DataDirectoryPointer.ReadAsync(pointer, Path.Combine(Path.GetDirectoryName(pointer)!, "data"), cancellationToken); }
+                catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+                { /* Keep the host usable, but never access reputation data through an invalid pointer. */ }
+                if (directory is not null && File.Exists(Path.Combine(directory, "reputation.db")))
                 {
                     reputation = new DomainReputation(directory);
                     urlReputation = new UrlReputation(directory);

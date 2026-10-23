@@ -15,8 +15,14 @@ public sealed class BrowserHistoryRecorder
         if (!result.ShouldWarn || result.HistoryKey is not { Length: 64 }) return false;
 
         if (!File.Exists(pointer)) return false;
-        var directory = (await File.ReadAllTextAsync(pointer, cancellationToken)).Trim();
-        if (directory.Length is 0 or > 4096 || directory.StartsWith('\\') || !Path.IsPathFullyQualified(directory)) return false;
+        string directory;
+        try
+        {
+            directory = await DataDirectoryPointer.ReadAsync(pointer,
+                Path.Combine(Path.GetDirectoryName(pointer)!, "data"), cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        { return false; }
         var database = Path.Combine(directory, "sentinel.db");
         if (!File.Exists(database)) return false;
         var store = new LocalStore(directory);

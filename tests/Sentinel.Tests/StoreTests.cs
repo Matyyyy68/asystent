@@ -12,6 +12,35 @@ public sealed class StoreTests : IDisposable
     private readonly string dir = Path.Combine(Path.GetTempPath(), "sentinel-test-" + Guid.NewGuid());
     private async Task<LocalStore> Store() { var s = new LocalStore(dir); await s.InitializeAsync(); return s; }
     private static SecurityEvent Event(DateTimeOffset? time = null) => new(0,time ?? DateTimeOffset.UtcNow,RiskLevel.Information,"Test","Synthetic","Synthetic test only","No action",EventStatus.New);
+    [Fact] public async Task DataDirectoryPointerBoundsReadsAndRejectsInvalidOrNonLocalPaths()
+    {
+        Directory.CreateDirectory(dir);
+        var pointer = Path.Combine(dir, "data-path.txt");
+        var fallback = Path.Combine(dir, "data");
+        Assert.Equal(Path.GetFullPath(fallback), await DataDirectoryPointer.ReadAsync(pointer, fallback));
+
+        await File.WriteAllTextAsync(pointer, fallback);
+        Assert.Equal(Path.GetFullPath(fallback), await DataDirectoryPointer.ReadAsync(pointer, fallback));
+
+        var bom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetPreamble();
+        await File.WriteAllBytesAsync(pointer, [.. bom, .. System.Text.Encoding.UTF8.GetBytes(fallback)]);
+        Assert.Equal(Path.GetFullPath(fallback), await DataDirectoryPointer.ReadAsync(pointer, fallback));
+
+        await File.WriteAllTextAsync(pointer, new string('x', DataDirectoryPointer.MaximumPointerBytes + 1));
+        await Assert.ThrowsAsync<InvalidDataException>(() => DataDirectoryPointer.ReadAsync(pointer, fallback));
+
+        await File.WriteAllBytesAsync(pointer, [0xFF]);
+        await Assert.ThrowsAsync<InvalidDataException>(() => DataDirectoryPointer.ReadAsync(pointer, fallback));
+
+        await File.WriteAllTextAsync(pointer, fallback);
+        using (var locked = new FileStream(pointer, FileMode.Open, FileAccess.Read, FileShare.None))
+            await Assert.ThrowsAsync<IOException>(() => DataDirectoryPointer.ReadAsync(pointer, fallback));
+
+        Assert.Throws<InvalidDataException>(() => DataDirectoryPointer.Validate("relative-data"));
+        Assert.Throws<InvalidDataException>(() => DataDirectoryPointer.Validate(Path.GetPathRoot(dir)!));
+        if (OperatingSystem.IsWindows())
+            Assert.Throws<InvalidDataException>(() => DataDirectoryPointer.Validate(@"\\server\share\sentinel"));
+    }
     [Fact] public async Task SettingsSurviveReopening() { var s = await Store(); await s.SaveSettingsAsync(new(7,false)); var next = await Store(); Assert.Equal(new AppSettings(7,false), await next.LoadSettingsAsync()); }
     [Fact] public async Task DnsOperationalRecordCursorPersistsAndCanResetAfterLogClear()
     {

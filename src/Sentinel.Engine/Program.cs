@@ -19,7 +19,7 @@ json.Converters.Add(new JsonStringEnumConverter());
 var root = Environment.GetEnvironmentVariable("SENTINEL_DATA_ROOT") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI");
 Directory.CreateDirectory(root);
 var pointer = Path.Combine(root, "data-path.txt");
-var directory = File.Exists(pointer) ? File.ReadAllText(pointer).Trim() : Path.Combine(root, "data");
+var directory = await DataDirectoryPointer.ReadAsync(pointer, Path.Combine(root, "data"));
 var store = new LocalStore(directory);
 await store.InitializeAsync();
 var installationProfile = await store.GetInstallationProfileAsync();
