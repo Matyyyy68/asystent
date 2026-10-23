@@ -42,6 +42,7 @@ var domainNames = new DomainNames();
 var urlAnalyzer = new UrlAnalyzer(domainNames);
 var rules = new ThreatAnalysisEngine(urlAnalyzer);
 var reputation = new DomainReputation(directory);
+var urlReputation = new UrlReputation(directory);
 var fileHashReputation = new FileHashReputation(directory);
 var ipReputation = new IpReputation(directory);
 await using var processImageInspectionQueue = new ProcessImageInspectionQueue(store, fileHashReputation, ReadAuthenticodeSignatureAsync);
@@ -313,13 +314,19 @@ while (await Console.In.ReadLineAsync() is { } line)
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
-                    ipReputation = ipReputation.Status(),
+                    ipReputation = ipReputation.Status(), urlReputation = urlReputation.Status(DateTimeOffset.UtcNow),
                     downloadedFiles = downloadedFileMonitor.State,
                     browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "rollbackFeed": reputation.Rollback(); result = reputation.Status(DateTimeOffset.UtcNow); break;
+            case "urlReputationImport":
+                var urlFeedPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano listy URL.");
+                result = await urlReputation.ImportFileAsync(urlFeedPath, DateTimeOffset.UtcNow);
+                break;
+            case "urlReputationRollback": urlReputation.Rollback(); result = urlReputation.Status(DateTimeOffset.UtcNow); break;
+            case "urlReputationClear": result = urlReputation.Clear(); break;
             case "ipReputationImport":
                 var ipFeedPath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano listy IP.");
                 result = await ipReputation.ImportFileAsync(ipFeedPath);
@@ -593,15 +600,17 @@ while (await Console.In.ReadLineAsync() is { } line)
                     string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url));
                 var assessment = await orchestrator.AnalyzeAsync(context, settings.UseLocalAI, settings.LocalAIEndpoint,
                     settings.LocalAIModel, settings.LocalAIEmbeddingModel, settings.LocalAITimeoutSeconds);
-                assessment = ManualUrlReputationMatcher.Apply(assessment, url, text, reputation, observedAt, out var reputationMatchHost);
+                assessment = ManualUrlReputationMatcher.Apply(assessment, url, text, reputation, urlReputation,
+                    observedAt, out var reputationMatchHost, out var reputationMatchUrlHash, out var reputationMatchUrl);
                 if (assessment.Indicators.Count > 0)
                 {
                     var signalUrlAnalysis = ManualUrlReputationMatcher.FindSignalUrlAnalysis(url, text, urlAnalyzer,
-                        assessment.Indicators, reputationMatchHost);
+                        assessment.Indicators, reputationMatchHost, reputationMatchUrl);
                     var correlationDomain = signalUrlAnalysis?.RegistrableDomain ?? signalUrlAnalysis?.Host;
                     Guid? correlationId = signalUrlAnalysis is { IsValid: true } && correlationDomain is not null &&
                         Uri.CheckHostName(correlationDomain) == UriHostNameType.Dns &&
-                        assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) || indicator.Id == "reputation.cert")
+                        assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) ||
+                            indicator.Id is "reputation.cert" or "reputation.url-feed")
                         ? await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt)
                         : null;
                     await RecordDetectionAsync(new SecurityEvent(0, observedAt, assessment.Risk,
@@ -612,10 +621,13 @@ while (await Console.In.ReadLineAsync() is { } line)
                         EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
                         SignalHash: assessment.Indicators.Any(indicator => indicator.Id == "reputation.cert")
                             ? LocalStore.CreateHostSignalHash(reputationMatchHost ?? urlAnalysis?.Host)
+                            : assessment.Indicators.Any(indicator => indicator.Id == "reputation.url-feed")
+                                ? reputationMatchUrlHash
                             : LocalStore.CreateUrlEvidenceSignalHash(signalUrlAnalysis?.Host, assessment.Indicators.Select(indicator => indicator.Id))),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
                         "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"),
-                        assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) || indicator.Id == "reputation.cert")
+                        assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) ||
+                            indicator.Id is "reputation.cert" or "reputation.url-feed")
                             ? TimeSpan.FromMinutes(10)
                             : null);
                 }

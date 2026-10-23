@@ -34,9 +34,11 @@ public sealed class UrlRequestProcessor
     private readonly UrlAnalyzer urls;
     private readonly ThreatAnalysisEngine engine;
     private readonly DomainReputation? reputation;
-    public UrlRequestProcessor(DomainReputation? reputation = null)
+    private readonly UrlReputation? urlReputation;
+    public UrlRequestProcessor(DomainReputation? reputation = null, UrlReputation? urlReputation = null)
     {
         this.reputation = reputation;
+        this.urlReputation = urlReputation;
         urls = new UrlAnalyzer(new DomainNames());
         engine = new ThreatAnalysisEngine(urls);
     }
@@ -54,9 +56,15 @@ public sealed class UrlRequestProcessor
         var context = new AnalysisContext("Browser extension", "", DateTimeOffset.UtcNow, new NavigationSignal(request.Url));
         var result = engine.Analyze(context);
         var analysis = urls.Analyze(request.Url);
-        if (analysis.Host is { } host && reputation?.Contains(host, DateTimeOffset.UtcNow) == true)
+        var observedAt = DateTimeOffset.UtcNow;
+        var domainMatch = analysis.Host is { } host && reputation?.Contains(host, observedAt) == true;
+        var urlMatch = urlReputation?.Check(request.Url, observedAt);
+        if (domainMatch)
             result = result with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
                 Indicators = result.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray() };
+        else if (urlMatch?.Match == true)
+            result = result with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
+                Indicators = result.Indicators.Append(new ThreatIndicator("reputation.url-feed", "Dokładny adres znajduje się na lokalnej liście URL użytkownika.", 10, ThreatCategory.SuspiciousNavigation)).ToArray() };
         var historyKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{analysis.Origin}|{string.Join(',', result.Indicators.Select(x => x.Id).Order(StringComparer.Ordinal))}")));
         var evidenceCodes = result.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).ToArray();
         var isCertSignal = evidenceCodes.Contains("reputation.cert", StringComparer.Ordinal);
@@ -66,6 +74,7 @@ public sealed class UrlRequestProcessor
             result.Uncertainties.FirstOrDefault() ?? "Wynik nie potwierdza bezpieczeństwa adresu.", historyKey, result.Explanation,
             analysis.RegistrableDomain ?? analysis.Host,
             isCertSignal ? LocalStore.CreateHostSignalHash(analysis.Host)
+                : urlMatch?.Match == true ? urlMatch.SignalHash
                 : LocalStore.CreateUrlEvidenceSignalHash(analysis.Host, evidenceCodes));
     }
 }

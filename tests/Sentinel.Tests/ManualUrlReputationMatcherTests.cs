@@ -54,6 +54,33 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
     }
 
     [Fact]
+    public void ExactLocalUrlMatchRaisesRiskAndReturnsOnlyPrivacySafeSignalMaterial()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var domains = new DomainReputation(directory);
+        var urls = new UrlReputation(directory);
+        const string maliciousUrl = "https://paypal.com@attacker.test/login?campaign=fixture";
+        urls.Import(maliciousUrl + "\n", now);
+        var baseline = new ThreatAssessment(ThreatCategory.None, RiskLevel.Information, [], [], [], "No sygnałów.");
+
+        var result = ManualUrlReputationMatcher.Apply(baseline, maliciousUrl, "", domains, urls, now,
+            out var matchedHost, out var signalHash, out var matchedUrl);
+
+        Assert.Equal("attacker.test", matchedHost);
+        Assert.Equal(UrlReputation.CreateSignalHash(maliciousUrl), signalHash);
+        Assert.Equal(maliciousUrl, matchedUrl);
+        Assert.Equal(RiskLevel.High, result.Risk);
+        Assert.Contains(result.Indicators, indicator => indicator.Id == "reputation.url-feed");
+        Assert.DoesNotContain(maliciousUrl, result.Explanation, StringComparison.Ordinal);
+        Assert.DoesNotContain("attacker.test", result.Explanation, StringComparison.Ordinal);
+
+        var stale = ManualUrlReputationMatcher.Apply(baseline, maliciousUrl, "", domains, urls, now.AddHours(49),
+            out _, out var staleHash, out _);
+        Assert.Null(staleHash);
+        Assert.Empty(stale.Indicators);
+    }
+
+    [Fact]
     public void SignalHostComesFromTheUrlThatProducedTheWarning()
     {
         var analyzer = new UrlAnalyzer(new DomainNames());

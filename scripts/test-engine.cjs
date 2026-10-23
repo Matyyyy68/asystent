@@ -8,6 +8,7 @@ const { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, truncateSyn
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const root = mkdtempSync(path.join(tmpdir(), 'sentinel-engine-test-'));
 const downloadsDirectory = path.join(root, 'Downloads'); mkdirSync(downloadsDirectory);
 const child = spawn(path.resolve('artifacts/engine/Sentinel.Engine.exe'), [], { windowsHide: true,
@@ -90,6 +91,25 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.deepEqual(clearedIpFeed.result, { networkCount: 0, importedAt: null });
   assert.deepEqual((await call('status')).result.ipReputation, { networkCount: 0, importedAt: null },
     'clearing IP/CIDR reputation must remove the persisted feed and import metadata');
+  const exactFeedUrl = 'https://example.test/checkout/continue?case=synthetic#ignored-fragment';
+  await call('clearHistory');
+  const urlFeedPath = path.join(root, 'local-url-feed.txt'); writeFileSync(urlFeedPath, `# user supplied fixture\n${exactFeedUrl}\n`);
+  const importedUrlFeed = await call('urlReputationImport', { path: urlFeedPath });
+  assert.equal(importedUrlFeed.ok, true, importedUrlFeed.error); assert.equal(importedUrlFeed.result.urlCount, 1);
+  const exactUrlAnalysis = await call('analyze', { text: '', url: exactFeedUrl });
+  assert.equal(exactUrlAnalysis.ok, true, exactUrlAnalysis.error);
+  assert.equal(exactUrlAnalysis.result.risk, 'High');
+  assert.ok(exactUrlAnalysis.result.indicators.some(indicator => indicator.id === 'reputation.url-feed'));
+  const exactUrlHistory = (await call('history')).result;
+  assert.equal(exactUrlHistory.length, 1);
+  assert.ok(!JSON.stringify(exactUrlHistory).includes('example.test'));
+  assert.ok(!JSON.stringify(exactUrlHistory).includes('checkout/continue'));
+  assert.ok(!JSON.stringify(exactUrlHistory).includes('case=synthetic'));
+  const normalizedFeedUrl = new URL(exactFeedUrl); normalizedFeedUrl.hash = '';
+  const exactUrlSignalHash = createHash('sha256').update(normalizedFeedUrl.href, 'utf8').digest('hex').toUpperCase();
+  assert.ok(!JSON.stringify(exactUrlHistory).includes(exactUrlSignalHash));
+  assert.equal((await call('urlReputationClear')).ok, true);
+  await call('clearHistory');
   assert.equal((await call('aiSettings', { useLocalAI: true, endpoint: 'http://example.com:11434', model: 'remote' })).ok, false);
   assert.equal((await call('status')).result.settings.useLocalAI, false);
   ollamaServer = createServer((request, response) => {

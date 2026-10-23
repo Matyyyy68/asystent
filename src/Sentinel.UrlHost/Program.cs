@@ -46,6 +46,7 @@ public static class Program
     public static async Task ServeAsync(Stream input, Stream output, CancellationToken cancellationToken = default, bool enableHostSideEffects = true)
     {
         DomainReputation? reputation = null;
+        UrlReputation? urlReputation = null;
         if (enableHostSideEffects)
         {
             var pointer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI", "data-path.txt");
@@ -53,10 +54,13 @@ public static class Program
             {
                 var directory = (await File.ReadAllTextAsync(pointer, cancellationToken)).Trim();
                 if (Path.IsPathFullyQualified(directory) && !directory.StartsWith('\\') && File.Exists(Path.Combine(directory, "reputation.db")))
+                {
                     reputation = new DomainReputation(directory);
+                    urlReputation = new UrlReputation(directory);
+                }
             }
         }
-        var processor = new UrlRequestProcessor(reputation);
+        var processor = new UrlRequestProcessor(reputation, urlReputation);
         var history = new BrowserHistoryRecorder();
         while (!cancellationToken.IsCancellationRequested)
         {

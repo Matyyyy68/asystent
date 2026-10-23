@@ -1,4 +1,5 @@
 using Sentinel.Core;
+using Sentinel.Core.Analysis;
 using Sentinel.Core.Enterprise;
 using Microsoft.Data.Sqlite;
 using System.Security.AccessControl;
@@ -217,6 +218,26 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(new[] { "manual-analysis", "browser-extension" }, saved.Observations!.Select(item => item.Source));
         var serialized = System.Text.Json.JsonSerializer.Serialize(await store.ReadAsync());
         Assert.DoesNotContain("login.example.com", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(hash, serialized, StringComparison.OrdinalIgnoreCase);
+    }
+    [Fact] public async Task MatchingManualAndBrowserExactUrlFeedSignalsMergeWithoutStoringUrlOrSignalHash()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        const string url = "https://bad.example.test/login?campaign=synthetic";
+        var hash = UrlReputation.CreateSignalHash(url);
+        var evidence = new[] { "reputation.url-feed" };
+        var manual = new SecurityEvent(0, at, RiskLevel.High, "SuspiciousNavigation", "Manual analysis", "Exact URL feed match", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "manual-analysis", EvidenceCodes: evidence, SignalHash: hash);
+        var canonicalId = await store.AddLocalOnlyAsync(manual);
+        var browser = manual with { EventId = Guid.NewGuid(), Timestamp = at.AddSeconds(8), Source = "browser-extension",
+            Application = "Browser extension" };
+
+        Assert.Equal(canonicalId, await store.AddLocalOnlyAsync(browser));
+        Assert.Equal(1, await store.CountEventsAsync());
+        var serialized = System.Text.Json.JsonSerializer.Serialize(await store.ReadAsync());
+        Assert.DoesNotContain(url, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("bad.example.test", serialized, StringComparison.Ordinal);
         Assert.DoesNotContain(hash, serialized, StringComparison.OrdinalIgnoreCase);
     }
     [Fact] public async Task MatchingManualAndDownloadsFileSignalsMergeWithoutPersistingFileNames()

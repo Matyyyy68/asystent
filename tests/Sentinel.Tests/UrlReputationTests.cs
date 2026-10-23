@@ -1,0 +1,80 @@
+using Microsoft.Data.Sqlite;
+using Sentinel.Core.Analysis;
+using Xunit;
+
+namespace Sentinel.Tests;
+
+public sealed class UrlReputationTests : IDisposable
+{
+    private readonly string directory = Path.Combine(Path.GetTempPath(), "sentinel-url-reputation-" + Guid.NewGuid());
+
+    [Fact]
+    public void ExactUrlFeedMatchesLocallyAndPersistsOnlyHashes()
+    {
+        var importedAt = DateTimeOffset.Parse("2026-10-23T10:00:00Z");
+        var reputation = new UrlReputation(directory);
+        reputation.Import("# user supplied URL list\nhttps://bad.example.test/account?token=fixture#ignored\n", importedAt);
+
+        Assert.True(reputation.Check("https://bad.example.test/account?token=fixture", importedAt.AddHours(1)).Match);
+        Assert.False(reputation.Check("https://bad.example.test/other?token=fixture", importedAt.AddHours(1)).Match);
+        Assert.False(reputation.Check("https://bad.example.test/account?token=other", importedAt.AddHours(1)).Match);
+        Assert.True(reputation.Check("https://bad.example.test/account?token=fixture", importedAt.AddHours(49)).FeedImported is false);
+
+        var database = File.ReadAllBytes(Path.Combine(directory, "url-reputation.db"));
+        var databaseText = System.Text.Encoding.UTF8.GetString(database);
+        Assert.DoesNotContain("bad.example.test", databaseText, StringComparison.Ordinal);
+        Assert.DoesNotContain("token=fixture", databaseText, StringComparison.Ordinal);
+        Assert.Equal(1, reputation.Status(importedAt.AddHours(1)).UrlCount);
+    }
+
+    [Fact]
+    public void InvalidOrEmptyReplacementKeepsCommittedFeedAndRollbackRestoresPreviousFeed()
+    {
+        var importedAt = DateTimeOffset.Parse("2026-10-23T10:00:00Z");
+        var reputation = new UrlReputation(directory);
+        reputation.Import("https://first.example.test/path\n", importedAt);
+        Assert.Throws<InvalidDataException>(() => reputation.Import("https://valid.example.test/\nfile:///private\n", importedAt.AddHours(1)));
+        Assert.Throws<InvalidDataException>(() => reputation.Import("# empty\n", importedAt.AddHours(1)));
+        Assert.True(reputation.Check("https://first.example.test/path", importedAt.AddHours(1)).Match);
+
+        reputation.Import("https://second.example.test/path\n", importedAt.AddHours(2));
+        reputation.Rollback();
+        Assert.True(reputation.Check("https://first.example.test/path", importedAt.AddHours(3)).Match);
+        Assert.False(reputation.Check("https://second.example.test/path", importedAt.AddHours(3)).Match);
+    }
+
+    [Fact]
+    public void FeedClearRemovesCurrentAndPreviousSignalsAndFreshnessMetadata()
+    {
+        var reputation = new UrlReputation(directory);
+        var now = DateTimeOffset.UtcNow;
+        reputation.Import("https://first.example.test/\n", now);
+        reputation.Import("https://second.example.test/\n", now.AddMinutes(1));
+
+        var cleared = reputation.Clear();
+
+        Assert.Equal(new UrlReputationStatus(0, null, null, true), cleared);
+        Assert.False(reputation.Check("https://second.example.test/", now.AddMinutes(2)).FeedImported);
+        Assert.Throws<InvalidDataException>(reputation.Rollback);
+        Assert.Equal(new UrlReputationStatus(0, null, null, true), new UrlReputation(directory).Status(now.AddMinutes(2)));
+    }
+
+    [Fact]
+    public void NormalizesFragmentsButKeepsCaseSensitivePathAndQuery()
+    {
+        Assert.Equal(UrlReputation.CreateSignalHash("https://example.test/path?q=one"),
+            UrlReputation.CreateSignalHash("https://EXAMPLE.test:443/path?q=one#fragment"));
+        Assert.NotEqual(UrlReputation.CreateSignalHash("https://example.test/path?q=one"),
+            UrlReputation.CreateSignalHash("https://example.test/Path?q=one"));
+        Assert.NotEqual(UrlReputation.CreateSignalHash("https://example.test/path?q=one"),
+            UrlReputation.CreateSignalHash("https://example.test/path?q=ONE"));
+        Assert.Throws<InvalidDataException>(() => UrlReputation.CreateSignalHash("javascript:alert(1)"));
+        Assert.Throws<InvalidDataException>(() => UrlReputation.CreateSignalHash("https://example.test/" + new string('x', 4100)));
+    }
+
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+}

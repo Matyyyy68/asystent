@@ -74,6 +74,25 @@ public sealed class BrowserIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void BrowserWarningMatchesExactLocalUrlFeedWithoutReturningUrlOrHost()
+    {
+        var url = "https://bad.example.test/login?campaign=synthetic";
+        var reputation = new UrlReputation(directory);
+        reputation.Import(url + "\n", DateTimeOffset.UtcNow);
+        var response = new UrlRequestProcessor(urlReputation: reputation)
+            .Process(new BrowserRequest("url-feed-1", "analyze", url, "chrome"));
+
+        Assert.True(response.ShouldWarn);
+        Assert.Equal("High", response.Risk);
+        Assert.Contains(response.Indicators, item => item.Id == "reputation.url-feed");
+        Assert.Equal(UrlReputation.CreateSignalHash(url), response.SignalHash);
+        var serialized = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain(url, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("bad.example.test", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(response.SignalHash!, serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProcessorWarnsOnDeceptiveBrandAndDoesNotReturnSubmittedUrl()
     {
         var url = "https://paypal.com.evil.test/login?email=private@example.test";

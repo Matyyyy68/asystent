@@ -924,8 +924,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         code.StartsWith("reputation.cert.", StringComparison.Ordinal)) == true;
     private static bool HasFileReputationEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
         string.Equals(code, "file.sha256.matches-local-list", StringComparison.Ordinal)) == true;
-    private static bool HasUrlRuleEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
-        code.StartsWith("url.", StringComparison.Ordinal)) == true;
+    private static bool HasUrlSignalEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        code.StartsWith("url.", StringComparison.Ordinal) || string.Equals(code, "reputation.url-feed", StringComparison.Ordinal)) == true;
     private static async Task<long?> FindRecentSameSourceSignalAsync(SqliteConnection c, SqliteTransaction transaction,
         SecurityEvent item, string source, TimeSpan window, CancellationToken ct)
     {
@@ -945,7 +945,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         var isCertSignal = HasCertEvidence(item.EvidenceCodes);
         var isFileSignal = HasFileReputationEvidence(item.EvidenceCodes);
-        var isUrlSignal = !isCertSignal && HasUrlRuleEvidence(item.EvidenceCodes) && (source is "manual-analysis" or "browser-extension");
+        var isUrlSignal = !isCertSignal && HasUrlSignalEvidence(item.EvidenceCodes) && (source is "manual-analysis" or "browser-extension");
         if (item.SignalHash is null || (!isCertSignal && !isFileSignal && !isUrlSignal) || (isCertSignal && item.Risk < RiskLevel.Moderate)) return null;
         var from = item.Timestamp.ToUniversalTime().AddSeconds(-60).ToString("O");
         var to = item.Timestamp.ToUniversalTime().AddSeconds(60).ToString("O");
@@ -971,7 +971,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 var observationSource = reader.GetString(0);
                 var matchingSignal = isCertSignal ? HasCertEvidence(codes)
                     : isFileSignal ? HasFileReputationEvidence(codes)
-                    : HasUrlRuleEvidence(codes) && (observationSource is "manual-analysis" or "browser-extension");
+                    : HasUrlSignalEvidence(codes) && (observationSource is "manual-analysis" or "browser-extension");
                 if (!matchingSignal) continue;
                 if (string.Equals(observationSource, source, StringComparison.Ordinal)) hasSignalFromSameSource = true;
                 else hasSignalFromOtherSource = true;
