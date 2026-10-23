@@ -119,6 +119,19 @@ Przy niezmienionych regułach `2026.10.6` wynik train dla gold/silver to 13 080 
 
 Diagnoza sygnałów URL `2026.10.6` na gold/silver train wykazała, że `url.tld` występuje w 282/2 076 phishingowych i 42/11 004 legalnych adresach. W validation ten sam słaby warning wystąpił w 0/24 phishingowych i 6/1 561 legalnych adresów. Pozostałe aktualne wskaźniki URL zaobserwowano w tym train wyłącznie przy adresach legalnych. Podniesienie wagi TLD na podstawie train nie poprawia więc validation i zwiększyłoby tam false positive; nie zmieniono reguł. Mała próbka phishingu validation ogranicza wniosek — ta analiza wskazuje brak potwierdzonego kandydata, nie dowodzi braku jakichkolwiek możliwych cech predykcyjnych.
 
+### Kandydat lokalnej listy nazw banków/platform (train → validation)
+
+Dodany `scripts/evaluate-phishvn-brand-tokens.ps1` mierzy wyłącznie ustaloną listę 12 tokenów w polu `domain`, z granicami tokenu, na oficjalnych splitach train i validation oraz domyślnie tylko gold/silver. Guard odrzuca wiersze spoza splitu, raport zawiera hash i rozmiar obu plików, a żaden URL nie jest otwierany. Fixture test jest uruchamiany przez pełny `scripts/build-user.ps1`.
+
+Lista `vietcombank,vietinbank,agribank,bidv,techcombank,mbbank,vpbank,acb,sacombank,shopee,momo,zalopay` dała train TP=136, FP=16, TN=10 988, FN=1 940 (recall 6,5511%, FPR 0,1454%). Na validation: TP=0, FP=2, TN=1 559, FN=24 (recall 0%, FPR 0,1281%). Pliki: train SHA-256 `568E788EDA4BDF62531ADCDDD093373EF6A1E97FEEC1354063AE337325367B61`, validation `D9EF64D29DF6639AF698EF228E5AF5EC6F8AE44C8F1A1DD1367F9BA6D073D81F`. W validation jest tylko 24 pozytywnych przykładów; wynik nie uzasadnia globalnej listy ani reguły produktu. Nie zmieniono detekcji i testowy split nie był odczytywany.
+
+```powershell
+pwsh -NoProfile -File scripts/evaluate-phishvn-brand-tokens.ps1 `
+  -TrainCsvPath C:\ścieżka\PhishVN\data\splits\url_train.csv `
+  -ValidationCsvPath C:\ścieżka\PhishVN\data\splits\url_val.csv
+pwsh -NoProfile -File scripts/test-evaluate-phishvn-brand-tokens.ps1
+```
+
 Sprawdziłem też substringy w etykiecie domeny rejestrowalnej dla kandydatów nazw banków/platform z PhishVN. Liczby train liczą wiersze URL (wzorce mogą się nakładać): `vietcombank` 36 phishingowych/1 legalny, `bidv` 16/2, `vpb` 23/1, `shopee` 32/7 i `momo` 12/3. W validation z 24 phishingowych adresów tylko `momo` wystąpiło w jednym, a jednocześnie w dwóch legalnych; wymienione pozostałe nazwy banków/platform nie miały pozytywnego trafienia. Te małe i rozbieżne wyniki nie potwierdzają bezpiecznej reguły brandowej; nie dodano nowej listy marek ani nie zmieniono detekcji.
 
 Pole metadanych PhishVN `suspicious_tld` oznacza 539/2 076 phishingowych i 130/11 004 legalnych URL-i w train oraz 3/24 phishingowe i 23/1 561 legalnych w validation. Nie jest to wyjście ani reguła Sentinel, a jego szersza definicja nie została przeniesiona do produktu. Trzy oznaczone walidacyjne phishingowe adresy mają sufiksy `.help`, `.shop` i `.vip`; każdy z nich samodzielnie daje bieżącemu analizatorowi poziom `Information`, bez wskaźników. W train `.vip` występuje w 80 phishingowych i 8 legalnych wierszach, `.shop` w 4 i 18, a `.help` w 2 i 0. Małe walidacyjne liczby i rozbieżność `.shop` nie uzasadniają obecnie nowej reguły sufiksów ani podniesienia ryzyka.
