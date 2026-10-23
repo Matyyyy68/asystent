@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace Sentinel.Setup;
@@ -166,6 +167,17 @@ internal static class Program
             samplePayload[0] ^= 0xFF;
             using (var tamperedPayload = new MemoryStream(samplePayload))
                 if (PayloadHashMatches(tamperedPayload, sampleHash)) throw new InvalidDataException("Weryfikator zaakceptował zmieniony pakiet.");
+
+            var noisyAclOutput = string.Join(Environment.NewLine,
+                Enumerable.Range(0, 500).Select(index => index % 2 == 0
+                    ? "processed file: C:\\private\\staging\\chrome_100_percent.pak"
+                    : "Przetworzono plik: C:\\private\\staging\\chrome_100_percent.pak"))
+                + Environment.NewLine + "Successfully processed 500 files; Failed processing 0 files";
+            var aclSummary = SummarizeProcessOutputForLog(noisyAclOutput, string.Empty);
+            if (aclSummary.Length > 400 || aclSummary.Contains("C:\\private", StringComparison.OrdinalIgnoreCase)
+                || aclSummary.Contains("processed file:", StringComparison.OrdinalIgnoreCase)
+                || !aclSummary.Contains("Successfully processed 500 files", StringComparison.Ordinal))
+                throw new InvalidDataException("Podsumowanie logu ACL nie ogranicza listy ścieżek ani nie zachowuje wyniku zbiorczego.");
 
             var requiredSpace = CalculateRequiredFreeSpace(100L * 1024 * 1024, 10L * 1024 * 1024);
             EnsureSufficientFreeSpace(requiredSpace, requiredSpace);
@@ -347,8 +359,20 @@ internal static class Program
         if (!process.WaitForExit(30_000)) { process.Kill(entireProcessTree: true); throw new TimeoutException("Konfiguracja uprawnień Chromium trwała zbyt długo."); }
         var stdout = stdoutTask.GetAwaiter().GetResult();
         var stderr = stderrTask.GetAwaiter().GetResult();
-        Log($"CHROMIUM_ACL exit={process.ExitCode} output={Clean((stdout + " " + stderr).Trim())}");
-        if (process.ExitCode != 0) throw new IOException($"Windows nie ustawił uprawnień wymaganych przez Chromium (kod {process.ExitCode}). {Clean(stderr.Trim())}");
+        var outputSummary = SummarizeProcessOutputForLog(stdout, stderr);
+        Log($"CHROMIUM_ACL exit={process.ExitCode} outputChars={stdout.Length} errorChars={stderr.Length} summary={outputSummary}");
+        if (process.ExitCode != 0) throw new IOException($"Windows nie ustawił uprawnień wymaganych przez Chromium (kod {process.ExitCode}). {outputSummary}");
+    }
+
+    private static string SummarizeProcessOutputForLog(string stdout, string stderr)
+    {
+        var summaryLines = (stdout + Environment.NewLine + stderr)
+            .Split(["\r\n", "\n", "\r"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => !Regex.IsMatch(line, @"(?i)(?:[a-z]:\\|\\\\)"))
+            .ToArray();
+        var summary = Clean(string.Join(" ", summaryLines));
+        if (summary.Length == 0) return "no diagnostic summary";
+        return summary.Length <= 400 ? summary : summary[..400];
     }
 
     internal static void Log(string message)
