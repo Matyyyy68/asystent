@@ -6,6 +6,8 @@
 
 **Chrome E2E (2026-10-23):** po nieudanych próbach UI użyto oficjalnego CDP `Extensions.loadUnpacked` w odizolowanym profilu Chrome 155. Kopię manifestu zawężono do `*.test`; Chrome mapował te domeny na loopback, a pozostałe nazwy odrzucał. Lokalny fixture przeszedł przez rozszerzenie, mock Native Messaging odebrał żądania `status` i `analyze`, a CDP potwierdził `warning.html` i kontrolowany opis wskaźnika. Powtarzalny harness `node scripts/test-chrome-extension-e2e.cjs` z mockiem w `tests/Sentinel.NativeMessagingMock` przeszedł ponownie z kodem 0. Profil, mock, procesy i HKCU usunięto i sprawdzono brak pozostałości. To test przepływu rozszerzenia z atrapą, nie rzeczywistej analizy Sentinel Engine.
 
+**Live read-only F21 (2026-10-23):** jawnie uruchomiony `LiveReadOnlyServiceRegistryEnumerationWhenExplicitlyEnabled` z `SENTINEL_LIVE_SERVICES=1` przeszedł 1/1 w bieżącej sesji Windows i potwierdził dostęp do snapshotu usług/sterowników bez zapisu rejestru. Wcześniejsze `SecurityException` dotyczyło przebiegu ograniczonego sandboxem. Test monitorowania syntetycznego pozostaje 20/20; GUI, restart i walidacja na zwykłym profilu pozostają otwarte.
+
 
 **Następne kroki:** F03 nadal wymaga poprawy pokrycia URL i niezależnej, reprezentatywnej walidacji; PhishVN holdout pozostaje 0/487. Instalator GUI nadal wymaga działania na interaktywnej sesji Windows; headless install/verify/uninstall dla bieżącego hasha już przeszedł. Przeglądarkowy E2E z mockiem przeszedł; ręcznej instalacji w zwykłym profilu ani pełnej analizy przez rzeczywisty Engine w przeglądarce nie testowano. Kanał DNS Operational wymaga świadomej zmiany ustawień Windows, a licencję wskaże właściciel projektu.
 
