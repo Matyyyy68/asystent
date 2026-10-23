@@ -15,6 +15,8 @@ try {
   if ($LASTEXITCODE) { throw 'PhishVN temporal test evaluation guard failed' }
   pwsh -NoProfile -File scripts/test-evaluate-phishvn-brand-tokens.ps1
   if ($LASTEXITCODE) { throw 'PhishVN train/validation brand-token diagnostic guard failed' }
+  pwsh -NoProfile -File scripts/test-evaluate-phishvn-feature-candidates.ps1
+  if ($LASTEXITCODE) { throw 'PhishVN URL feature candidate diagnostic guard failed' }
   pwsh -NoProfile -File scripts/test-implementation-plans.ps1
   if ($LASTEXITCODE) { throw 'Implementation plan structure check failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {
