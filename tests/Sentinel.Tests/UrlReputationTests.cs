@@ -28,6 +28,35 @@ public sealed class UrlReputationTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportsOnlyVerifiedOnlinePhishTankCsvRowsAndPreservesFeedOnInvalidCsv()
+    {
+        var now = DateTimeOffset.Parse("2026-10-23T10:00:00Z");
+        var reputation = new UrlReputation(directory);
+        var csvPath = Path.Combine(directory, "phish-feed.CSV");
+        var csv = "phish_id,url,phish_detail_url,submission_time,verified,verification_time,online,target\r\n" +
+                  "1,\"https://bad.example.test/pay,roll?case=1\",https://phishtank.example/detail/1,2026-10-23T09:00:00Z,yes,2026-10-23T09:10:00Z,yes,\"Mega, Inc.\"\r\n" +
+                  "2,https://offline.example.test/,https://phishtank.example/detail/2,2026-10-23T09:00:00Z,yes,2026-10-23T09:10:00Z,no,Other\r\n" +
+                  "3,https://unverified.example.test/,https://phishtank.example/detail/3,2026-10-23T09:00:00Z,no,,yes,Other\r\n";
+        await File.WriteAllTextAsync(csvPath, csv, new System.Text.UTF8Encoding(false));
+
+        var imported = await reputation.ImportFileAsync(csvPath, now);
+
+        Assert.Equal(1, imported.UrlCount);
+        Assert.True(reputation.Check("https://bad.example.test/pay,roll?case=1", now.AddMinutes(1)).Match);
+        Assert.False(reputation.Check("https://offline.example.test/", now.AddMinutes(1)).Match);
+        Assert.False(reputation.Check("https://unverified.example.test/", now.AddMinutes(1)).Match);
+
+        var invalidCsvPath = Path.Combine(directory, "invalid.csv");
+        await File.WriteAllTextAsync(invalidCsvPath,
+            "phish_id,url,phish_detail_url,submission_time,verified,verification_time,online,target\n" +
+            "4,javascript:alert(1),https://phishtank.example/detail/4,2026-10-23T09:00:00Z,yes,2026-10-23T09:10:00Z,yes,Other\n",
+            new System.Text.UTF8Encoding(false));
+        await Assert.ThrowsAsync<InvalidDataException>(() => reputation.ImportFileAsync(invalidCsvPath, now.AddHours(1)));
+        Assert.True(reputation.Check("https://bad.example.test/pay,roll?case=1", now.AddHours(1)).Match);
+        Assert.Equal(1, reputation.Status(now.AddHours(1)).UrlCount);
+    }
+
+    [Fact]
     public void InvalidOrEmptyReplacementKeepsCommittedFeedAndRollbackRestoresPreviousFeed()
     {
         var importedAt = DateTimeOffset.Parse("2026-10-23T10:00:00Z");

@@ -93,7 +93,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     'clearing IP/CIDR reputation must remove the persisted feed and import metadata');
   const exactFeedUrl = 'https://example.test/checkout/continue?case=synthetic#ignored-fragment';
   await call('clearHistory');
-  const urlFeedPath = path.join(root, 'local-url-feed.txt'); writeFileSync(urlFeedPath, `# user supplied fixture\n${exactFeedUrl}\n`);
+  const urlFeedPath = path.join(root, 'local-url-feed.csv');
+  writeFileSync(urlFeedPath, `phish_id,url,phish_detail_url,submission_time,verified,verification_time,online,target\n1,${exactFeedUrl},https://phishtank.example/detail/1,2026-10-23T09:00:00Z,yes,2026-10-23T09:10:00Z,yes,Fixture\n2,https://inactive.example.test/,https://phishtank.example/detail/2,2026-10-23T09:00:00Z,yes,2026-10-23T09:10:00Z,no,Fixture\n`);
   const importedUrlFeed = await call('urlReputationImport', { path: urlFeedPath });
   assert.equal(importedUrlFeed.ok, true, importedUrlFeed.error); assert.equal(importedUrlFeed.result.urlCount, 1);
   const exactUrlAnalysis = await call('analyze', { text: '', url: exactFeedUrl });

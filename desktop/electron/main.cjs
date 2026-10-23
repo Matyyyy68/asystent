@@ -34,7 +34,7 @@ app.whenReady().then(() => {
       return choice.canceled ? null : call('ipReputationImport', { path: choice.filePaths[0] });
     }
     if (method === 'chooseUrlFeed') {
-      const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Lista URL (jeden adres w wierszu)', extensions: ['txt', 'list'] }] });
+      const choice = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: 'Lista URL lub PhishTank CSV', extensions: ['txt', 'list', 'csv'] }] });
       return choice.canceled ? null : call('urlReputationImport', { path: choice.filePaths[0] });
     }
     if (method === 'chooseKnowledgeFile') {

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.VisualBasic.FileIO;
 using Microsoft.Data.Sqlite;
 
 namespace Sentinel.Core.Analysis;
@@ -102,6 +103,55 @@ public sealed class UrlReputation
             hashes.Add(CreateSignalHash(value));
         }
         if (hashes.Count == 0) throw new InvalidDataException("Lista URL nie zawiera poprawnych adresów.");
+        ReplaceFeed(content, hashes, importedAt);
+    }
+
+    public void ImportPhishTankCsv(string content, DateTimeOffset importedAt)
+    {
+        if (Encoding.UTF8.GetByteCount(content) > MaximumFeedBytes)
+            throw new InvalidDataException("Lista URL przekracza limit 20 MiB.");
+        using var parser = new TextFieldParser(new StringReader(content))
+        {
+            HasFieldsEnclosedInQuotes = true,
+            TrimWhiteSpace = false
+        };
+        parser.SetDelimiters(",");
+        var headers = parser.ReadFields() ?? throw new InvalidDataException("Brak nagłówka w pliku CSV PhishTank.");
+        var urlIndex = FindColumn(headers, "url");
+        var verifiedIndex = FindColumn(headers, "verified");
+        var onlineIndex = FindColumn(headers, "online");
+        var hashes = new HashSet<string>(StringComparer.Ordinal);
+        var lineCount = 1;
+        var entryCount = 0;
+        while (!parser.EndOfData)
+        {
+            var fields = parser.ReadFields();
+            if (fields is null) continue;
+            if (++lineCount > MaximumFeedLines)
+                throw new InvalidDataException("Lista PhishTank CSV przekracza limit 500 000 wierszy.");
+            if (fields.Length != headers.Length)
+                throw new InvalidDataException("Nieprawidłowa liczba kolumn w pliku CSV PhishTank.");
+            if (!string.Equals(fields[verifiedIndex].Trim(), "yes", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(fields[onlineIndex].Trim(), "yes", StringComparison.OrdinalIgnoreCase)) continue;
+            if (++entryCount > MaximumUrls)
+                throw new InvalidDataException("Lista PhishTank przekracza limit 250 000 aktywnych wpisów.");
+            hashes.Add(CreateSignalHash(fields[urlIndex]));
+        }
+        if (hashes.Count == 0) throw new InvalidDataException("CSV PhishTank nie zawiera aktywnych, zweryfikowanych adresów.");
+        ReplaceFeed(content, hashes, importedAt);
+    }
+
+    private static int FindColumn(string[] headers, string name)
+    {
+        var matches = headers.Select((header, index) => (header, index))
+            .Where(item => string.Equals(item.header.Trim(), name, StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.index).ToArray();
+        if (matches.Length != 1) throw new InvalidDataException($"Brak jednoznacznej kolumny '{name}' w pliku CSV PhishTank.");
+        return matches[0];
+    }
+
+    private void ReplaceFeed(string content, HashSet<string> hashes, DateTimeOffset importedAt)
+    {
         var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
         using var connection = Open();
@@ -142,7 +192,10 @@ public sealed class UrlReputation
         if (stream.Length > MaximumFeedBytes) throw new InvalidDataException("Lista URL przekracza limit 20 MiB.");
         using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
         var content = await reader.ReadToEndAsync(cancellationToken);
-        Import(content, importedAt);
+        if (string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase))
+            ImportPhishTankCsv(content, importedAt);
+        else
+            Import(content, importedAt);
         return Status(importedAt);
     }
 
