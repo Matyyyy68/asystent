@@ -9,6 +9,8 @@ public sealed record ThreatAssessment(ThreatCategory Category, RiskLevel Risk,
     IReadOnlyList<string> Recommendations, string Explanation);
 public static class AnalysisLimitationCodes
 {
+    public const string BrowserRedirectChainUnverified = "analysis.redirect-chain-unverified";
+
     private static readonly (string TextPrefix, string Code)[] Known =
     [
         ("Reguły nie potwierdzają intencji", "analysis.sender-intent-unverified"),

@@ -39,7 +39,8 @@ public sealed class BrowserHistoryRecorder
             "Nie podawaj danych i zweryfikuj adres przez niezależny, znany kanał.", EventStatus.New,
             Source: "browser-extension", RuleVersion: ThreatAnalysisEngine.RulesVersion, CorrelationId: correlationId,
             EvidenceCodes: result.Indicators.Select(i => i.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
-            SignalHash: result.SignalHash);
+            SignalHash: result.SignalHash,
+            AnalysisLimitations: [AnalysisLimitationCodes.BrowserRedirectChainUnverified]);
         if (!await store.AddLocalOnlyDeduplicatedAsync(item, TimeSpan.FromMinutes(10), cancellationToken)) return false;
         try
         {

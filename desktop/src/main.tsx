@@ -12,6 +12,7 @@ const analysisLimitationLabels: Record<string, string> = {
   'analysis.embedded-link-target-unverified': 'Rzeczywisty cel kliknięcia w link z treści nie został potwierdzony.',
   'analysis.embedded-url-limit': 'Część adresów z treści pominięto z powodu limitu analizy.',
   'analysis.navigation-target-unverified': 'Nie ustalono wiarygodnego celu nawigacji ani przekierowań.',
+  'analysis.redirect-chain-unverified': 'Końcowego celu po przekierowaniach nie potwierdzono; sprawdzono adres rozpoczynający nawigację.',
   'analysis.navigation-target-invalid': 'Podany adres nie był poprawnym adresem HTTP/HTTPS.',
   'analysis.displayed-url-invalid': 'Widocznego tekstu linku nie można było porównać z adresem.',
   'analysis.redirect-target-invalid': 'Podany cel przekierowania nie był poprawnym adresem HTTP/HTTPS.',
