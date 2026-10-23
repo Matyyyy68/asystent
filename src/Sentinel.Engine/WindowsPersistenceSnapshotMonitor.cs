@@ -9,7 +9,7 @@ using Sentinel.Core.Analysis;
 public sealed record PersistenceSnapshotEntry(string Source, string Fingerprint, bool WritableLocation);
 public sealed record PersistenceRegistrySnapshotCapture(bool Available, IReadOnlyDictionary<string, PersistenceSnapshotEntry> Entries, string Status);
 
-/// <summary>Observes per-user autorun state. Raw registry commands and file paths stay in memory and are never persisted.</summary>
+/// <summary>Observes selected Windows persistence sources. Raw registry commands and file paths stay in memory and are never persisted.</summary>
 public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 {
     private const int MaximumEntries = 1024;
@@ -251,6 +251,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.winlogon" => "HKLM Winlogon (32-bit)",
                 "registry.machine64.appinit" => "HKLM AppInit_DLLs (64-bit)",
                 "registry.machine32.appinit" => "HKLM AppInit_DLLs (32-bit)",
+                "registry.machine64.ifeo" => "HKLM IFEO Debugger (64-bit)",
+                "registry.machine32.ifeo" => "HKLM IFEO Debugger (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
@@ -263,14 +265,17 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "scheduled.task" => "zaplanowane zadanie Windows",
                 "registry.service" => "usługę Windows",
                 "registry.driver" => "sterownik Windows",
+                "registry.machine64.ifeo" or "registry.machine32.ifeo" => "ustawienie IFEO Debugger Windows",
                 _ => "wpis autostartu"
             };
             var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
+                or "registry.machine64.ifeo" or "registry.machine32.ifeo"
                 ? "Trwałość Windows · " + sourceName : "Autostart Windows · " + sourceName;
             var recommendation = source switch
             {
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
+                "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Sprawdź konfigurację IFEO Debugger dla aplikacji w rejestrze Windows. Sentinel nie zmienia wpisu ani nie uruchamia debuggera.",
                 "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
                 "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" => "Sprawdź konfigurację logowania Windows. Sentinel nie zmienia powłoki ani skryptów logowania.",
                 "registry.machine64.appinit" or "registry.machine32.appinit" => "Sprawdź konfigurację AppInit_DLLs Windows. Sentinel nie zmienia rejestru ani nie ładuje wskazanych bibliotek.",
@@ -292,6 +297,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.winlogon" => "machine32.winlogon",
                 "registry.machine64.appinit" => "machine64.appinit",
                 "registry.machine32.appinit" => "machine32.appinit",
+                "registry.machine64.ifeo" => "machine64.ifeo",
+                "registry.machine32.ifeo" => "machine32.ifeo",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
@@ -307,6 +314,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
+                    "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Zmiana konfiguracji uruchamiania procesu Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
                 isWinlogon
@@ -385,6 +393,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
+            CaptureImageFileExecutionOptions(RegistryHive.LocalMachine, view, sourcePrefix, entries);
         }
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);
@@ -550,6 +559,35 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             }
             entries[keyId] = new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))),
                 LooksLikeWritableLocation(command));
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureImageFileExecutionOptions(RegistryHive hive, RegistryView view, string sourcePrefix,
+        IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        const string subKeyPath = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Image File Execution Options";
+        var source = $"registry.{sourcePrefix}.ifeo";
+        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+        using var options = baseKey.OpenSubKey(subKeyPath, writable: false);
+        if (options is null) return;
+
+        var inspected = 0;
+        foreach (var imageName in options.GetSubKeyNames().OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (++inspected > MaximumEntries)
+                throw new InvalidDataException("Liczba wpisów IFEO przekracza limit snapshotu.");
+            using var imageOptions = options.OpenSubKey(imageName, writable: false);
+            if (imageOptions is null) continue;
+            var debugger = ReadString(imageOptions, "Debugger");
+            if (string.IsNullOrWhiteSpace(debugger)) continue;
+
+            var key = CreateKey(source, imageName);
+            if (!entries.ContainsKey(key) && entries.Count >= MaximumEntries)
+                throw new InvalidDataException("Łączna liczba źródeł autostartu przekracza limit snapshotu.");
+            entries[key] = new(source,
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(debugger))),
+                LooksLikeWritableLocation(debugger));
         }
     }
 

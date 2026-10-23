@@ -441,6 +441,32 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task IfeoDebuggerChangeIsRecordedWithoutPersistingExecutableOrDebuggerPath()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["registry.machine64.ifeo:" + new string('B', 64)] = Entry("registry.machine64.ifeo", "C:\\Windows\\System32\\WerFault.exe", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries["registry.machine64.ifeo:" + new string('B', 64)] = Entry("registry.machine64.ifeo", @"C:\Users\Alice\AppData\Local\Temp\debugger.exe", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana konfiguracji uruchamiania procesu Windows", item.Category);
+        Assert.Equal("Trwałość Windows · HKLM IFEO Debugger (64-bit)", item.Application);
+        Assert.Contains("persistence.machine64.ifeo.changed", item.EvidenceCodes!);
+        Assert.Contains("persistence.target.user-writable-location", item.EvidenceCodes!);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = await store.ReadAsync(), Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("debugger.exe", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alice", persisted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task NewlyAvailableServiceSourceGetsSilentBaseline()
     {
         var store = await CreateStore();
@@ -614,11 +640,13 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await store.InitializeAsync();
         await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
             new("existing-run", "registry.user.run", fingerprint, false),
-            new("registry.machine64.appinit:" + new string('A', 64), "registry.machine64.appinit", fingerprint, false)
+            new("registry.machine64.appinit:" + new string('A', 64), "registry.machine64.appinit", fingerprint, false),
+            new("registry.machine64.ifeo:" + new string('B', 64), "registry.machine64.ifeo", fingerprint, false)
         ]);
         var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.run");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.appinit");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.ifeo");
     }
 
     [Fact]

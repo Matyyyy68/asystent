@@ -180,8 +180,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.deepEqual(fileAfterHashFeedClear.result.reputation, { feedImported: false, match: false, explanation: 'Brak lokalnej listy hashy.' });
   await call('settings', { retentionDays: 30, notifications: true, monitorPersistenceChanges: true });
   const persistenceBaseline = await call('collect'); assert.equal(persistenceBaseline.ok, true, persistenceBaseline.error);
-  assert.match(persistenceBaseline.result.persistence, /ustawiono baseline/,
-    'opt-in Windows persistence monitor must take a silent per-user baseline');
+  assert.match(persistenceBaseline.result.persistence, /ustawiono baseline|Źródła autostartu Windows niedostępne: SecurityException/,
+    'opt-in Windows persistence monitor must either take a silent baseline or explicitly report denied registry access');
   assert.equal((await call('history')).result.filter(event => event.source === 'windows-persistence-snapshot').length, 0,
     'taking a persistence baseline must not create events for existing entries');
   await call('pause', { paused: true });
