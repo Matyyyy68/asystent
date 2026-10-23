@@ -205,6 +205,28 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task InitialProcessSourceFailureStillComparesAgainstPersistedBaseline()
+    {
+        var available = true;
+        var snapshot = new Dictionary<int, string> { [41] = "existing-process" };
+        Dictionary<int, string> ReadSnapshot() => available
+            ? new(snapshot)
+            : throw new IOException("synthetic startup failure");
+        var store = new LocalStore(directory);
+        await store.InitializeAsync();
+        var first = new ProcessSnapshotMonitor(ReadSnapshot);
+        Assert.Equal(0, await first.CollectAsync(store, paused: false, excludedApplications: ""));
+
+        available = false;
+        var restarted = new ProcessSnapshotMonitor(ReadSnapshot);
+        available = true;
+        snapshot.Add(42, "started-while-engine-stopped");
+
+        Assert.Equal(1, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(42, Assert.Single(await store.ReadAsync()).ProcessId);
+    }
+
+    [Fact]
     public async Task ProcessDeltaIsRetriedAfterHistoryDatabaseIsFull()
     {
         const long maximumBytes = 1024 * 1024;
