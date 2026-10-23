@@ -90,6 +90,21 @@ public sealed class StoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis, "url", "reputation.cert", TimeSpan.Zero));
     }
+    [Fact] public async Task PersistentSourceSignalDeduplicationIsAtomicForConcurrentWriters()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var hash = new string('C', 64);
+        var writes = Enumerable.Range(0, 8).Select(index => store.AddWithEnterpriseMetadataDeduplicatedAsync(
+            new SecurityEvent(0, at, RiskLevel.High, "Domena na liście", "DNS", "Synthetic match", "Review", EventStatus.New,
+                EventId: Guid.NewGuid(), Source: "dns-cache", EvidenceCodes: ["dns.windows-cache-entry"], SignalHash: hash),
+            "url", "reputation.cert", TimeSpan.FromMinutes(10)));
+
+        var results = await Task.WhenAll(writes);
+
+        Assert.Single(results, result => !result.Duplicate);
+        Assert.Equal(1, await store.CountEventsAsync());
+    }
     [Fact] public async Task CERTDetectionsFromDifferentSourcesMergeAndKeepEveryObservation()
     {
         var store = await Store();
