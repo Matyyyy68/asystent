@@ -34,7 +34,6 @@ public sealed class TcpConnectionSnapshotMonitor
     private bool knownTcpTruncated;
     private bool knownUdpTruncated;
     private DateTimeOffset? lastAttempt;
-    private long droppedEvents;
     private bool disabledModeHandled;
 
     public string State { get; private set; } = "Ciągła obserwacja TCP/UDP jest wyłączona.";
@@ -167,9 +166,9 @@ public sealed class TcpConnectionSnapshotMonitor
         var newUdpEndpoints = (knownUdpTruncated || udpTruncated) ? [] : currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)
             .Select(key => (Key: key, Connection: currentUdp[key])).ToArray();
         var candidates = newConnections.Select(item => (item.Key, item.Connection, IsUdp: false))
-            .Concat(newUdpEndpoints.Select(item => (item.Key, item.Connection, IsUdp: true))).ToArray();
+            .Concat(newUdpEndpoints.Select(item => (item.Key, item.Connection, IsUdp: true)))
+            .OrderBy(item => item.Key, StringComparer.Ordinal).ToArray();
         var added = candidates.Take(MaximumEventsPerSample).ToArray();
-        var newlyDroppedEvents = candidates.Length - added.Length;
         var events = added.Select(item =>
         {
             var connection = item.Connection;
@@ -200,15 +199,23 @@ public sealed class TcpConnectionSnapshotMonitor
                     : ["network.tcp.connection-snapshot"]);
         }).ToArray();
 
+        var tcpBaselineReset = previousTcpTruncated || tcpTruncated;
+        var udpBaselineReset = previousUdpTruncated || udpTruncated;
+        var removedTcpKeys = knownConnections.Except(currentTcpKeys, StringComparer.Ordinal).ToArray();
+        var removedUdpKeys = knownUdpEndpoints.Except(currentUdpKeys, StringComparer.Ordinal).ToArray();
+        var addedTcpKeys = tcpBaselineReset
+            ? currentTcpKeys.Except(knownConnections, StringComparer.Ordinal).ToArray()
+            : added.Where(item => !item.IsUdp).Select(item => item.Key).ToArray();
+        var addedUdpKeys = udpBaselineReset
+            ? currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal).ToArray()
+            : added.Where(item => item.IsUdp).Select(item => item.Key).ToArray();
+        var addedKeys = addedTcpKeys.Concat(addedUdpKeys).ToArray();
+        var removedKeys = removedTcpKeys.Concat(removedUdpKeys).ToArray();
         var truncationChanged = knownTcpTruncated != tcpTruncated || knownUdpTruncated != udpTruncated;
-        if (events.Length > 0 || truncationChanged)
+        if (events.Length > 0 || addedKeys.Length > 0 || removedKeys.Length > 0 || truncationChanged)
         {
             try
             {
-                var removedKeys = knownConnections.Except(currentTcpKeys, StringComparer.Ordinal)
-                    .Concat(knownUdpEndpoints.Except(currentUdpKeys, StringComparer.Ordinal)).ToArray();
-                var addedKeys = currentTcpKeys.Except(knownConnections, StringComparer.Ordinal)
-                    .Concat(currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)).ToArray();
                 await store.CommitNetworkMonitorChangesAsync(events, addedKeys, removedKeys, cancellationToken, tcpTruncated, udpTruncated);
             }
             catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
@@ -217,28 +224,17 @@ public sealed class TcpConnectionSnapshotMonitor
                 return 0;
             }
         }
-        else
-        {
-            var removedKeys = knownConnections.Except(currentTcpKeys, StringComparer.Ordinal)
-                .Concat(knownUdpEndpoints.Except(currentUdpKeys, StringComparer.Ordinal)).ToArray();
-            var addedKeys = currentTcpKeys.Except(knownConnections, StringComparer.Ordinal)
-                .Concat(currentUdpKeys.Except(knownUdpEndpoints, StringComparer.Ordinal)).ToArray();
-            if (addedKeys.Length > 0 || removedKeys.Length > 0 || truncationChanged)
-            {
-                try { await store.CommitNetworkMonitorChangesAsync([], addedKeys, removedKeys, cancellationToken, tcpTruncated, udpTruncated); }
-                catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
-                {
-                    State = "Nie można zaktualizować trwałej migawki TCP/UDP: baza osiągnęła limit lub brakuje miejsca.";
-                    return 0;
-                }
-            }
-        }
-        knownConnections = currentTcpKeys;
-        knownUdpEndpoints = currentUdpKeys;
+        knownConnections.ExceptWith(removedTcpKeys);
+        knownConnections.UnionWith(addedTcpKeys);
+        knownUdpEndpoints.ExceptWith(removedUdpKeys);
+        knownUdpEndpoints.UnionWith(addedUdpKeys);
+        if (tcpBaselineReset) knownConnections = currentTcpKeys;
+        if (udpBaselineReset) knownUdpEndpoints = currentUdpKeys;
         knownTcpTruncated = tcpTruncated;
         knownUdpTruncated = udpTruncated;
-        droppedEvents += newlyDroppedEvents;
-        State = $"Ciągła migawka TCP/UDP działa; {currentTcp.Count} połączeń TCP i {currentUdp.Count} endpointów UDP, {events.Length} nowych zdarzeń, pominięto łącznie {droppedEvents}. Krótkie połączenia TCP mogą zostać pominięte; endpoint UDP nie potwierdza datagramu.";
+        var pendingEvents = Math.Max(0, newConnections.Length - (tcpBaselineReset ? newConnections.Length : addedTcpKeys.Length))
+            + Math.Max(0, newUdpEndpoints.Length - (udpBaselineReset ? newUdpEndpoints.Length : addedUdpKeys.Length));
+        State = $"Ciągła migawka TCP/UDP działa; {currentTcp.Count} połączeń TCP i {currentUdp.Count} endpointów UDP, {events.Length} nowych zdarzeń, {pendingEvents} nowych endpointów oczekuje na kolejne próbki. Krótkie połączenia TCP mogą zostać pominięte; endpoint UDP nie potwierdza datagramu.";
         if (tcpTruncated || udpTruncated)
             State += " Osiągnięto limit tabeli; alerty z niepełnej próbki są wstrzymane.";
         else if (previousTcpTruncated || previousUdpTruncated)

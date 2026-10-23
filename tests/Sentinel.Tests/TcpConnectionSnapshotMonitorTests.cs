@@ -105,6 +105,14 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Contains("50", monitor.State);
         Assert.Equal(100, (await store.ReadAsync()).Count);
 
+        // The unrecorded half must remain absent from the persisted baseline so a fresh
+        // Engine instance can drain it on the next sample instead of losing it.
+        monitor = new TcpConnectionSnapshotMonitor(Capture, clock);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(50, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Contains("0 nowych endpointów oczekuje", monitor.State);
+        Assert.Equal(150, (await store.ReadAsync()).Count);
+
         clock.Advance(TimeSpan.FromSeconds(10));
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: true, ""));
         Assert.Contains("wstrzymana", monitor.State);
@@ -119,7 +127,7 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         unavailable = false; sample = [Connection(443), Connection(9443)]; clock.Advance(TimeSpan.FromSeconds(10));
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
         Assert.Contains("baza początkowa", monitor.State);
-        Assert.Equal(100, (await store.ReadAsync()).Count);
+        Assert.Equal(150, (await store.ReadAsync()).Count);
     }
 
     [Fact]
