@@ -1,4 +1,4 @@
-# Znane ograniczenia — 2026-10-22
+# Znane ograniczenia — 2026-10-23
 
 Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego produktu ochronnego. Brak ostrzeżenia nie potwierdza bezpieczeństwa; reguły i pomiary testowe nie dowodzą skuteczności na rzeczywistych atakach.
 
@@ -7,7 +7,7 @@ Sentinel AI pozostaje prerelease i nie zastępuje Microsoft Defender ani innego 
 - Publicznym wydaniem pozostaje [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący `main` zawiera późniejsze poprawki, w tym automatyczną rotację poświadczeń Enterprise po 90 dniach. Zmiany te nie trafiły jeszcze do opublikowanego instalatora; lokalny build bieżącego kodu nie jest publicznym wydaniem.
 - Pełny build i self-test instalatora przechodzą. `--integration-test` dla artefaktu z 2026-10-23 przeszedł poza sandboxem: instalacja, wpis deinstalacji i Native Messaging, a następnie deinstalacja i kontrola sprzątania. Pełnego cyklu GUI, instalacji z włączonymi skrótami i autostartem oraz update/uninstall w normalnym profilu nie zweryfikowano na czystym Windows. Próba z 2026-10-22 potwierdziła otwarcie kreatora i ustawienie izolowanej ścieżki `%LOCALAPPDATA%\\Programs\\Sentinel-AI-Audit-2026-10-22`. Zrzut obrazu przekroczył limit czasu, a UI Automation nie udostępniła geometrii przycisków; instalator zamknięto przed kopiowaniem plików, rejestracją lub zmianami autostartu i skrótów.
 - Instalator nie jest podpisany Authenticode, nie ma podpisanego manifestu aktualizacji ani automatycznego updatera. Nie należy traktować lokalnego SHA-256 jako podpisu wydawcy.
-- Rozszerzenie Chrome/Edge wymaga ręcznego załadowania. Testy automatyczne na fixture `.test` przeszły 4/4. Próba uruchomienia Chrome w osobnym profilu testowym 2026-10-23 zakończyła się natychmiastową awarią procesu, zanim dało się sprawdzić interfejs; nie dodano rozszerzenia do zwykłego profilu. Ostrzeżenie może pojawić się po rozpoczęciu ładowania strony i nie blokuje nawigacji.
+- Rozszerzenie Chrome/Edge wymaga ręcznego załadowania. Testy automatyczne na fixture `.test` przeszły 4/4, a historyczny E2E Chrome/Edge z 2026-10-20 potwierdził UI w profilach tymczasowych. Próba Chrome z 2026-10-23 nie została zaliczona: Chrome 155 zignorował `--load-extension`, a dostępne CUA odmówiło odczytu URL okna i dalszej obsługi `chrome://extensions`. W jednym podejściu błędne przekazanie argumentów otworzyło zwykłą nową kartę; rozszerzenia tam nie załadowano. Druga próba użyła poprawnie odizolowanego profilu i mocka Native Messaging, lecz zakończyła się przed załadowaniem rozszerzenia. Profil, mock, procesy testowe i wpis HKCU sprzątnięto. Ostrzeżenie może pojawić się po rozpoczęciu ładowania strony i nie blokuje nawigacji.
 
 ## Analiza i źródła zdarzeń
 
