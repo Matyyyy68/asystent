@@ -594,6 +594,32 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         });
     }
 
+    [Fact]
+    public async Task LiveReadOnlyRunAndWinlogonRegistryEnumerationWhenExplicitlyEnabled()
+    {
+        if (!OperatingSystem.IsWindows() || !string.Equals(Environment.GetEnvironmentVariable("SENTINEL_LIVE_PERSISTENCE"), "1", StringComparison.Ordinal)) return;
+        var store = await CreateStore();
+        using var monitor = new WindowsPersistenceSnapshotMonitor(TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(snapshot.Initialized, monitor.State);
+        Assert.NotEmpty(snapshot.Entries);
+        Assert.All(snapshot.Entries, pair =>
+        {
+            Assert.Matches("^[a-z0-9.]+:[A-F0-9]{64}$", pair.Key);
+            Assert.Matches("^[A-F0-9]{64}$", pair.Value.Fingerprint);
+            Assert.Contains(pair.Value.Source, new[]
+            {
+                "registry.user.run", "registry.user.runonce", "registry.user.policy.run", "registry.user.winlogon",
+                "registry.machine64.run", "registry.machine64.runonce", "registry.machine64.policy.run", "registry.machine64.winlogon",
+                "registry.machine32.run", "registry.machine32.runonce", "registry.machine32.policy.run", "registry.machine32.winlogon",
+                "startup.user", "startup.common", "scheduled.task", "registry.service", "registry.driver"
+            });
+        });
+        Assert.Contains(snapshot.Entries.Values, entry => entry.Source.EndsWith(".winlogon", StringComparison.Ordinal));
+    }
+
     private static PersistenceSnapshotEntry Entry(string source, string value, bool writable)
         => new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))), writable);
 
