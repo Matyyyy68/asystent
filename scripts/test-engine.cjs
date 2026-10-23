@@ -245,6 +245,12 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     'an embedded suspicious URL must correlate with a later explicit analysis of that same host, not an unrelated typed URL: ' +
       JSON.stringify(correlatedHistory.map(({ correlationId, evidenceCodes, risk }) => ({ correlationId, evidenceCodes, risk }))));
   assert.ok(!JSON.stringify(correlatedHistory).includes('paypal.com.evil.test'));
+  const repeatedSameSignal = await call('analyze', { text: 'Oddzielna kontrola hosta', url: embeddedPhishingUrl });
+  assert.equal(repeatedSameSignal.ok, true, repeatedSameSignal.error);
+  const repeatedSameRisk = await call('analyze', { text: 'Oddzielna kontrola hosta', url: embeddedPhishingUrl });
+  assert.equal(repeatedSameRisk.ok, true, repeatedSameRisk.error);
+  assert.equal((await call('history')).result.length, 2,
+    'repeating an identical manual URL signal from the same source within ten minutes must not add another history event');
   await call('clearHistory');
   const result = await call('analyze', { text: `Pilnie zaloguj się i podaj hasło: ${embeddedPhishingUrl}`, url: 'https://example.com' });
   assert.equal(result.ok, true); assert.ok(['High','Critical'].includes(result.result.risk));

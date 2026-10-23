@@ -932,9 +932,10 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var from = item.Timestamp.ToUniversalTime().Subtract(window).ToString("O");
         var to = item.Timestamp.ToUniversalTime().Add(window).ToString("O");
         using var command = c.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT e.id FROM event_observations o JOIN events e ON e.id=o.event_row_id WHERE o.source=$source AND e.signal_hash=$hash AND o.observed_at BETWEEN $from AND $to ORDER BY o.observed_at DESC LIMIT 1";
+        command.CommandText = "SELECT e.id FROM event_observations o JOIN events e ON e.id=o.event_row_id WHERE o.source=$source AND e.signal_hash=$hash AND e.risk=$risk AND o.observed_at BETWEEN $from AND $to ORDER BY o.observed_at DESC LIMIT 1";
         command.Parameters.AddWithValue("$source", source);
         command.Parameters.AddWithValue("$hash", item.SignalHash!.ToUpperInvariant());
+        command.Parameters.AddWithValue("$risk", (int)item.Risk);
         command.Parameters.AddWithValue("$from", from); command.Parameters.AddWithValue("$to", to);
         var existing = await command.ExecuteScalarAsync(ct);
         return existing is null ? null : Convert.ToInt64(existing, CultureInfo.InvariantCulture);

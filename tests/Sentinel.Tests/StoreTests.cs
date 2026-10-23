@@ -84,6 +84,8 @@ public sealed class StoreTests : IDisposable
             basis with { EventId = Guid.NewGuid(), Source = "dns-other", Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
         var otherSignal = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis with { EventId = Guid.NewGuid(), SignalHash = new string('B', 64), Timestamp = at.AddMinutes(5) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
+        var changedRisk = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
+            basis with { EventId = Guid.NewGuid(), Risk = RiskLevel.Moderate, Timestamp = at.AddMinutes(6) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
         var afterWindow = await reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis with { EventId = Guid.NewGuid(), Timestamp = at.AddMinutes(11) }, "url", "reputation.cert", TimeSpan.FromMinutes(10));
 
@@ -91,8 +93,9 @@ public sealed class StoreTests : IDisposable
         Assert.True(repeatedOperational.Duplicate);
         Assert.False(otherSource.Duplicate);
         Assert.False(otherSignal.Duplicate);
+        Assert.False(changedRisk.Duplicate);
         Assert.False(afterWindow.Duplicate);
-        Assert.Equal(5, await reopened.CountEventsAsync());
+        Assert.Equal(6, await reopened.CountEventsAsync());
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddWithEnterpriseMetadataDeduplicatedAsync(
             basis, "url", "reputation.cert", TimeSpan.Zero));
     }

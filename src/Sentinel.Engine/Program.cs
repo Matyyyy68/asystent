@@ -614,7 +614,10 @@ while (await Console.In.ReadLineAsync() is { } line)
                             ? LocalStore.CreateHostSignalHash(reputationMatchHost ?? urlAnalysis?.Host)
                             : LocalStore.CreateUrlEvidenceSignalHash(signalUrlAnalysis?.Host, assessment.Indicators.Select(indicator => indicator.Id))),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
-                        "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
+                        "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"),
+                        assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) || indicator.Id == "reputation.cert")
+                            ? TimeSpan.FromMinutes(10)
+                            : null);
                 }
                 await store.ApplyRetentionAsync(settings.RetentionDays);
                 result = assessment;
