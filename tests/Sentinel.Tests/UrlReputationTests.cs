@@ -72,6 +72,17 @@ public sealed class UrlReputationTests : IDisposable
         Assert.Throws<InvalidDataException>(() => UrlReputation.CreateSignalHash("https://example.test/" + new string('x', 4100)));
     }
 
+    [Fact]
+    public void DuplicateAndCommentLinesCannotBypassFeedSizeBounds()
+    {
+        var reputation = new UrlReputation(directory);
+        var duplicateLines = string.Join('\n', Enumerable.Repeat("https://same.example.test/", UrlReputation.MaximumUrls + 1));
+        Assert.Throws<InvalidDataException>(() => reputation.Import(duplicateLines, DateTimeOffset.UtcNow));
+        var commentLines = string.Join('\n', Enumerable.Repeat("# comment", UrlReputation.MaximumFeedLines + 1));
+        Assert.Throws<InvalidDataException>(() => reputation.Import(commentLines, DateTimeOffset.UtcNow));
+        Assert.Equal(0, reputation.Status(DateTimeOffset.UtcNow).UrlCount);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

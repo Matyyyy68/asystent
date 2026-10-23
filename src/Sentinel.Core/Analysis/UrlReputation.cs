@@ -14,6 +14,7 @@ public sealed class UrlReputation
 {
     public const int MaximumFeedBytes = 20 * 1024 * 1024;
     public const int MaximumUrls = 250_000;
+    public const int MaximumFeedLines = 500_000;
     private readonly string connectionString;
 
     public UrlReputation(string directory)
@@ -87,12 +88,18 @@ public sealed class UrlReputation
         if (Encoding.UTF8.GetByteCount(content) > MaximumFeedBytes)
             throw new InvalidDataException("Lista URL przekracza limit 20 MiB.");
         var hashes = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var line in content.Split('\n'))
+        using var lines = new StringReader(content);
+        var lineCount = 0;
+        var entryCount = 0;
+        while (lines.ReadLine() is { } line)
         {
+            if (++lineCount > MaximumFeedLines)
+                throw new InvalidDataException("Lista URL przekracza limit 500 000 wierszy.");
             var value = line.Trim();
             if (value.Length == 0 || value.StartsWith('#')) continue;
+            if (++entryCount > MaximumUrls)
+                throw new InvalidDataException("Lista URL przekracza limit 250 000 wpisów.");
             hashes.Add(CreateSignalHash(value));
-            if (hashes.Count > MaximumUrls) throw new InvalidDataException("Lista URL przekracza limit 250 000 wpisów.");
         }
         if (hashes.Count == 0) throw new InvalidDataException("Lista URL nie zawiera poprawnych adresów.");
         var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
