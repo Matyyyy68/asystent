@@ -233,10 +233,21 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   }
   assert.equal((await call('history')).result.length, 0);
   const embeddedPhishingUrl = 'https://paypal.com.evil.test/login';
+  const embeddedAnalysis = await call('analyze', { text: `Pilnie zaloguj się i podaj hasło: ${embeddedPhishingUrl}`, url: 'https://example.com' });
+  assert.equal(embeddedAnalysis.ok, true); assert.ok(['High','Critical'].includes(embeddedAnalysis.result.risk));
+  assert.ok(embeddedAnalysis.result.indicators.some(indicator => indicator.id === 'url.brand'), 'embedded suspicious URL must contribute rule evidence');
+  assert.ok(embeddedAnalysis.result.uncertainties.some(item => item.includes('faktyczny cel kliknięcia nie został potwierdzony')));
+  const explicitSameHost = await call('analyze', { text: 'Oddzielna kontrola hosta', url: embeddedPhishingUrl });
+  assert.equal(explicitSameHost.ok, true, explicitSameHost.error);
+  const correlatedHistory = (await call('history')).result;
+  assert.equal(correlatedHistory.length, 2);
+  assert.equal(new Set(correlatedHistory.map(event => event.correlationId)).size, 1,
+    'an embedded suspicious URL must correlate with a later explicit analysis of that same host, not an unrelated typed URL: ' +
+      JSON.stringify(correlatedHistory.map(({ correlationId, evidenceCodes, risk }) => ({ correlationId, evidenceCodes, risk }))));
+  assert.ok(!JSON.stringify(correlatedHistory).includes('paypal.com.evil.test'));
+  await call('clearHistory');
   const result = await call('analyze', { text: `Pilnie zaloguj się i podaj hasło: ${embeddedPhishingUrl}`, url: 'https://example.com' });
   assert.equal(result.ok, true); assert.ok(['High','Critical'].includes(result.result.risk));
-  assert.ok(result.result.indicators.some(indicator => indicator.id === 'url.brand'), 'embedded suspicious URL must contribute rule evidence');
-  assert.ok(result.result.uncertainties.some(item => item.includes('faktyczny cel kliknięcia nie został potwierdzony')));
   const history = (await call('history')).result; assert.equal(history.length, 1);
   assert.ok(!JSON.stringify(history).includes(embeddedPhishingUrl));
   assert.equal(history[0].schemaVersion, 1); assert.equal(history[0].source, 'manual-analysis');

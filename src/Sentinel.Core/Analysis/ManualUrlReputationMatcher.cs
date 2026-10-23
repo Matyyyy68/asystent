@@ -35,4 +35,35 @@ public static class ManualUrlReputationMatcher
                 hosts.Add(uri.IdnHost);
         }
     }
+
+    public static UrlAnalysis? FindSignalUrlAnalysis(string? explicitUrl, string text, UrlAnalyzer urlAnalyzer,
+        IReadOnlyList<ThreatIndicator> indicators, string? reputationMatchHost = null)
+    {
+        if (reputationMatchHost is not null) return urlAnalyzer.Analyze("https://" + reputationMatchHost);
+
+        var urlIndicators = indicators.Where(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal))
+            .GroupBy(indicator => indicator.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Max(indicator => indicator.Weight), StringComparer.Ordinal);
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(explicitUrl)) candidates.Add(explicitUrl);
+        candidates.AddRange(ThreatAnalysisEngine.ExtractEmbeddedUrls(text).Urls);
+
+        UrlAnalysis? fallback = null;
+        UrlAnalysis? best = null;
+        var bestWeight = 0;
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var analysis = urlAnalyzer.Analyze(candidate);
+            if (!analysis.IsValid) continue;
+            fallback ??= analysis;
+            var weight = analysis.Indicators.Sum(indicator => urlIndicators.GetValueOrDefault(indicator.Id));
+            if (weight > bestWeight)
+            {
+                best = analysis;
+                bestWeight = weight;
+            }
+        }
+
+        return best ?? fallback;
+    }
 }

@@ -54,6 +54,20 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
     }
 
     [Fact]
+    public void SignalHostComesFromTheUrlThatProducedTheWarning()
+    {
+        var analyzer = new UrlAnalyzer(new DomainNames());
+        const string embedded = "https://paypal.com.evil.test/login";
+        var assessment = new ThreatAnalysisEngine(analyzer).Analyze(new AnalysisContext("test",
+            $"Link {embedded}", DateTimeOffset.UtcNow, new NavigationSignal("https://example.com/")));
+
+        var selected = ManualUrlReputationMatcher.FindSignalUrlAnalysis("https://example.com/",
+            $"Link {embedded}", analyzer, assessment.Indicators);
+
+        Assert.Equal("paypal.com.evil.test", selected?.Host);
+    }
+
+    [Fact]
     public void CombinesExplicitAndEmbeddedUrlsAndUsesTheFreshnessWindow()
     {
         var now = DateTimeOffset.UtcNow;

@@ -596,7 +596,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                 assessment = ManualUrlReputationMatcher.Apply(assessment, url, text, reputation, observedAt, out var reputationMatchHost);
                 if (assessment.Indicators.Count > 0)
                 {
-                    var signalUrlAnalysis = reputationMatchHost is null ? urlAnalysis : urlAnalyzer.Analyze("https://" + reputationMatchHost);
+                    var signalUrlAnalysis = ManualUrlReputationMatcher.FindSignalUrlAnalysis(url, text, urlAnalyzer,
+                        assessment.Indicators, reputationMatchHost);
                     var correlationDomain = signalUrlAnalysis?.RegistrableDomain ?? signalUrlAnalysis?.Host;
                     Guid? correlationId = signalUrlAnalysis is { IsValid: true } && correlationDomain is not null &&
                         Uri.CheckHostName(correlationDomain) == UriHostNameType.Dns &&
