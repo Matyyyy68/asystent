@@ -361,6 +361,33 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task PolicyRunRegistryChangeIsRecordedWithRedactedEvidence()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["policy-entry"] = Entry("registry.user.policy.run", "old command", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries["policy-entry"] = Entry("registry.user.policy.run", "C:\\Users\\Alice\\AppData\\Local\\Temp\\payload.exe", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana autostartu Windows", item.Category);
+        Assert.Contains("persistence.user.policy-run.changed", item.EvidenceCodes!);
+        Assert.Contains("persistence.target.user-writable-location", item.EvidenceCodes!);
+        Assert.Contains("Sprawdź ustawienia zasad autostartu Windows", item.Recommendation, StringComparison.OrdinalIgnoreCase);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(item);
+        Assert.DoesNotContain("payload.exe", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alice", serialized, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("old command", serialized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task NewlyAvailableServiceSourceGetsSilentBaseline()
     {
         var store = await CreateStore();
@@ -461,6 +488,34 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         Assert.Equal(2, expanded.Entries.Count);
         Assert.Contains(expanded.Entries.Values, entry => entry.Source == "registry.service");
         Assert.Contains(expanded.Entries.Values, entry => entry.Source == "registry.driver");
+    }
+
+    [Fact]
+    public async Task SchemaV26BaselineMigratesToPolicyRunSources()
+    {
+        var store = await CreateStore();
+        var fingerprint = Entry("registry.user.run", "existing command", false).Fingerprint;
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE windows_persistence_snapshot; CREATE TABLE windows_persistence_snapshot(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot VALUES('existing-run','registry.user.run','" + fingerprint + "',0); UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1; PRAGMA user_version=26;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(migrated.Initialized);
+        Assert.Equal(fingerprint, Assert.Single(migrated.Entries.Values).Fingerprint);
+
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new("policy-user-entry", "registry.user.policy.run", fingerprint, false),
+            new("policy-machine-entry", "registry.machine64.policy.run", fingerprint, false)
+        ]);
+        var expanded = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Equal(2, expanded.Entries.Count);
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "registry.user.policy.run");
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "registry.machine64.policy.run");
     }
 
     [Fact]

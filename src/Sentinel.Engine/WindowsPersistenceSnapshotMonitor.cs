@@ -242,6 +242,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine64.runonce" => "HKLM RunOnce (64-bit)",
                 "registry.machine32.run" => "HKLM Run (32-bit)",
                 "registry.machine32.runonce" => "HKLM RunOnce (32-bit)",
+                "registry.user.policy.run" => "HKCU Policies Explorer Run",
+                "registry.machine64.policy.run" => "HKLM Policies Explorer Run (64-bit)",
+                "registry.machine32.policy.run" => "HKLM Policies Explorer Run (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
@@ -262,6 +265,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             {
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
+                "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
                 _ => "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów."
             };
             var evidenceScope = source switch
@@ -272,6 +276,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine64.runonce" => "machine64.runonce",
                 "registry.machine32.run" => "machine32.run",
                 "registry.machine32.runonce" => "machine32.runonce",
+                "registry.user.policy.run" => "user.policy-run",
+                "registry.machine64.policy.run" => "machine64.policy-run",
+                "registry.machine32.policy.run" => "machine32.policy-run",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
@@ -346,8 +353,10 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
         var runPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
         var runOncePath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+        var policyRunPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
+        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
         var views = Environment.Is64BitOperatingSystem
             ? new[] { (RegistryView.Registry64, "machine64"), (RegistryView.Registry32, "machine32") }
             : new[] { (RegistryView.Default, "machine32") };
@@ -355,6 +364,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         {
             CaptureRunKey(RegistryHive.LocalMachine, view, runPath, $"registry.{sourcePrefix}.run", entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries);
+            CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
         }
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);
