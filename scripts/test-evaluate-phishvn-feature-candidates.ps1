@@ -13,7 +13,9 @@ Set-Content -LiteralPath $trainFixture -Value (@($header) + @(
     '2,https://safe.example.test/,benign,gold,train',
     '3,https://aaaaaaaaaaaaaaaaaaaaaaaaaa.example.test/,phishing,silver,train',
     '4,https://ordinary.example.test/,benign,silver,train',
-    '5,777777.example.test/a,phishing,bronze,train'
+    '5,777777.example.test/a,phishing,bronze,train',
+    '6,https://abcdefghijklmnopqrstuvwxyz.com/,phishing,gold,train',
+    '7,https://qqqqqqqqqqqqqqqqqq.example.com/,benign,gold,train'
 )) -Encoding UTF8
 Set-Content -LiteralPath $validationFixture -Value (@($header) + @(
     '6,verify.example.test/login,phishing,gold,val',
@@ -26,20 +28,24 @@ try {
     $evaluator = Join-Path $PSScriptRoot 'evaluate-phishvn-feature-candidates.ps1'
     $train = @(& $evaluator -CsvPath $trainFixture -Split train)
     $aggregate = $train | Where-Object ConfidenceTier -eq 'gold+silver aggregate'
-    if ($aggregate.Count -ne 29 -or @($train | Where-Object ConfidenceTier -eq 'bronze').Count -ne 0) {
+    if ($aggregate.Count -ne 30 -or @($train | Where-Object ConfidenceTier -eq 'bronze').Count -ne 0) {
         throw 'Default tiers must include aggregate and separate gold/silver rows, and exclude bronze.'
     }
     $digitMetric = $aggregate | Where-Object Feature -eq 'digits>=4'
-    if ($digitMetric.Rows -ne 4 -or $digitMetric.TP -ne 1 -or $digitMetric.FP -ne 0 -or $digitMetric.TN -ne 2 -or $digitMetric.FN -ne 1) {
+    if ($digitMetric.Rows -ne 6 -or $digitMetric.TP -ne 1 -or $digitMetric.FP -ne 0 -or $digitMetric.TN -ne 3 -or $digitMetric.FN -ne 2) {
         throw 'Digit candidate confusion matrix or tier filtering failed.'
     }
     $longLabelMetric = $aggregate | Where-Object Feature -eq 'long_label>=25'
-    if ($longLabelMetric.TP -ne 1 -or $longLabelMetric.FP -ne 0 -or $longLabelMetric.TN -ne 2 -or $longLabelMetric.FN -ne 1) {
+    if ($longLabelMetric.TP -ne 2 -or $longLabelMetric.FP -ne 0 -or $longLabelMetric.TN -ne 3 -or $longLabelMetric.FN -ne 1) {
         throw 'Long-label candidate or scheme-stripped URL parsing failed.'
     }
     $hostTokenMetric = $aggregate | Where-Object Feature -eq 'auth_token_in_host'
-    if ($hostTokenMetric.TP -ne 1 -or $hostTokenMetric.FP -ne 0 -or $hostTokenMetric.TN -ne 2 -or $hostTokenMetric.FN -ne 1) {
+    if ($hostTokenMetric.TP -ne 1 -or $hostTokenMetric.FP -ne 0 -or $hostTokenMetric.TN -ne 3 -or $hostTokenMetric.FN -ne 2) {
         throw 'Host-only authentication-token feature failed.'
+    }
+    $entropyMetric = $aggregate | Where-Object Feature -eq 'registered_label_entropy>=4.0'
+    if ($entropyMetric.Rows -ne 6 -or $entropyMetric.TP -ne 1 -or $entropyMetric.FP -ne 0 -or $entropyMetric.TN -ne 3 -or $entropyMetric.FN -ne 2) {
+        throw 'Registrable-label entropy candidate failed.'
     }
     $trainMetadata = Get-Item -LiteralPath $trainFixture
     if ($digitMetric.DataSizeBytes -ne $trainMetadata.Length -or $digitMetric.DataSha256 -ne (Get-FileHash -LiteralPath $trainFixture -Algorithm SHA256).Hash) {
@@ -47,7 +53,7 @@ try {
     }
     $validation = @(& $evaluator -CsvPath $validationFixture -Split val)
     $validationAggregate = $validation | Where-Object ConfidenceTier -eq 'gold+silver aggregate'
-    if ($validationAggregate.Count -ne 29 -or ($validationAggregate | Where-Object Feature -eq 'auth_token').TP -ne 1) {
+    if ($validationAggregate.Count -ne 30 -or ($validationAggregate | Where-Object Feature -eq 'auth_token').TP -ne 1) {
         throw 'Explicit validation evaluation failed.'
     }
 

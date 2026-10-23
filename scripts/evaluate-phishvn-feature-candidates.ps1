@@ -25,6 +25,13 @@ $dataSizeBytes = $stream.Length
 $dataSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream))
 $stream.Position = 0
 Add-Type -AssemblyName Microsoft.VisualBasic
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$coreAssembly = Join-Path $repositoryRoot 'src\Sentinel.Core\bin\Release\net10.0\Sentinel.Core.dll'
+if (-not (Test-Path -LiteralPath $coreAssembly -PathType Leaf)) {
+    $stream.Dispose(); throw 'Build Sentinel.Core first with: dotnet build src/Sentinel.Core/Sentinel.Core.csproj -c Release'
+}
+Add-Type -Path $coreAssembly
+$domainNames = [Sentinel.Core.Analysis.DomainNames]::new()
 $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($stream, [Text.Encoding]::UTF8, $true)
 $parser.TextFieldType = [Microsoft.VisualBasic.FileIO.FieldType]::Delimited
 $parser.SetDelimiters(',')
@@ -40,8 +47,16 @@ $featureNames = @(
     'path_segments>=4', 'path_segments>=6',
     'query_params>=3', 'query_params>=5', 'percent_escape', 'at_sign',
     'ip_literal', 'punycode', 'auth_token', 'auth_token_in_host', 'long_label>=25',
-    'subdomain_long>=20', 'unusual_port', 'encoded_slash'
+    'subdomain_long>=20', 'unusual_port', 'encoded_slash', 'registered_label_entropy>=4.0'
 )
+function Get-Entropy([string]$Value) {
+    if ([string]::IsNullOrEmpty($Value)) { return 0.0 }
+    $frequencies = @{}
+    foreach ($character in $Value.ToCharArray()) { $frequencies[[string]$character]++ }
+    $entropy = 0.0
+    foreach ($count in $frequencies.Values) { $probability = $count / $Value.Length; $entropy -= $probability * [Math]::Log($probability, 2) }
+    return $entropy
+}
 foreach ($tier in $Tiers) {
     $counts[$tier] = @{}
     foreach ($feature in $featureNames) {
@@ -89,6 +104,9 @@ try {
             throw "Invalid URL near record $record; no URL values were logged."
         }
         $hostName = $uri.Host.ToLowerInvariant().TrimEnd('.')
+        $registeredDomain = $domainNames.RegistrableDomain($hostName)
+        if ([string]::IsNullOrWhiteSpace($registeredDomain)) { $registeredDomain = $hostName }
+        $registeredLabel = $registeredDomain.Split('.')[0]
         $labels = @($hostName.Split('.') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $path = $uri.AbsolutePath
         $query = $uri.Query
@@ -113,7 +131,7 @@ try {
             'auth_token' = $rawUrl -match '(?i)(login|verify|secure|account|password|signin|confirm|update)'
             'auth_token_in_host' = $hostName -match '(?i)(login|verify|secure|account|password|signin|confirm|update)'; 'long_label>=25' = $longLabel
             'subdomain_long>=20' = $longSubdomain; 'unusual_port' = $uri.Port -notin 80, 443
-            'encoded_slash' = $rawUrl -match '(?i)%2f|%5c'
+            'encoded_slash' = $rawUrl -match '(?i)%2f|%5c'; 'registered_label_entropy>=4.0' = (Get-Entropy $registeredLabel) -ge 4.0
         }
 
         $actualPhishing = $label -eq 'phishing'
