@@ -593,14 +593,12 @@ while (await Console.In.ReadLineAsync() is { } line)
                     string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url));
                 var assessment = await orchestrator.AnalyzeAsync(context, settings.UseLocalAI, settings.LocalAIEndpoint,
                     settings.LocalAIModel, settings.LocalAIEmbeddingModel, settings.LocalAITimeoutSeconds);
-                if (Uri.TryCreate(url, UriKind.Absolute, out var target) && target.Scheme is "http" or "https" && reputation.Contains(target.IdnHost, DateTimeOffset.UtcNow))
-                    assessment = assessment with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
-                        Indicators = assessment.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray(),
-                        Explanation = "Domena znajduje się na aktualnej liście ostrzeżeń CERT Polska. " + assessment.Explanation };
+                assessment = ManualUrlReputationMatcher.Apply(assessment, url, text, reputation, observedAt, out var reputationMatchHost);
                 if (assessment.Indicators.Count > 0)
                 {
-                    var correlationDomain = urlAnalysis?.RegistrableDomain ?? urlAnalysis?.Host;
-                    Guid? correlationId = urlAnalysis is { IsValid: true } && correlationDomain is not null &&
+                    var signalUrlAnalysis = reputationMatchHost is null ? urlAnalysis : urlAnalyzer.Analyze("https://" + reputationMatchHost);
+                    var correlationDomain = signalUrlAnalysis?.RegistrableDomain ?? signalUrlAnalysis?.Host;
+                    Guid? correlationId = signalUrlAnalysis is { IsValid: true } && correlationDomain is not null &&
                         Uri.CheckHostName(correlationDomain) == UriHostNameType.Dns &&
                         assessment.Indicators.Any(indicator => indicator.Id.StartsWith("url.", StringComparison.Ordinal) || indicator.Id == "reputation.cert")
                         ? await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt)
@@ -612,8 +610,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                         CorrelationId: correlationId,
                         EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
                         SignalHash: assessment.Indicators.Any(indicator => indicator.Id == "reputation.cert")
-                            ? LocalStore.CreateHostSignalHash(urlAnalysis?.Host)
-                            : LocalStore.CreateUrlEvidenceSignalHash(urlAnalysis?.Host, assessment.Indicators.Select(indicator => indicator.Id))),
+                            ? LocalStore.CreateHostSignalHash(reputationMatchHost ?? urlAnalysis?.Host)
+                            : LocalStore.CreateUrlEvidenceSignalHash(signalUrlAnalysis?.Host, assessment.Indicators.Select(indicator => indicator.Id))),
                         assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message",
                         "local." + (assessment.Category == ThreatCategory.SuspiciousNavigation ? "url" : "message"));
                 }

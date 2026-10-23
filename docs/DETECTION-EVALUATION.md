@@ -4,7 +4,7 @@
 **Wersja reguł:** `2026.10.6`
 **Zakres:** wyłącznie kolumny `URL` i `label`; żaden adres nie został otwarty, rozwiązany przez DNS ani wysłany do usługi.
 
-**Zmiana po pomiarze:** wersja `2026.10.7` dodaje analizę do 10 surowych adresów HTTP/HTTPS osadzonych w treści wiadomości. Klasyfikator URL-only oraz jego próg nie uległy zmianie; powyższe metryki dotyczą wersji `2026.10.6` i nie są dowodem skuteczności nowej obsługi tekstu. F03 pozostaje częściowe.
+**Zmiany po pomiarze:** wersja `2026.10.7` dodaje analizę do 10 surowych adresów HTTP/HTTPS osadzonych w treści wiadomości, a `2026.10.8` sprawdza te linki oraz jawny URL względem świeżej, lokalnie zaimportowanej listy CERT Polska. Testy benchmarkowe tworzą `ThreatAnalysisEngine` bez feedu, więc wyniki poniżej mierzą wyłącznie reguły URL i nie obejmują dopasowań do lokalnej listy. Metryki nadal dotyczą heurystyk URL; nie są pomiarem nowej kontroli reputacyjnej. F03 pozostaje częściowe.
 
 ## Zestaw i odtwarzanie
 
