@@ -1,0 +1,41 @@
+$ErrorActionPreference = 'Stop'
+$repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$plansDirectory = Join-Path $repositoryRoot 'docs\implementation-plans'
+$planFiles = @(Get-ChildItem -LiteralPath $plansDirectory -Filter 'PLAN-*.md' -File | Sort-Object Name)
+if ($planFiles.Count -lt 12) { throw "Expected at least 12 implementation plans; found $($planFiles.Count)." }
+
+$expectedTitlePatterns = @(
+    'Cel',
+    'Stan obecny',
+    'Braki',
+    'Decyzje',
+    'Zależności',
+    'Etapy',
+    'Pliki|Zmiany w plikach',
+    'Prywatność|Bezpieczeństwo',
+    'Testy',
+    'Akceptacj',
+    'Ryzyka',
+    'Status'
+)
+$headingPattern = '^\s*(?<number>1[0-2]|[1-9])\.\s+\*\*(?<title>[^*]+)\*\*'
+foreach ($plan in $planFiles) {
+    $headings = @(Select-String -LiteralPath $plan.FullName -Pattern $headingPattern | ForEach-Object {
+        [pscustomobject]@{ Number = [int]$_.Matches[0].Groups['number'].Value; Title = $_.Matches[0].Groups['title'].Value }
+    })
+    foreach ($number in 1..12) {
+        $matchesForSection = @($headings | Where-Object Number -eq $number)
+        if ($matchesForSection.Count -ne 1) {
+            throw "$($plan.Name) must contain exactly one numbered section $number; found $($matchesForSection.Count)."
+        }
+        $titlePattern = $expectedTitlePatterns[$number - 1]
+        if ($matchesForSection[0].Title -notmatch $titlePattern) {
+            throw "$($plan.Name) section $number has unexpected title '$($matchesForSection[0].Title)'."
+        }
+    }
+    if (-not ($headings | Where-Object Number -eq 12 | Select-Object -First 1).Title.Contains('Status')) {
+        throw "$($plan.Name) must end its required plan structure with a status section."
+    }
+}
+
+Write-Output "PASS: all $($planFiles.Count) implementation plans contain the required 12 sections."
