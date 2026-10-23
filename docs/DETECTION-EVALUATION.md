@@ -6,6 +6,8 @@ Porównano aktualny oficjalny feed domen CERT Polska z PhishVN v3.1.0 wyłączni
 
 Pomiar można odtworzyć skryptem `scripts/evaluate-phishvn-cert-feed.ps1`, podając wyłącznie oficjalne `url_train.csv` i `url_val.csv`. Źródłem feedu jest [CERT Polska — lista ostrzeżeń](https://cert.pl/lista-ostrzezen/).
 
+**Powtórzenie z aktualnym feedem (2026-10-23 15:02 UTC):** ponowny pomiar tym samym, checksumowanym train/validation pobrał 125 421 domen, feed SHA-256 `CCD086A057422D783D42CF6B96538A4C3B15DA3C0FFECFB01D203911E2F6C1D9`. Wynik pozostał TP=0, FP=0, TN=11 004, FN=2 076 na train oraz TP=0, FP=0, TN=1 561, FN=24 na validation. `RulesVersion=2026.10.9`, `URLsOpened=0`; nie użyto PhishVN test splitu. To potwierdza, że świeża lista CERT nie uzupełnia rozpoznawania URL w tym zbiorze.
+
 **Data pomiaru:** 2026-10-22  
 **Wersja reguł:** `2026.10.6`
 **Zakres:** wyłącznie kolumny `URL` i `label`; żaden adres nie został otwarty, rozwiązany przez DNS ani wysłany do usługi.
