@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -16,6 +18,29 @@ public static class WindowsDnsOperationalEventParser
     private const string Channel = "Microsoft-Windows-DNS-Client/Operational";
     private const int MaximumXmlCharacters = 2 * 1024 * 1024;
     private static readonly Regex XmlDeclaration = new("<\\?xml[^?]*\\?>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>Resumes from the stored cursor, or replays the current log after Windows resets its record IDs.</summary>
+    public static long ResolveCursorAfterLogReset(long savedCursor, long latestRecordId)
+    {
+        if (savedCursor < 0) throw new ArgumentOutOfRangeException(nameof(savedCursor));
+        if (latestRecordId < 0) throw new ArgumentOutOfRangeException(nameof(latestRecordId));
+        return latestRecordId < savedCursor ? 0 : savedCursor;
+    }
+
+    /// <summary>Builds an idempotent identity for one DNS log record, including fields that change across log resets.</summary>
+    public static Guid CreateEventId(WindowsDnsOperationalEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.Timestamp is not { } timestamp) throw new ArgumentException("Zdarzenie DNS musi zawierać czas.", nameof(item));
+        var canonical = string.Join('\n', "sentinel-dns-operational-v2",
+            item.RecordId.ToString(CultureInfo.InvariantCulture),
+            timestamp.UtcDateTime.Ticks.ToString(CultureInfo.InvariantCulture),
+            item.QueryName ?? string.Empty,
+            item.QueryType.ToString(CultureInfo.InvariantCulture),
+            item.QueryStatus.ToString(CultureInfo.InvariantCulture));
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return new Guid(hash.AsSpan(0, 16));
+    }
 
     public static IReadOnlyList<WindowsDnsOperationalEvent> Parse(string xml, long afterRecordId = 0, int maximumEvents = 256)
     {

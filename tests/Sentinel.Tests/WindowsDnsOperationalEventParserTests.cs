@@ -6,6 +6,29 @@ namespace Sentinel.Tests;
 public sealed class WindowsDnsOperationalEventParserTests
 {
     [Fact]
+    public void ResetCursorReplaysCurrentLogButNormalCursorResumesIncrementally()
+    {
+        Assert.Equal(0, WindowsDnsOperationalEventParser.ResolveCursorAfterLogReset(42, 3));
+        Assert.Equal(42, WindowsDnsOperationalEventParser.ResolveCursorAfterLogReset(42, 43));
+        Assert.Equal(0, WindowsDnsOperationalEventParser.ResolveCursorAfterLogReset(0, 43));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WindowsDnsOperationalEventParser.ResolveCursorAfterLogReset(-1, 0));
+    }
+
+    [Fact]
+    public void EventIdentityIsStableAcrossRetriesAndDistinctAcrossLogResets()
+    {
+        var time = new DateTimeOffset(2026, 10, 23, 12, 0, 0, TimeSpan.Zero);
+        var first = new WindowsDnsOperationalEvent(3, time, "phishing.example", 1, 0);
+        var afterReset = first with { Timestamp = time.AddSeconds(1) };
+
+        Assert.Equal(WindowsDnsOperationalEventParser.CreateEventId(first), WindowsDnsOperationalEventParser.CreateEventId(first));
+        Assert.NotEqual(WindowsDnsOperationalEventParser.CreateEventId(first), WindowsDnsOperationalEventParser.CreateEventId(afterReset));
+        Assert.NotEqual(WindowsDnsOperationalEventParser.CreateEventId(first),
+            WindowsDnsOperationalEventParser.CreateEventId(first with { QueryName = "other.example" }));
+        Assert.Throws<ArgumentException>(() => WindowsDnsOperationalEventParser.CreateEventId(first with { Timestamp = null }));
+    }
+
+    [Fact]
     public void ParsesOnlyNewDnsClientQueryEventsAndDropsQueryResults()
     {
         const string xml = """

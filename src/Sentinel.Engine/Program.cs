@@ -193,12 +193,17 @@ async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToke
         dnsOperationalState = "Kanał DNS Operational aktywny; ustawiono początkowy punkt odczytu";
         return [];
     }
-    if (latestRecordId is null || latestRecordId.Value < cursor.Value)
+    if (latestRecordId is null)
     {
-        await store.SetDnsOperationalRecordCursorAsync(latestRecordId ?? 0, cancellationToken);
+        await store.SetDnsOperationalRecordCursorAsync(0, cancellationToken);
         dnsOperationalState = "Dziennik DNS został wyczyszczony lub obrócony; ustawiono nowy punkt odczytu";
         return [];
     }
+
+    var logWasReset = latestRecordId.Value < cursor.Value;
+    cursor = WindowsDnsOperationalEventParser.ResolveCursorAfterLogReset(cursor.Value, latestRecordId.Value);
+    if (logWasReset)
+        dnsOperationalState = "Wykryto reset dziennika DNS; ponawiam odczyt jego bieżących rekordów";
 
     var records = await dnsOperationalLog.ReadAfterAsync(cursor.Value, cancellationToken);
     var matches = new List<string>();
@@ -208,7 +213,7 @@ async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToke
             !reputation.FindMatches([record.QueryName], observedAt).Any() || !deduplicator.TryMark(record.QueryName, observedAt)) continue;
         var correlationDomain = domainNames.RegistrableDomain(record.QueryName) ?? record.QueryName;
         var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt, ct: cancellationToken);
-        var eventId = DnsOperationalEventId(record.RecordId);
+        var eventId = WindowsDnsOperationalEventParser.CreateEventId(record);
         await RecordDetectionAsync(new SecurityEvent(0, observedAt, RiskLevel.High,
             "Domena na liście CERT Polska", "Windows DNS Client Operational", "Zaobserwowano zapytanie o domenę z aktualnej listy: " + record.QueryName,
             "Ostrzeżenie, bez blokowania. Zdarzenie nie wskazuje procesu; odpowiedź DNS nie jest przechowywana.", EventStatus.New,
@@ -222,11 +227,6 @@ async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToke
         await store.SetDnsOperationalRecordCursorAsync(records[^1].RecordId, cancellationToken);
     dnsOperationalState = $"Kanał DNS Operational działa; odczytano {records.Count} nowych zdarzeń, dopasowania: {matches.Count}";
     return matches;
-}
-static Guid DnsOperationalEventId(long recordId)
-{
-    var hash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("sentinel-dns-operational-v1:" + recordId.ToString(CultureInfo.InvariantCulture)));
-    return new Guid(hash.AsSpan(0, 16));
 }
 Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
 {
