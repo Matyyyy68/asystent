@@ -58,6 +58,6 @@ $finalHash = Get-Sha256Hex $namedInstaller
 Set-Content -NoNewline -Encoding ascii "$namedInstaller.sha256" "$finalHash  Sentinel.AI.Setup.$version.exe`n"
 Write-Host "Instalator: $namedInstaller"
 Write-Host "SHA-256: $finalHash"
-& $namedInstaller --self-test
-if ($LASTEXITCODE) { throw 'Installer self-test failed.' }
+$selfTest = Start-Process -FilePath $namedInstaller -ArgumentList @('--self-test') -Wait -PassThru -WindowStyle Hidden
+if ($selfTest.ExitCode -ne 0) { throw "Installer self-test failed with exit code $($selfTest.ExitCode)." }
 Write-Host 'Autotest instalatora: PASS'

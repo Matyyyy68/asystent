@@ -76,17 +76,21 @@ public sealed class AIProviderTests
     public async Task EmbeddingRerankingMovesTheMostSimilarLexicalCandidateIntoAIContext()
     {
         string? chatRequest = null;
+        string? embeddingRequest = null;
         using var client = new HttpClient(new DelegateHandler(async request =>
         {
             if (request.RequestUri!.AbsolutePath == "/api/embed")
+            {
+                embeddingRequest = await request.Content!.ReadAsStringAsync();
                 return Json("""{"embeddings":[[1,0],[0,1],[1,0]]}""");
+            }
             chatRequest = await request.Content!.ReadAsStringAsync();
             return Json("""{"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"High\",\"indicators\":[{\"description\":\"Zweryfikuj zasady\",\"sourceReferences\":[1]}],\"uncertainties\":[],\"recommendations\":[],\"explanation\":\"Źródło opisuje weryfikację zgłoszenia.\"}"}}""");
         }));
         var provider = new OllamaLocalProvider(client);
         var candidates = new TestKnowledgeProvider(
         [
-            new KnowledgeHit("doc-a", "lexical-first.txt", 0, "payment transfer details", -2.0),
+            new KnowledgeHit("doc-a", "lexical-first.txt", 0, "payment transfer details password: kb-secret-value", -2.0),
             new KnowledgeHit("doc-b", "semantic-match.txt", 0, "verify identity through the official support channel", -1.0)
         ]);
         var orchestrator = new AnalysisOrchestrator(new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames())), provider, candidates);
@@ -94,6 +98,9 @@ public sealed class AIProviderTests
             true, "http://127.0.0.1:11434", "synthetic-chat", "synthetic-embed");
 
         Assert.Equal(RiskLevel.High, result.Risk);
+        Assert.NotNull(embeddingRequest);
+        Assert.DoesNotContain("kb-secret-value", embeddingRequest, StringComparison.Ordinal);
+        Assert.Contains("[dane poufne]", embeddingRequest, StringComparison.Ordinal);
         Assert.NotNull(chatRequest);
         using var sent = JsonDocument.Parse(chatRequest);
         var context = sent.RootElement.GetProperty("messages")[1].GetProperty("content").GetString();

@@ -37,8 +37,8 @@ internal static class Program
 
     private static int IntegrationTest()
     {
+        Log("INTEGRATION_TEST_REQUESTED");
         if (!OperatingSystem.IsWindows()) return 2;
-        ApplicationConfiguration.Initialize();
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Programs", ".SentinelAI-Integration-Test-" + Guid.NewGuid().ToString("N"));
         try
@@ -890,6 +890,8 @@ internal sealed class SetupWizard : Form
         ShowPage(WizardPage.Welcome);
     }
 
+    protected override bool ShowWithoutActivation => true;
+
     private async Task MoveNextAsync()
     {
         switch (page)
@@ -1115,6 +1117,12 @@ internal sealed class SetupWizard : Form
     internal static void ValidateVisualStates()
     {
         using var wizard = new SetupWizard();
+        wizard.ShowInTaskbar = false;
+        wizard.StartPosition = FormStartPosition.Manual;
+        wizard.Location = new Point(-32_000, -32_000);
+        wizard.Opacity = 0;
+        wizard.Show();
+        Application.DoEvents();
         if (!ReferenceEquals(wizard.AcceptButton, wizard.next) || !ReferenceEquals(wizard.CancelButton, wizard.cancel))
             throw new InvalidDataException("Kreator nie udostępnia klawiaturowych przycisków Dalej i Anuluj.");
         wizard.lastError = "Kontrolowany błąd testowy instalatora.";

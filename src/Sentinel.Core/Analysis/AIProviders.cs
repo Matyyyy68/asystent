@@ -235,7 +235,7 @@ public sealed class AnalysisOrchestrator(ThreatAnalysisEngine rules, IAIProvider
                 {
                     try
                     {
-                        var inputs = new[] { searchText }.Concat(candidates.Select(hit => hit.Excerpt)).ToArray();
+                        var inputs = new[] { searchText }.Concat(candidates.Select(hit => PrivacyFilter.Redact(hit.Excerpt))).ToArray();
                         var vectors = await embeddings.EmbedAsync(endpoint, embeddingModel, inputs, timeout.Token);
                         sources = candidates.Select((hit, index) => (Hit: hit, Score: CosineSimilarity(vectors[0], vectors[index + 1])))
                             .OrderByDescending(item => item.Score).ThenBy(item => item.Hit.Rank).Take(5).Select(item => item.Hit).ToArray();
