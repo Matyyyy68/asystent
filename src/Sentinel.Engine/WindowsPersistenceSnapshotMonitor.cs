@@ -234,6 +234,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var suspicious = change.Current?.WritableLocation == true;
             var verb = change.Kind switch { PersistenceChangeKind.Added => "dodano", PersistenceChangeKind.Changed => "zmieniono", _ => "usunięto" };
             var source = change.Current?.Source ?? change.Previous!.Source;
+            var isWinlogon = source is "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon";
             var sourceName = source switch
             {
                 "registry.user.run" => "HKCU Run",
@@ -245,6 +246,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.user.policy.run" => "HKCU Policies Explorer Run",
                 "registry.machine64.policy.run" => "HKLM Policies Explorer Run (64-bit)",
                 "registry.machine32.policy.run" => "HKLM Policies Explorer Run (32-bit)",
+                "registry.user.winlogon" => "HKCU Winlogon",
+                "registry.machine64.winlogon" => "HKLM Winlogon (64-bit)",
+                "registry.machine32.winlogon" => "HKLM Winlogon (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
@@ -259,13 +263,14 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.driver" => "sterownik Windows",
                 _ => "wpis autostartu"
             };
-            var eventApplication = source is "scheduled.task" or "registry.service" or "registry.driver"
+            var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
                 ? "Trwałość Windows · " + sourceName : "Autostart Windows · " + sourceName;
             var recommendation = source switch
             {
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
+                "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" => "Sprawdź konfigurację logowania Windows. Sentinel nie zmienia powłoki ani skryptów logowania.",
                 _ => "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów."
             };
             var evidenceScope = source switch
@@ -279,6 +284,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.user.policy.run" => "user.policy-run",
                 "registry.machine64.policy.run" => "machine64.policy-run",
                 "registry.machine32.policy.run" => "machine32.policy-run",
+                "registry.user.winlogon" => "user.winlogon",
+                "registry.machine64.winlogon" => "machine64.winlogon",
+                "registry.machine32.winlogon" => "machine32.winlogon",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
@@ -289,14 +297,16 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
             if (suspicious) evidence.Add("persistence.target.user-writable-location");
             var item = new SecurityEvent(0, now, suspicious ? RiskLevel.Low : RiskLevel.Information,
-                source switch
+                isWinlogon ? "Zmiana konfiguracji logowania Windows" : source switch
                 {
                     "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
-                $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
+                isWinlogon
+                    ? $"Wykryto zmianę konfiguracji logowania Windows ({verb}). Surowa nazwa wartości i polecenie nie są zapisywane."
+                    : $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
                 recommendation,
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence);
@@ -354,9 +364,11 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var runPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
         var runOncePath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
         var policyRunPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
+        var winlogonPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
+        CaptureRegistryValues(RegistryHive.CurrentUser, RegistryView.Default, winlogonPath, "registry.user.winlogon", ["Shell", "Userinit"], entries);
         var views = Environment.Is64BitOperatingSystem
             ? new[] { (RegistryView.Registry64, "machine64"), (RegistryView.Registry32, "machine32") }
             : new[] { (RegistryView.Default, "machine32") };
@@ -365,6 +377,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             CaptureRunKey(RegistryHive.LocalMachine, view, runPath, $"registry.{sourcePrefix}.run", entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
+            CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
         }
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);
@@ -500,6 +513,34 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 break;
             }
             entries[keyId] = new(source, fingerprint, LooksLikeWritableLocation(command));
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureRegistryValues(RegistryHive hive, RegistryView view, string subKeyPath, string source,
+        IReadOnlyCollection<string> valueNames, IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+        using var key = baseKey.OpenSubKey(subKeyPath, writable: false);
+        if (key is null) return;
+        foreach (var name in valueNames)
+        {
+            var value = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            var command = value switch
+            {
+                string text => text,
+                string[] values => string.Join("\0", values),
+                _ => null
+            };
+            if (command is null) continue;
+            var keyId = CreateKey(source, name);
+            if (!entries.ContainsKey(keyId) && entries.Count >= MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                break;
+            }
+            entries[keyId] = new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))),
+                LooksLikeWritableLocation(command));
         }
     }
 

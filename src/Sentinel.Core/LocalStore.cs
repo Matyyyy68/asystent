@@ -96,7 +96,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 27) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 28) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -326,6 +326,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             try
             {
                 await Execute(c, "CREATE TABLE windows_persistence_snapshot_v27(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v27(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v27 RENAME TO windows_persistence_snapshot; PRAGMA user_version=27; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 28)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v28(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v28(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v28 RENAME TO windows_persistence_snapshot; PRAGMA user_version=28; COMMIT;", ct);
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
@@ -821,6 +830,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (string.IsNullOrWhiteSpace(entry.Key) || entry.Key.Length > 100 ||
             entry.Source is not ("registry.user.run" or "registry.user.runonce" or "registry.machine64.run" or "registry.machine64.runonce" or
                 "registry.machine32.run" or "registry.machine32.runonce" or "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" or
+                "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" or
                 "startup.user" or "startup.common" or "scheduled.task" or "registry.service" or "registry.driver") ||
             entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
             throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
@@ -1412,7 +1422,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v27 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores the local event/settings queue from a verified v6-v28 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -1430,7 +1440,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20 or 21 or 22 or 23 or 24 or 25 or 26 or 27))
+            if (backupVersion is not (6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18 or 19 or 20 or 21 or 22 or 23 or 24 or 25 or 26 or 27 or 28))
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
