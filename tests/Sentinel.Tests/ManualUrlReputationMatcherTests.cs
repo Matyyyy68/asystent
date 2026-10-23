@@ -40,6 +40,28 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
     }
 
     [Fact]
+    public void ListedDomainWarnsOnManualSubdomainButNotParentOrLookalike()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reputation = new DomainReputation(directory);
+        reputation.Import("listed.test\nlogin.only.test", now);
+        var baseline = new ThreatAssessment(ThreatCategory.None, RiskLevel.Information, [], [], [], "No sygnałów.");
+
+        var subdomain = ManualUrlReputationMatcher.Apply(baseline, null,
+            "Otwórz https://shop.listed.test/login", reputation, now, out var matchedHost);
+        var parent = ManualUrlReputationMatcher.Apply(baseline, null,
+            "Otwórz https://only.test/", reputation, now, out _);
+        var lookalike = ManualUrlReputationMatcher.Apply(baseline, null,
+            "Otwórz https://notlisted.test/", reputation, now, out _);
+
+        Assert.Equal("shop.listed.test", matchedHost);
+        Assert.Equal(RiskLevel.High, subdomain.Risk);
+        Assert.Contains(subdomain.Indicators, indicator => indicator.Id == "reputation.cert");
+        Assert.Equal(RiskLevel.Information, parent.Risk);
+        Assert.Equal(RiskLevel.Information, lookalike.Risk);
+    }
+
+    [Fact]
     public void ReputationMatchDoesNotDowngradeAnExistingCriticalAssessment()
     {
         var now = DateTimeOffset.UtcNow;

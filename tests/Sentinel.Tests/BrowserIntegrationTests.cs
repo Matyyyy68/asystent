@@ -93,6 +93,23 @@ public sealed class BrowserIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void BrowserWarningMatchesListedDomainSubdomainWithoutReturningHost()
+    {
+        var reputation = new DomainReputation(directory);
+        reputation.Import("listed.test", DateTimeOffset.UtcNow);
+        const string url = "https://shop.listed.test/login";
+
+        var response = new UrlRequestProcessor(reputation)
+            .Process(new BrowserRequest("cert-subdomain-1", "analyze", url, "chrome"));
+
+        Assert.True(response.ShouldWarn);
+        Assert.Equal("High", response.Risk);
+        Assert.Contains(response.Indicators, item => item.Id == "reputation.cert");
+        Assert.DoesNotContain(url, JsonSerializer.Serialize(response), StringComparison.Ordinal);
+        Assert.DoesNotContain("listed.test", JsonSerializer.Serialize(response), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProcessorWarnsOnDeceptiveBrandAndDoesNotReturnSubmittedUrl()
     {
         var url = "https://paypal.com.evil.test/login?email=private@example.test";
