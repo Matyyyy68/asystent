@@ -586,7 +586,7 @@ internal static class Program
                         output.Write(buffer, 0, read);
                         copied += read;
                         var percent = totalBytes == 0 ? 75 : 10 + (int)(copied * 65.0 / totalBytes);
-                        progress($"Kopiowanie plików… {copied / 1_048_576:N0} z {totalBytes / 1_048_576:N0} MB", Math.Min(75, percent));
+                        progress($"Rozpakowuję aplikację z pakietu lokalnego… {copied / 1_048_576:N0} z {totalBytes / 1_048_576:N0} MB", Math.Min(75, percent));
                     }
                     output.Flush();
                     var copiedLength = new FileInfo(destination).Length;
@@ -964,16 +964,23 @@ internal sealed class SetupWizard : Form
         installCancellation = new CancellationTokenSource();
         progress.Value = 0;
         ShowPage(WizardPage.Installing);
+        long lastProgressUiUpdate = 0;
         try
         {
             var selectedPath = Program.ValidateInstallSelection(folder.Text);
-            await Task.Run(() => Program.Install(selectedPath, startMenu.Checked, desktop.Checked, start.Checked, (message, value) => BeginInvoke(() =>
+            await Task.Run(() => Program.Install(selectedPath, startMenu.Checked, desktop.Checked, start.Checked, (message, value) =>
             {
-                status.Text = message;
-                progress.Value = value;
-                if (value >= 80) cancel.Enabled = false;
-                SetIllustration(value >= 90 ? "configure" : value > 10 ? "installing" : "prepare");
-            }), installCancellation.Token));
+                var now = Environment.TickCount64;
+                if (value < 100 && now - Interlocked.Read(ref lastProgressUiUpdate) < 200) return;
+                Interlocked.Exchange(ref lastProgressUiUpdate, now);
+                BeginInvoke(() =>
+                {
+                    status.Text = message;
+                    progress.Value = value;
+                    if (value >= 80) cancel.Enabled = false;
+                    SetIllustration(value >= 90 ? "configure" : value > 10 ? "installing" : "prepare");
+                });
+            }, installCancellation.Token));
             installationRunning = false;
             ShowPage(WizardPage.Verify);
             status.Text = "Sprawdzam pliki, ustawienia, skróty i rejestrację przeglądarki…";
@@ -1067,7 +1074,7 @@ internal sealed class SetupWizard : Form
             WizardPage.Location => "Wybierz bezpieczny folder w swoim profilu. Istniejąca instalacja zostanie zaktualizowana w tym samym miejscu.",
             WizardPage.Options => "Wybierz skróty i zachowanie aplikacji. Możesz zmienić te ustawienia później.",
             WizardPage.Summary => "Instalator sprawdzi pakiet, skopiuje pliki, skonfiguruje wybrane opcje i zweryfikuje wynik.",
-            WizardPage.Installing => "Postęp odpowiada kopiowaniu rzeczywistych plików aplikacji.",
+            WizardPage.Installing => "Rozpakowuję aplikację z pakietu osadzonego w instalatorze; pobieranie nie jest wymagane.",
             WizardPage.Verify => "Sprawdzam pliki programu, ustawienie autostartu, skróty i host przeglądarki.",
             WizardPage.Complete => "Pliki i konfiguracja instalacji zostały sprawdzone.",
             _ => "Instalator nie zgłosi sukcesu, jeśli konfiguracja lub weryfikacja się nie powiedzie."
