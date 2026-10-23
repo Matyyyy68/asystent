@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sentinel.Engine", "src\Sent
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sentinel.Contracts", "src\Sentinel.Contracts\Sentinel.Contracts.csproj", "{F8C5CFFF-57DA-466D-B853-0C750CBFB6CD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sentinel.NativeMessagingEngineHost", "tests\Sentinel.NativeMessagingEngineHost\Sentinel.NativeMessagingEngineHost.csproj", "{755630F3-946F-484A-8EC7-6B9D4A91A1F5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -87,6 +89,18 @@ Global
 		{F8C5CFFF-57DA-466D-B853-0C750CBFB6CD}.Release|x64.Build.0 = Release|Any CPU
 		{F8C5CFFF-57DA-466D-B853-0C750CBFB6CD}.Release|x86.ActiveCfg = Release|Any CPU
 		{F8C5CFFF-57DA-466D-B853-0C750CBFB6CD}.Release|x86.Build.0 = Release|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Debug|x64.Build.0 = Debug|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Debug|x86.Build.0 = Debug|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Release|x64.ActiveCfg = Release|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Release|x64.Build.0 = Release|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Release|x86.ActiveCfg = Release|Any CPU
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -97,5 +111,6 @@ Global
 		{FCDDFEA3-9083-400B-8759-94CBC6089681} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{5EFA78BD-5680-4DB3-A620-F9F3477E72EF} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{F8C5CFFF-57DA-466D-B853-0C750CBFB6CD} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{755630F3-946F-484A-8EC7-6B9D4A91A1F5} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

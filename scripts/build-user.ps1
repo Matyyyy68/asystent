@@ -9,6 +9,8 @@ try {
   if ($LASTEXITCODE) { throw 'Debug Engine build failed' }
   dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release
   if ($LASTEXITCODE) { throw 'Tests failed' }
+  dotnet build tests/Sentinel.NativeMessagingEngineHost/Sentinel.NativeMessagingEngineHost.csproj -c Release
+  if ($LASTEXITCODE) { throw 'Native Messaging browser E2E host build failed' }
   pwsh -NoProfile -File scripts/test-evaluate-phiusiil-split.ps1
   if ($LASTEXITCODE) { throw 'Domain-disjoint detection evaluation test failed' }
   pwsh -NoProfile -File scripts/test-evaluate-phishvn.ps1

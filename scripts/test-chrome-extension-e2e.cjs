@@ -130,13 +130,13 @@ async function main() {
   const root = fs.mkdtempSync(path.join(repoRoot, '.tmp-chrome-e2e-'));
   const profilePath = path.join(root, 'profile');
   const extensionPath = path.join(root, 'extension');
-  const mockProject = path.join(repoRoot, 'tests', 'Sentinel.NativeMessagingMock', 'Sentinel.NativeMessagingMock.csproj');
-  const mockOutput = path.join(root, 'mock');
-  const hostPath = path.join(mockOutput, 'Sentinel.NativeMessagingMock.exe');
+  const engineHostProject = path.join(repoRoot, 'tests', 'Sentinel.NativeMessagingEngineHost', 'Sentinel.NativeMessagingEngineHost.csproj');
+  const engineHostOutput = path.join(root, 'engine-host');
+  const hostPath = path.join(engineHostOutput, 'Sentinel.NativeMessagingEngineHost.exe');
   const hostManifestPath = path.join(root, 'native-host.json');
   const hostManifest = {
     name: hostName,
-    description: 'Temporary test-only Native Messaging mock',
+    description: 'Temporary test-only Native Messaging host using Sentinel URL rules',
     path: hostPath,
     type: 'stdio',
     allowed_origins: [`chrome-extension://${extensionId}/`]
@@ -154,7 +154,7 @@ async function main() {
     manifest.web_accessible_resources[0].matches = ['http://*.test/*', 'https://*.test/*'];
     fs.writeFileSync(path.join(extensionPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
-    run('dotnet', ['publish', mockProject, '-c', 'Release', '-o', mockOutput, '--nologo', '-p:NuGetAudit=false', '--ignore-failed-sources']);
+    run('dotnet', ['publish', engineHostProject, '-c', 'Release', '-o', engineHostOutput, '--nologo', '-p:NuGetAudit=false', '--ignore-failed-sources']);
     fs.writeFileSync(hostManifestPath, `${JSON.stringify(hostManifest, null, 2)}\n`);
     sendRegistryValue(hostManifestPath);
     registryRegistered = true;
@@ -210,10 +210,10 @@ async function main() {
     });
     const probeResult = nativeProbe.result?.value;
     if (!probeResult?.reply?.available) {
-      throw new Error(`Native Messaging mock probe failed: ${JSON.stringify(probeResult)}`);
+      throw new Error(`Native Messaging Sentinel host probe failed: ${JSON.stringify(probeResult)}`);
     }
 
-    const fixtureUrl = `http://paypal.com.evil.test:${fixturePort}/login`;
+    const fixtureUrl = `http://paypal-login.test:${fixturePort}/login`;
     const created = await browser.command('Target.createTarget', { url: fixtureUrl });
     const targetsResponse = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
     const targets = await targetsResponse.json();
@@ -228,30 +228,37 @@ async function main() {
     while (Date.now() < deadline) {
       const value = await evaluatePage(page, 'JSON.stringify({href:location.href,text:document.body?.innerText||""})');
       try { observed = JSON.parse(value); } catch {}
-      if (observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) break;
+      if (observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) &&
+          observed.text.includes('Domena przypomina znaną markę') &&
+          observed.text.includes('reguły 2026.10.9')) break;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     if (!observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) {
-      const mockLog = path.join(mockOutput, 'mock-requests.log');
-      const requestTypes = fs.existsSync(mockLog) ? fs.readFileSync(mockLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
+      const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
+      const requestTypes = fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
       throw new Error(`The warning page was not reached. Final page: ${observed?.href ?? 'unavailable'}; Native Messaging requests: ${requestTypes.join(',') || 'none'}.`);
     }
     if (!observed.text.includes('Sprawdź ten adres przed kontynuowaniem') ||
-        !observed.text.includes('Wynik kontrolowany testu integracyjnego')) {
-      throw new Error('The warning page did not render the expected heading and mock indicator.');
+        !observed.text.includes('Domena przypomina znaną markę') ||
+        !observed.text.includes('reguły 2026.10.9')) {
+      throw new Error(`The warning page did not render the expected production rule and indicator. Page text: ${observed.text}`);
     }
-    const mockLog = path.join(mockOutput, 'mock-requests.log');
-    const requestTypes = fs.existsSync(mockLog) ? fs.readFileSync(mockLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
-    if (!requestTypes.includes('analyze')) throw new Error('The Native Messaging mock did not receive an analyze request.');
+    if (observed.text.includes('paypal-login.test') || observed.text.includes(fixtureUrl)) {
+      throw new Error('The warning page displayed the submitted URL or host.');
+    }
+    const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
+    const requestTypes = fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
+    if (!requestTypes.includes('analyze')) throw new Error('The Native Messaging Sentinel host did not receive an analyze request.');
 
     console.log(JSON.stringify({
       result: 'PASS',
       browser: browserInfo.Browser,
       extensionId,
-      fixtureHost: 'paypal.com.evil.test',
+      fixtureHost: 'paypal-login.test',
       nativeMessagingRequests: requestTypes,
       warningRendered: true,
-      mockIndicatorRendered: true,
+      productionRuleRendered: true,
+      submittedUrlRedacted: true,
       externalDns: 'blocked by Chrome host resolver rules'
     }, null, 2));
   } finally {
