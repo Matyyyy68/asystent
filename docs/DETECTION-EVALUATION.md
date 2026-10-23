@@ -1,5 +1,11 @@
 # Ewaluacja deterministycznej analizy URL
 
+## Diagnostyczny model n-gramów znakowych (2026-10-24)
+
+Sprawdzono czysto lokalny Multinomial Naive Bayes z n-gramami znakowymi 3–5, trenowanymi na surowym URL-u bez schematu, z `alpha=0.1`. Użyto wyłącznie checksumowanych `url_train.csv` i `url_val.csv`, gold+silver; skrypt `scripts/evaluate_phishvn_char_ngram.py` odrzuca inne nazwy plików, kontroluje sumy i split oraz nie otwiera URL-i. Zbiór testowy nie był czytany. Test skryptu: `python scripts/test_evaluate_phishvn_char_ngram.py` (4/4 PASS).
+
+Próg `0` uzyskał na train TP=2 065, FP=398, TN=10 606, FN=11, a na validation TP=22/24, FP=198, TN=1 363, FN=2. Próg alternatywny został wyznaczony wyłącznie z wyników negatywnych train jako 99,9 percentyl (zastosowano `score > threshold`): train TP=1 800, FP=11, TN=10 993, FN=276; validation TP=3, FP=3, TN=1 558, FN=21. Wysoka liczba fałszywych alarmów przy progu 0 i spadek recall przy progu train potwierdzają, że prosty model przeucza się na języku i wzorcach zbioru. Nie dodano modelu ani alarmu do produktu. Walidacja ma tylko 24 pozytywy i była już wielokrotnie użyta diagnostycznie; ten wynik nie jest niezależną walidacją. PhishVN test pozostaje nietknięty.
+
 ## Ponowne pobranie i weryfikacja oficjalnego PhishVN v4 (2026-10-23)
 
 Pobrano wyłącznie publiczny pakiet `PhishVN_v3.1.0_open.zip` z Mendeley Data (5 813 309 B, SHA-256 `308351E9D0C0FCA13A81F2F63524A7DEE08CCBA6C775848D125B3DA5525D0AB5`). Z archiwum odczytano `MANIFEST.txt` i wyodrębniono tylko `url_train.csv` oraz `url_val.csv`; `url_test.csv` nie był wyodrębniany ani otwierany. Obie sumy wejściowe zgadzają się z manifestem: train 7 826 219 B / `568E788EDA4BDF62531ADCDDD093373EF6A1E97FEEC1354063AE337325367B61`, validation 1 476 590 B / `D9EF64D29DF6639AF698EF228E5AF5EC6F8AE44C8F1A1DD1367F9BA6D073D81F`. Powtórzony pomiar reguł `2026.10.9`, gold+silver, bez feedu i bez otwierania adresów dał train TP=0, FP=3, TN=11 001, FN=2 076 oraz validation TP=0, FP=0, TN=1 561, FN=24 (`URLsOpened=0`). Wynik potwierdza wcześniejszy baseline; nie powstała nowa reguła ani nowy holdout. Archiwum i pliki CSV pozostają poza repozytorium.
