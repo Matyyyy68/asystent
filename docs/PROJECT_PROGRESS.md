@@ -1,6 +1,6 @@
 # Postęp projektu Sentinel AI
 
-**Aktualizacja:** 2026-10-22
+**Aktualizacja:** 2026-10-23
 **Ostatnie opublikowane wydanie:** prerelease [v0.15.38](https://github.com/Matyyyy68/asystent/releases/tag/v0.15.38). Bieżący kod zawiera nowsze, nieopublikowane poprawki; lokalnego instalatora testowego nie należy utożsamiać z wydaniem.
 
 **Naprawa rozrostu logu instalatora (2026-10-23):** `icacls` zwraca dziesiątki tysięcy znaków z pełnymi ścieżkami dla kilkuset plików. Zmieniono logowanie na liczbę znaków i krótkie podsumowanie, a autotest sprawdza limit 400 znaków, brak ścieżek i obecność liczby przetworzonych plików. `installer/build-installer.ps1` zakończył produkcyjny build i `--self-test` wynikiem PASS; artefakt testowy v0.15.38 SHA-256 `EB2532BFB60652DCA89A19A1C2F8C2F5053A909533D9DE2E394F9094D93FA170`, nie jest wydaniem. Ostatni wpis ACL podsumował 374 pliki przy 55 298 znakach wyjściowych; pełne ścieżki nie zostały dopisane do logu.
