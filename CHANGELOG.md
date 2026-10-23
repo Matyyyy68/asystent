@@ -1,6 +1,6 @@
 ## Unreleased
 - Dodano lokalny czas przetworzenia zdarzeń i scalonych obserwacji (SQLite v23), widoczny w JSON/CSV i zachowywany przez backup/restore. Czasów starych rekordów nie odtwarza się wstecz. SQLite v24 zapisuje ograniczenia analizy jako allowlistowane kody; historia i UI nie przechowują swobodnego tekstu niepewności ani nazw źródeł wiedzy.
-- Historia ostrzeżeń rozszerzenia przeglądarki zapisuje teraz kod `analysis.redirect-chain-unverified`: ostrzeżenie ocenia URL rozpoczynający nawigację, ale nie potwierdza końcowego celu po przekierowaniach. BrowserIntegrationTests 9/9, pełny .NET 317 PASS / 2 pominięte, Electron 16/16, lint i produkcyjny build UI PASS.
+- Historia ostrzeżeń rozszerzenia przeglądarki zapisuje teraz kod `analysis.redirect-chain-unverified`: ostrzeżenie ocenia URL rozpoczynający nawigację, ale nie potwierdza końcowego celu po przekierowaniach. BrowserIntegrationTests 9/9; pełna bramka .NET 319/319 bez pominięć, Electron 16/16, lint i produkcyjny build UI PASS. Autotest nowego instalatora PASS; artefakt testowy v0.15.38 281359737 B, SHA-256 `55B96D5BEC5DA38172C31325B334FC49E828691745F706AA5E65FB7DD61B90CE`; GUI i `--integration-test` dla tego hash nie wykonano.
 
 # CHANGELOG
 
