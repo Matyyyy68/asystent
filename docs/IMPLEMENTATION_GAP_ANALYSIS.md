@@ -1,6 +1,6 @@
 # Audyt luk i plan realizacji Sentinel AI
 
-**Data audytu:** 2026-10-22
+**Data audytu:** 2026-10-23
 **Najnowsza pełna bramka (2026-10-23, SQLite v24):** `scripts/build-user.ps1 -Installer` PASS: .NET 319/319 bez pominięć, ewaluatory domen/PhishVN, Engine IPC i DNS/TCP/UDP, Electron 16/16, `npm audit` 0, produkcyjny UI i autotest instalatora. Artefakt testowy v0.15.38: 281359737 B, SHA-256 `7C77BC71959B44F3EE971DD4CBF9313323A0763E820537BB17532615D42A8DA4`; test GUI/integracyjny tego artefaktu nie wykonano. Nie jest to wydanie.
 **Kontrola planów (2026-10-23):** sprawdzono 13 planów wdrożenia względem wymaganej struktury 12 sekcji. Wykryto i poprawiono brak osobnej sekcji „Braki” w PLAN-011; `scripts/test-implementation-plans.ps1` przechodzi i został dodany do pełnej bramki.
 **Dodatkowy test detekcji F03 (2026-10-23):** publiczny URL-Phish v1 (CC BY 4.0; 111 660 rekordów) zmierzono surowymi URL-ami bez feedu, z deterministycznym podziałem domen rejestrowalnych. Na 35 959 domenowo odseparowanych holdout URL-ach reguły `2026.10.8` przy progu Moderate uzyskały TP=1 395, FP=50, TN=30 180, FN=4 334 (recall 24,35%, FPR 0,1654%, precision 96,54%). To diagnostyczny wynik na znanym, opublikowanym zbiorze, którego phishingowa część pochodzi głównie z PhishTank; po nim nie strojono reguł. PhishVN URL-only nadal ma 0/487 na swoim czasowym teście, a F03 pozostaje częściowe. Reprodukcja, hash pliku i ograniczenia: [DETECTION-EVALUATION.md](DETECTION-EVALUATION.md); nowy lokalny ewaluator: `scripts/evaluate-url-phish.ps1`.
