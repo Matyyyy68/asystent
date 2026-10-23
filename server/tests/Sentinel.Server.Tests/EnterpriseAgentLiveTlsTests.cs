@@ -243,7 +243,11 @@ public sealed class EnterpriseAgentLiveTlsTests
                     && presented.NotAfter.ToUniversalTime() > DateTime.UtcNow,
             };
             using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+            // This scenario deliberately waits for the configured 30-second retry interval after
+            // restarting the API. Hosted Windows runners can spend over 30 seconds on the setup
+            // and TLS enrollment before reaching that wait, so keep the whole live test budget
+            // comfortably above the retry window.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             await WaitForReadyAsync(http, server, apiProcess, stdoutLines, stderrLines, timeout.Token);
 
             var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
