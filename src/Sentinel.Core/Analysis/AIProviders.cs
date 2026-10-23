@@ -50,6 +50,13 @@ public sealed class OllamaLocalProvider(HttpClient httpClient) : IAIProvider, IT
         Ryzyko nie jest prawdopodobieństwem. Nie wymyślaj faktów ani źródeł.
         """;
 
+    /// <summary>Creates the production transport for loopback-only AI calls without proxying or redirects.</summary>
+    public static HttpClient CreateDirectHttpClient() => new(new SocketsHttpHandler
+    {
+        UseProxy = false,
+        AllowAutoRedirect = false
+    }) { Timeout = Timeout.InfiniteTimeSpan };
+
     public async Task<IReadOnlyList<LocalAIModel>> ListModelsAsync(string endpoint, CancellationToken cancellationToken = default)
     {
         var baseUri = ValidateEndpoint(endpoint);

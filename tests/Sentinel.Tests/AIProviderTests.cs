@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Sentinel.Core;
@@ -37,6 +38,37 @@ public sealed class AIProviderTests
         Assert.DoesNotContain("dont-send-me", requestBody);
         Assert.DoesNotContain("token=private", requestBody);
         Assert.DoesNotContain("tools", requestBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProductionLocalAiTransportDoesNotFollowRedirectsToAnotherEndpoint()
+    {
+        using var redirectTarget = new TcpListener(IPAddress.Loopback, 0);
+        redirectTarget.Start();
+        var redirectPort = ((IPEndPoint)redirectTarget.LocalEndpoint).Port;
+        using var ollama = new TcpListener(IPAddress.Loopback, 0);
+        ollama.Start();
+        var ollamaPort = ((IPEndPoint)ollama.LocalEndpoint).Port;
+
+        var serveRedirect = Task.Run(async () =>
+        {
+            using var client = await ollama.AcceptTcpClientAsync();
+            using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+            while (!string.IsNullOrEmpty(await reader.ReadLineAsync())) { }
+            var response = Encoding.ASCII.GetBytes($"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{redirectPort}/capture\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(response);
+            await stream.FlushAsync();
+        });
+
+        using var http = OllamaLocalProvider.CreateDirectHttpClient();
+        http.Timeout = TimeSpan.FromSeconds(3);
+        var provider = new OllamaLocalProvider(http);
+        await Assert.ThrowsAsync<HttpRequestException>(() => provider.ListModelsAsync($"http://127.0.0.1:{ollamaPort}"));
+        await serveRedirect;
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+
+        Assert.False(redirectTarget.Pending(), "Loopback model redirect must not cause a request to a second endpoint.");
     }
 
     [Fact]

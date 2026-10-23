@@ -55,7 +55,7 @@ var tcpConnectionMonitor = new TcpConnectionSnapshotMonitor(async cancellationTo
     await ReadConnectionSnapshotBatchAsync(cancellationToken),
     wasRecentlyObservedStart: processMonitor.WasRecentlyObservedStart,
     matchesLocalIpFeed: ipReputation.Contains);
-using var aiHttpClient = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+using var aiHttpClient = OllamaLocalProvider.CreateDirectHttpClient();
 var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
 var deduplicator = new NotificationDeduplicator();
