@@ -79,5 +79,19 @@ public sealed class ReputationTests : IDisposable
         Assert.DoesNotContain(unflagged.Indicators, indicator => indicator.Id == "reputation.cert");
         Assert.False(store.Contains("192.0.2.20", DateTimeOffset.UtcNow));
     }
+    [Fact]
+    public async Task LiveCertFeedCanBeFetchedOnlyWhenExplicitlyEnabled()
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("SENTINEL_LIVE_CERT_FEED"), "1", StringComparison.Ordinal)) return;
+        var store = new DomainReputation(directory);
+
+        await store.UpdateAsync();
+
+        var status = store.Status(DateTimeOffset.UtcNow);
+        Assert.True(status.Count > 0);
+        Assert.False(status.Expired);
+        Assert.Matches("^[A-F0-9]{64}$", status.Version!);
+        Assert.NotNull(status.FetchedAt);
+    }
     public void Dispose() { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
 }
