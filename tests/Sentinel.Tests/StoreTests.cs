@@ -108,6 +108,20 @@ public sealed class StoreTests : IDisposable
             basis with { SignalHash = "not-a-hash" }, TimeSpan.FromMinutes(10)));
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reopened.AddLocalOnlyDeduplicatedAsync(basis, TimeSpan.Zero));
     }
+    [Fact] public async Task PersistentLocalOnlySignalDeduplicationIsAtomicForConcurrentWriters()
+    {
+        var store = await Store();
+        var at = DateTimeOffset.UtcNow;
+        var hash = new string('C', 64);
+        var writes = Enumerable.Range(0, 8).Select(index => store.AddLocalOnlyDeduplicatedAsync(
+            Event(at) with { Risk = RiskLevel.Moderate, EventId = Guid.NewGuid(), Source = "browser-extension", SignalHash = hash },
+            TimeSpan.FromMinutes(10)));
+
+        var results = await Task.WhenAll(writes);
+
+        Assert.Single(results, recorded => recorded);
+        Assert.Equal(1, await store.CountEventsAsync());
+    }
     [Fact] public async Task PersistentSourceSignalDeduplicationIsAtomicForConcurrentWriters()
     {
         var store = await Store();
