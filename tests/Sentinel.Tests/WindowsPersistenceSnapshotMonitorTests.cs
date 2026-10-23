@@ -112,12 +112,12 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     public async Task OversizedSnapshotIsSkippedWithoutAdvancingBaseline()
     {
         var store = await CreateStore();
-        var snapshot = Enumerable.Range(0, 257).ToDictionary(index => index.ToString(),
+        var snapshot = Enumerable.Range(0, 1025).ToDictionary(index => index.ToString(),
             index => Entry("registry.user.run", "fingerprint-" + index, false), StringComparer.Ordinal);
         using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
 
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
-        Assert.Contains("limit 256", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("limit 1024", monitor.State, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(await store.ReadAsync());
 
         snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
@@ -251,6 +251,43 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task ServiceAndDriverChangesAreDetectedWithRedactedFingerprints()
+    {
+        var store = await CreateStore();
+        var serviceKey = "registry.service:" + new string('0', 62) + "A1";
+        var driverKey = "registry.driver:" + new string('0', 62) + "B2";
+        var services = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            [serviceKey] = Entry("registry.service", @"C:\Program Files\Vendor\agent.exe", false),
+            [driverKey] = Entry("registry.driver", @"\SystemRoot\System32\drivers\vendor.sys", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(
+            () => new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+            _ => Task.FromResult(tasks),
+            _ => Task.FromResult(new PersistenceRegistrySnapshotCapture(true, services, "odczytano 2 komponenty")), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Empty(await store.ReadAsync());
+
+        services[serviceKey] = Entry("registry.service", @"C:\Users\Mateusz\AppData\Local\Temp\agent.exe", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var events = await store.ReadAsync();
+        var item = Assert.Single(events);
+        Assert.Equal("Zmiana usługi Windows", item.Category);
+        Assert.Contains("persistence.service.changed", item.EvidenceCodes!);
+        Assert.Contains("persistence.target.user-writable-location", item.EvidenceCodes!);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = events, Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("Vendor", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("C:\\Users\\Mateusz", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("agent.exe", persisted, StringComparison.OrdinalIgnoreCase);
+
+        services.Remove(serviceKey);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Contains(await store.ReadAsync(), candidate => candidate.Category == "Zmiana usługi Windows" &&
+            candidate.EvidenceCodes!.Contains("persistence.service.removed"));
+    }
+
+    [Fact]
     public async Task ScheduledTaskReadFailurePreservesItsBaselineAndStillDetectsOtherSources()
     {
         var store = await CreateStore();
@@ -281,6 +318,71 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         tasksAvailable = true;
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
         Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task ServiceRegistryReadFailurePreservesBaselineAndStillDetectsRunChanges()
+    {
+        var store = await CreateStore();
+        var registry = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["run-id"] = Entry("registry.user.run", "run-before", false)
+        };
+        var serviceEntry = Entry("registry.service", "service-before", false);
+        var services = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["registry.service:" + new string('0', 64)] = serviceEntry
+        };
+        var serviceAvailable = true;
+        Task<PersistenceRegistrySnapshotCapture> CaptureServices(CancellationToken _) => Task.FromResult(serviceAvailable
+            ? new PersistenceRegistrySnapshotCapture(true, services, "odczytano 1 usługę")
+            : new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "źródło niedostępne (SecurityException)"));
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => registry, _ => Task.FromResult(tasks), CaptureServices, TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Empty(await store.ReadAsync());
+
+        registry["run-id"] = Entry("registry.user.run", "run-after", false);
+        services.Clear();
+        serviceAvailable = false;
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var events = await store.ReadAsync();
+        Assert.Single(events);
+        Assert.Contains("persistence.user.run.changed", events[0].EvidenceCodes!);
+        Assert.DoesNotContain(events, item => item.EvidenceCodes!.Any(code => code.StartsWith("persistence.service.", StringComparison.Ordinal)));
+        Assert.Contains("SecurityException", monitor.State, StringComparison.Ordinal);
+        var preserved = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Contains(preserved.Entries.Values, item => item.Source == "registry.service");
+
+        serviceAvailable = true;
+        services["registry.service:" + new string('0', 64)] = serviceEntry;
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task NewlyAvailableServiceSourceGetsSilentBaseline()
+    {
+        var store = await CreateStore();
+        var services = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
+        var available = false;
+        Task<PersistenceRegistrySnapshotCapture> CaptureServices(CancellationToken _) => Task.FromResult(new PersistenceRegistrySnapshotCapture(
+            available, services, available ? "odczytano usługę" : "źródło niedostępne"));
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(
+            () => new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+            _ => Task.FromResult(tasks), CaptureServices, TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        services["registry.service:" + new string('1', 64)] = Entry("registry.service", "preexisting service", false);
+        available = true;
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Empty(await store.ReadAsync());
+        Assert.True((await store.ReadWindowsPersistenceMonitorSnapshotAsync()).ServicesInitialized);
+
+        services["registry.service:" + new string('1', 64)] = Entry("registry.service", "changed service", false);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Contains((await store.ReadAsync()).Single().EvidenceCodes!, code => code == "persistence.service.changed");
     }
 
     [Fact]
@@ -331,6 +433,56 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var entry = Assert.Single(migrated.Entries.Values);
         Assert.Equal("registry.user.run", entry.Source);
         Assert.Equal(fingerprint, entry.Fingerprint);
+    }
+
+    [Fact]
+    public async Task SchemaV24BaselineMigratesToServiceAndDriverSources()
+    {
+        var store = await CreateStore();
+        var fingerprint = Entry("registry.user.run", "existing command", false).Fingerprint;
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE windows_persistence_snapshot; CREATE TABLE windows_persistence_snapshot(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','startup.user','startup.common','scheduled.task')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot VALUES('existing-run','registry.user.run','" + fingerprint + "',0); UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1; PRAGMA user_version=24;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(migrated.Initialized);
+        Assert.Equal(fingerprint, Assert.Single(migrated.Entries.Values).Fingerprint);
+
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new("hashed-service-id", "registry.service", fingerprint, false),
+            new("hashed-driver-id", "registry.driver", fingerprint, false)
+        ]);
+        var expanded = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Equal(2, expanded.Entries.Count);
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "registry.service");
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "registry.driver");
+    }
+
+    [Fact]
+    public async Task LiveReadOnlyServiceRegistryEnumerationWhenExplicitlyEnabled()
+    {
+        if (!OperatingSystem.IsWindows() || !string.Equals(Environment.GetEnvironmentVariable("SENTINEL_LIVE_SERVICES"), "1", StringComparison.Ordinal)) return;
+        var store = await CreateStore();
+        using var monitor = new WindowsPersistenceSnapshotMonitor(TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(snapshot.Initialized, monitor.State);
+        if (!snapshot.ServicesInitialized)
+        {
+            Assert.Contains("SecurityException", monitor.State, StringComparison.Ordinal);
+            return;
+        }
+        Assert.Contains(snapshot.Entries.Values, entry => entry.Source is "registry.service" or "registry.driver");
+        Assert.All(snapshot.Entries.Values.Where(entry => entry.Source is "registry.service" or "registry.driver"), entry =>
+        {
+            Assert.Matches("^(registry\\.(service|driver)):[A-F0-9]{64}$", entry.Key);
+            Assert.Matches("^[A-F0-9]{64}$", entry.Fingerprint);
+        });
     }
 
     private static PersistenceSnapshotEntry Entry(string source, string value, bool writable)

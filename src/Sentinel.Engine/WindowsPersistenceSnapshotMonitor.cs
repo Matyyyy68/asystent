@@ -7,14 +7,16 @@ using Sentinel.Core;
 using Sentinel.Core.Analysis;
 
 public sealed record PersistenceSnapshotEntry(string Source, string Fingerprint, bool WritableLocation);
+public sealed record PersistenceRegistrySnapshotCapture(bool Available, IReadOnlyDictionary<string, PersistenceSnapshotEntry> Entries, string Status);
 
 /// <summary>Observes per-user autorun state. Raw registry commands and file paths stay in memory and are never persisted.</summary>
 public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 {
-    private const int MaximumEntries = 256;
+    private const int MaximumEntries = 1024;
     private const int MaximumEventsPerSample = 32;
     private readonly Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture;
     private readonly Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks;
+    private readonly Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices;
     private readonly TimeSpan minimumInterval;
     private long? lastAttemptTimestamp;
     private bool? wasEnabled;
@@ -22,21 +24,34 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     public string State { get; private set; } = "Monitor zmian autostartu jest wyłączony.";
 
     public WindowsPersistenceSnapshotMonitor(TimeSpan? minimumInterval = null)
-        : this(CaptureSupportedPlatform, WindowsScheduledTaskSnapshotReader.CaptureAsync, minimumInterval) { }
+        : this(CaptureSupportedPlatform, WindowsScheduledTaskSnapshotReader.CaptureAsync,
+            _ => Task.FromResult(CaptureServiceRegistry()), minimumInterval) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
         TimeSpan? minimumInterval = null)
         : this(capture, _ => Task.FromResult(new ScheduledTaskSnapshotCapture(false,
-            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "syntetyczne źródło bez zadań")), minimumInterval) { }
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "syntetyczne źródło bez zadań")),
+            _ => Task.FromResult(new PersistenceRegistrySnapshotCapture(false,
+                new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "syntetyczne źródło bez usług")), minimumInterval) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
         Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
         TimeSpan? minimumInterval = null)
+        : this(capture, captureScheduledTasks,
+            _ => Task.FromResult(new PersistenceRegistrySnapshotCapture(false,
+                new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "syntetyczne źródło bez usług")), minimumInterval) { }
+
+    public WindowsPersistenceSnapshotMonitor(
+        Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
+        Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
+        Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
+        TimeSpan? minimumInterval = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.captureScheduledTasks = captureScheduledTasks ?? throw new ArgumentNullException(nameof(captureScheduledTasks));
+        this.captureServices = captureServices ?? throw new ArgumentNullException(nameof(captureServices));
         this.minimumInterval = minimumInterval ?? TimeSpan.FromSeconds(30);
         if (this.minimumInterval < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minimumInterval));
     }
@@ -141,6 +156,53 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 currentSnapshot[pair.Key] = new(pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation);
         }
 
+        PersistenceRegistrySnapshotCapture services;
+        try { services = await captureServices(cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception)
+        {
+            services = new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                "źródło niedostępne (" + exception.GetType().Name + ")");
+        }
+        var serviceStatus = services.Status;
+        if (services.Available)
+        {
+            var invalidServiceEntries = services.Entries.Any(pair =>
+                pair.Value.Source is not ("registry.service" or "registry.driver") ||
+                !pair.Key.StartsWith(pair.Value.Source + ":", StringComparison.Ordinal));
+            if (invalidServiceEntries || currentSnapshot.Count + services.Entries.Count > MaximumEntries)
+            {
+                services = new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                    invalidServiceEntries ? "snapshot ma nieprawidłowy format" : $"liczba źródeł przekracza limit {MaximumEntries}");
+                serviceStatus = services.Status;
+            }
+            else if (!stored.ServicesInitialized && stored.Initialized)
+            {
+                try
+                {
+                    await store.InitializeWindowsServiceSnapshotAsync(services.Entries
+                        .Select(pair => new WindowsPersistenceFingerprint(pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation)).ToArray(), cancellationToken).ConfigureAwait(false);
+                    stored = await store.ReadWindowsPersistenceMonitorSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    services = new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                        "nie można ustawić baseline'u (" + exception.GetType().Name + ")");
+                    serviceStatus = services.Status;
+                }
+            }
+        }
+        if (services.Available)
+        {
+            foreach (var pair in services.Entries) currentSnapshot[pair.Key] = pair.Value;
+        }
+        else
+        {
+            // A registry access failure must not look like every service and driver was removed.
+            foreach (var pair in stored.Entries.Where(pair => pair.Value.Source is "registry.service" or "registry.driver"))
+                currentSnapshot[pair.Key] = new(pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation);
+        }
+
         var snapshot = (IReadOnlyDictionary<string, PersistenceSnapshotEntry>)currentSnapshot;
         if (snapshot.Count > MaximumEntries)
         {
@@ -152,13 +214,13 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             pair => new WindowsPersistenceFingerprint(pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation), StringComparer.Ordinal);
         if (!stored.Initialized)
         {
-            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), scheduledTasks.Available, cancellationToken); }
+            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), scheduledTasks.Available, services.Available, cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 State = "Nie można ustawić lokalnego baseline'u autostartu: " + exception.GetType().Name;
                 return 0;
             }
-            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}.";
+            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}.";
             return 0;
         }
         var baseline = stored.Entries.ToDictionary(pair => pair.Key,
@@ -183,12 +245,25 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
+                "registry.service" => "usługa Windows",
+                "registry.driver" => "sterownik Windows",
                 _ => "autostart Windows"
             };
-            var eventApplication = source == "scheduled.task" ? "Trwałość Windows · zaplanowane zadanie" : "Autostart Windows · " + sourceName;
-            var recommendation = source == "scheduled.task"
-                ? "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań."
-                : "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów.";
+            var sourceSubject = source switch
+            {
+                "scheduled.task" => "zaplanowane zadanie Windows",
+                "registry.service" => "usługę Windows",
+                "registry.driver" => "sterownik Windows",
+                _ => "wpis autostartu"
+            };
+            var eventApplication = source is "scheduled.task" or "registry.service" or "registry.driver"
+                ? "Trwałość Windows · " + sourceName : "Autostart Windows · " + sourceName;
+            var recommendation = source switch
+            {
+                "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
+                "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
+                _ => "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów."
+            };
             var evidenceScope = source switch
             {
                 "registry.user.run" => "user.run",
@@ -200,13 +275,21 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
+                "registry.service" => "service",
+                "registry.driver" => "driver",
                 _ => "unknown"
             };
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
             if (suspicious) evidence.Add("persistence.target.user-writable-location");
             var item = new SecurityEvent(0, now, suspicious ? RiskLevel.Low : RiskLevel.Information,
-                source == "scheduled.task" ? "Zmiana zaplanowanego zadania Windows" : "Zmiana autostartu Windows", eventApplication,
-                $"Wykryto, że {verb} {(source == "scheduled.task" ? "zaplanowane zadanie" : "wpis autostartu")}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
+                source switch
+                {
+                    "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
+                    "registry.service" => "Zmiana usługi Windows",
+                    "registry.driver" => "Zmiana sterownika Windows",
+                    _ => "Zmiana autostartu Windows"
+                }, eventApplication,
+                $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
                 recommendation,
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence);
@@ -230,8 +313,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
         var pending = GetChanges(baseline, snapshot).Count;
         State = pending > 0
-            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}."
-            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}.";
+            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}."
+            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}.";
         return recorded;
     }
 
@@ -305,6 +388,76 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
     private static IReadOnlyDictionary<string, PersistenceSnapshotEntry> CaptureSupportedPlatform()
         => OperatingSystem.IsWindows() ? CaptureUserPersistence() : new Dictionary<string, PersistenceSnapshotEntry>();
+
+    private static PersistenceRegistrySnapshotCapture CaptureServiceRegistry()
+    {
+        if (!OperatingSystem.IsWindows())
+            return new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "usługi Windows wymagają Windows");
+        try
+        {
+            var entries = CaptureServiceRegistryEntries();
+            return new(true, entries, $"odczytano {entries.Count} usług i sterowników");
+        }
+        catch (Exception exception)
+        {
+            return new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal),
+                "źródło niedostępne (" + exception.GetType().Name + ")");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static Dictionary<string, PersistenceSnapshotEntry> CaptureServiceRegistryEntries()
+    {
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine,
+            Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default);
+        using var services = baseKey.OpenSubKey("SYSTEM\\CurrentControlSet\\Services", writable: false);
+        if (services is null) return entries;
+
+        var inspected = 0;
+        foreach (var name in services.GetSubKeyNames().OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+        {
+            if (++inspected > MaximumEntries) throw new InvalidDataException("Liczba usług i sterowników przekracza limit snapshotu.");
+            using var service = services.OpenSubKey(name, writable: false);
+            if (service is null) continue;
+
+            var type = ReadDword(service, "Type");
+            var isDriver = type is { } serviceType && (serviceType & 0x3) != 0;
+            var source = isDriver ? "registry.driver" : "registry.service";
+            var imagePath = ReadString(service, "ImagePath");
+            var start = ReadDword(service, "Start");
+            var errorControl = ReadDword(service, "ErrorControl");
+            var objectName = ReadString(service, "ObjectName");
+            var delayedAutoStart = ReadDword(service, "DelayedAutoStart");
+            string? serviceDll = null;
+            using (var parameters = service.OpenSubKey("Parameters", writable: false))
+                if (parameters is not null) serviceDll = ReadString(parameters, "ServiceDll");
+
+            var canonical = string.Join("\0", imagePath ?? "", start?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
+                type?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "",
+                errorControl?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "", objectName ?? "",
+                delayedAutoStart?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "", serviceDll ?? "");
+            var key = CreateKey(source, name);
+            if (!entries.ContainsKey(key) && entries.Count >= MaximumEntries)
+                throw new InvalidDataException("Łączna liczba źródeł autostartu przekracza limit snapshotu.");
+            entries[key] = new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))),
+                LooksLikeWritableLocation((imagePath ?? "") + "\0" + (serviceDll ?? "")));
+        }
+        return entries;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static int? ReadDword(RegistryKey key, string name)
+        => key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is int value ? value : null;
+
+    [SupportedOSPlatform("windows")]
+    private static string? ReadString(RegistryKey key, string name)
+        => key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) switch
+        {
+            string value => value,
+            string[] values => string.Join("\0", values),
+            _ => null
+        };
 
     [SupportedOSPlatform("windows")]
     private static void CaptureRunKey(RegistryHive hive, RegistryView view, string subKeyPath, string source,
