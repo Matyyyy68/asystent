@@ -185,7 +185,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var source = await CreateStore();
         var target = await CreateStore();
         var sourceEntry = new WindowsPersistenceFingerprint("source-id", "registry.user.run", Entry("registry.user.run", "source-command", false).Fingerprint, false);
-        var targetEntry = new WindowsPersistenceFingerprint("target-id", "startup.user", Entry("startup.user", "target-command", false).Fingerprint, false);
+        var targetEntry = new WindowsPersistenceFingerprint("target-id", "registry.machine64.ifeo", Entry("registry.machine64.ifeo", "target-debugger", false).Fingerprint, false);
         await source.InitializeWindowsPersistenceMonitorSnapshotAsync([sourceEntry]);
         await target.InitializeWindowsPersistenceMonitorSnapshotAsync([targetEntry]);
         var backup = Path.Combine(root, "state.db");
