@@ -235,6 +235,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var verb = change.Kind switch { PersistenceChangeKind.Added => "dodano", PersistenceChangeKind.Changed => "zmieniono", _ => "usunięto" };
             var source = change.Current?.Source ?? change.Previous!.Source;
             var isWinlogon = source is "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon";
+            var isStartupApproved = source.Contains(".startup.approved.", StringComparison.Ordinal);
             var sourceName = source switch
             {
                 "registry.user.run" => "HKCU Run",
@@ -260,6 +261,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.silent.exit" => "HKLM SilentProcessExit (32-bit)",
                 "registry.machine64.shell.delay" => "HKLM ShellServiceObjectDelayLoad (64-bit)",
                 "registry.machine32.shell.delay" => "HKLM ShellServiceObjectDelayLoad (32-bit)",
+                _ when isStartupApproved => "Windows StartupApproved",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
@@ -275,6 +277,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "ustawienie IFEO Debugger Windows",
                 "registry.machine64.silent.exit" or "registry.machine32.silent.exit" => "ustawienie SilentProcessExit Windows",
                 "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "ustawienie rozszerzenia powłoki Windows",
+                _ when isStartupApproved => "stan zatwierdzenia wpisu autostartu Windows",
                 _ => "wpis autostartu"
             };
             var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
@@ -282,6 +285,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 or "registry.machine64.silent.exit" or "registry.machine32.silent.exit"
                 or "registry.machine64.shell.delay" or "registry.machine32.shell.delay"
                 ? "Trwałość Windows · " + sourceName : "Autostart Windows · " + sourceName;
+            if (isStartupApproved) eventApplication = "Autostart Windows · StartupApproved";
             var recommendation = source switch
             {
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
@@ -292,6 +296,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
                 "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" => "Sprawdź konfigurację logowania Windows. Sentinel nie zmienia powłoki ani skryptów logowania.",
                 "registry.machine64.appinit" or "registry.machine32.appinit" => "Sprawdź konfigurację AppInit_DLLs Windows. Sentinel nie zmienia rejestru ani nie ładuje wskazanych bibliotek.",
+                _ when isStartupApproved => "Sprawdź status aplikacji w ustawieniach Aplikacje startowe Windows. Sentinel odczytuje wyłącznie nieinterpretowany odcisk binarny i nie zmienia rejestru.",
                 _ => "Sprawdź listę aplikacji uruchamianych podczas logowania w ustawieniach Windows. Sentinel nie uruchamia ani nie usuwa wpisów."
             };
             var evidenceScope = source switch
@@ -319,6 +324,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.silent.exit" => "machine32.silent-exit",
                 "registry.machine64.shell.delay" => "machine64.shell-delay",
                 "registry.machine32.shell.delay" => "machine32.shell-delay",
+                _ when isStartupApproved => "startup-approved",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
@@ -337,6 +343,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Zmiana konfiguracji uruchamiania procesu Windows",
                     "registry.machine64.silent.exit" or "registry.machine32.silent.exit" => "Zmiana monitorowania zakończenia procesu Windows",
                     "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "Zmiana konfiguracji rozszerzenia powłoki Windows",
+                    _ when isStartupApproved => "Zmiana statusu aplikacji startowej Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
                 isWinlogon
@@ -403,11 +410,13 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var winlogonPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
         var appInitPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
         var shellDelayPath = "Software\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad";
+        var startupApprovedPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved";
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
         CaptureRunOnceEx(RegistryHive.CurrentUser, RegistryView.Default, runOnceExPath, "registry.user.runonceex", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
         CaptureRegistryValues(RegistryHive.CurrentUser, RegistryView.Default, winlogonPath, "registry.user.winlogon", ["Shell", "Userinit"], entries);
+        CaptureStartupApproved(RegistryHive.CurrentUser, RegistryView.Default, startupApprovedPath, "user", entries);
         var views = Environment.Is64BitOperatingSystem
             ? new[] { (RegistryView.Registry64, "machine64"), (RegistryView.Registry32, "machine32") }
             : new[] { (RegistryView.Default, "machine32") };
@@ -419,6 +428,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
+            CaptureStartupApproved(RegistryHive.LocalMachine, view, startupApprovedPath, sourcePrefix, entries);
             CaptureImageFileExecutionOptions(RegistryHive.LocalMachine, view, sourcePrefix, entries);
             CaptureSilentProcessExit(RegistryHive.LocalMachine, view, sourcePrefix, entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, shellDelayPath, $"registry.{sourcePrefix}.shell.delay", entries);
@@ -645,6 +655,40 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             }
             entries[keyId] = new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))),
                 LooksLikeWritableLocation(command));
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureStartupApproved(RegistryHive hive, RegistryView view, string rootPath, string hivePrefix,
+        IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        // StartupApproved is an undocumented Windows format. Fingerprint opaque binary values only;
+        // do not interpret state bytes or persist item names, timestamps, or contents.
+        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+        foreach (var area in new[] { "Run", "Run32", "StartupFolder" })
+        {
+            var source = $"registry.{hivePrefix}.startup.approved.{area.ToLowerInvariant()}";
+            using var key = baseKey.OpenSubKey(rootPath + "\\" + area, writable: false);
+            if (key is null) continue;
+            var inspected = 0;
+            foreach (var name in key.GetValueNames().OrderBy(valueName => valueName, StringComparer.OrdinalIgnoreCase))
+            {
+                if (++inspected > MaximumEntries)
+                {
+                    entries["!overflow"] = new("overflow", "", false);
+                    return;
+                }
+                if (key.GetValueKind(name) != RegistryValueKind.Binary) continue;
+                if (key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is not byte[] data) continue;
+                var keyId = CreateKey(source, name);
+                if (!entries.ContainsKey(keyId) && entries.Count >= MaximumEntries)
+                {
+                    entries["!overflow"] = new("overflow", "", false);
+                    return;
+                }
+                var fingerprint = Convert.ToHexString(SHA256.HashData(data));
+                entries[keyId] = new(source, fingerprint, false);
+            }
         }
     }
 

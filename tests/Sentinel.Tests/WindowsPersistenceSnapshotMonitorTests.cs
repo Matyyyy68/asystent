@@ -390,6 +390,33 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task StartupApprovedDeltaIsRecordedWithoutPersistingItemNameOrBinaryState()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["registry.user.startup.approved.run:" + new string('A', 64)] = Entry("registry.user.startup.approved.run", "opaque-state-before", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries["registry.user.startup.approved.run:" + new string('A', 64)] = Entry("registry.user.startup.approved.run", "opaque-state-after", false);
+        var recorded = await monitor.CollectAsync(store, enabled: true, paused: false);
+        Assert.True(recorded == 1, $"Expected one StartupApproved delta, got {recorded}. {monitor.State}");
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana statusu aplikacji startowej Windows", item.Category);
+        Assert.Equal("Autostart Windows · StartupApproved", item.Application);
+        Assert.Contains("persistence.startup-approved.changed", item.EvidenceCodes!);
+        Assert.Contains("nieinterpretowany odcisk binarny", item.Recommendation, StringComparison.OrdinalIgnoreCase);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(item);
+        Assert.DoesNotContain("Private Startup App", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("opaque-state", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task WinlogonChangeIsRecordedWithoutShellOrUserinitValue()
     {
         var store = await CreateStore();
@@ -750,6 +777,34 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task SchemaV33MigratesToStartupApprovedSourcesAndPreservesBaseline()
+    {
+        var store = await CreateStore();
+        var fingerprint = Entry("registry.user.run", "existing command", false).Fingerprint;
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE windows_persistence_snapshot; CREATE TABLE windows_persistence_snapshot(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot VALUES('existing-run','registry.user.run','" + fingerprint + "',0); UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1; PRAGMA user_version=33;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(migrated.Initialized);
+        Assert.Equal(fingerprint, Assert.Single(migrated.Entries.Values).Fingerprint);
+        var approved = "registry.user.startup.approved.run:" + new string('A', 64);
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new(approved, "registry.user.startup.approved.run", Entry("registry.user.startup.approved.run", "opaque binary", false).Fingerprint, false)
+        ]);
+        Assert.Equal("registry.user.startup.approved.run", Assert.Single((await store.ReadWindowsPersistenceMonitorSnapshotAsync()).Entries.Values).Source);
+        await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await verify.OpenAsync();
+        using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(34L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task LiveReadOnlyServiceRegistryEnumerationWhenExplicitlyEnabled()
     {
         if (!OperatingSystem.IsWindows() || !string.Equals(Environment.GetEnvironmentVariable("SENTINEL_LIVE_SERVICES"), "1", StringComparison.Ordinal)) return;
@@ -795,6 +850,9 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
                 "registry.machine64.shell.delay", "registry.machine32.shell.delay",
                 "registry.user.runonceex", "registry.machine64.runonceex", "registry.machine32.runonceex",
                 "registry.machine64.silent.exit", "registry.machine32.silent.exit",
+                "registry.user.startup.approved.run", "registry.user.startup.approved.run32", "registry.user.startup.approved.startupfolder",
+                "registry.machine64.startup.approved.run", "registry.machine64.startup.approved.run32", "registry.machine64.startup.approved.startupfolder",
+                "registry.machine32.startup.approved.run", "registry.machine32.startup.approved.run32", "registry.machine32.startup.approved.startupfolder",
                 "startup.user", "startup.common", "scheduled.task", "registry.service", "registry.driver"
             });
         });
