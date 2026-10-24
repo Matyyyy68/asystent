@@ -84,8 +84,19 @@ public sealed class ConfigurationRecommendationEngine
     {
         ArgumentNullException.ThrowIfNull(system);
         if (!Enum.IsDefined(variant)) throw new ArgumentOutOfRangeException(nameof(variant));
-        var available = new List<string> { "Lokalny silnik reguł", "Lokalna historia SQLite", "Lokalna baza pełnotekstowa FTS5 (TXT, MD, DOCX)", "Opcjonalna analiza przez wcześniej zainstalowany Ollama loopback" };
-        var unavailable = new List<string> { "Wyszukiwanie semantyczne/embeddingi oraz indeksowanie PDF", "Automatyczny dobór modelu do GPU/RAM/NPU — brak zweryfikowanego katalogu wymagań", "Integracja przeglądarki — brak obsługiwanego rozszerzenia" };
+        var available = new List<string>
+        {
+            "Lokalny silnik reguł",
+            "Lokalna historia SQLite",
+            "Lokalna baza pełnotekstowa FTS5 (TXT, MD, DOCX i tekstowy PDF)",
+            "Integracja Chrome/Edge przez ręcznie instalowane rozszerzenie MV3; ostrzega, ale nie blokuje nawigacji",
+            "Opcjonalna analiza przez wcześniej zainstalowany Ollama loopback"
+        };
+        var unavailable = new List<string>
+        {
+            "Pełne wyszukiwanie semantyczne w całej bazie i OCR PDF",
+            "Automatyczny dobór modelu do GPU/RAM/NPU — brak zweryfikowanego katalogu wymagań"
+        };
         var notices = new List<string>();
         if (!system.IsWindows) notices.Add("Pełny klient desktopowy wymaga Windows 10/11 x64; wykrywanie nie potwierdziło Windows.");
         if (!system.Is64Bit) notices.Add("System nie jest 64-bitowy; instalator x64 nie może być użyty.");
@@ -107,6 +118,6 @@ public sealed class ConfigurationRecommendationEngine
             if (system.NetworkAvailable == false) notices.Add("Nie wykryto połączenia sieciowego. Lokalna analiza reguł nadal działa offline.");
         }
         return new(variant, available, unavailable, "Lokalne reguły + opcjonalny Ollama loopback", false,
-            "Podstawowa analiza i wyszukiwanie dokumentów działają lokalnie. Model AI jest opcjonalny i wymaga wcześniej zainstalowanego, przetestowanego Ollama oraz wyboru użytkownika; model nie jest automatycznie pobierany. Dostępne wyszukiwanie wiedzy jest pełnotekstowe, nie semantyczne.", notices);
+            "Podstawowa analiza i wyszukiwanie dokumentów działają lokalnie. Model AI jest opcjonalny i wymaga wcześniej zainstalowanego, przetestowanego Ollama oraz wyboru użytkownika; model nie jest automatycznie pobierany. Podstawowe wyszukiwanie wiedzy jest pełnotekstowe; opcjonalny reranking embeddingami porządkuje tylko kandydatów znalezionych przez FTS5.", notices);
     }
 }
