@@ -253,6 +253,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.appinit" => "HKLM AppInit_DLLs (32-bit)",
                 "registry.machine64.ifeo" => "HKLM IFEO Debugger (64-bit)",
                 "registry.machine32.ifeo" => "HKLM IFEO Debugger (32-bit)",
+                "registry.machine64.shell.delay" => "HKLM ShellServiceObjectDelayLoad (64-bit)",
+                "registry.machine32.shell.delay" => "HKLM ShellServiceObjectDelayLoad (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
                 "startup.common" => "wspólny folder Startup",
                 "scheduled.task" => "zaplanowane zadanie Windows",
@@ -266,16 +268,19 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.service" => "usługę Windows",
                 "registry.driver" => "sterownik Windows",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "ustawienie IFEO Debugger Windows",
+                "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "ustawienie rozszerzenia powłoki Windows",
                 _ => "wpis autostartu"
             };
             var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
                 or "registry.machine64.ifeo" or "registry.machine32.ifeo"
+                or "registry.machine64.shell.delay" or "registry.machine32.shell.delay"
                 ? "Trwałość Windows · " + sourceName : "Autostart Windows · " + sourceName;
             var recommendation = source switch
             {
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Sprawdź konfigurację IFEO Debugger dla aplikacji w rejestrze Windows. Sentinel nie zmienia wpisu ani nie uruchamia debuggera.",
+                "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "Sprawdź konfigurację ShellServiceObjectDelayLoad Windows. Sentinel nie zmienia rejestru ani nie ładuje rozszerzeń powłoki.",
                 "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
                 "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" => "Sprawdź konfigurację logowania Windows. Sentinel nie zmienia powłoki ani skryptów logowania.",
                 "registry.machine64.appinit" or "registry.machine32.appinit" => "Sprawdź konfigurację AppInit_DLLs Windows. Sentinel nie zmienia rejestru ani nie ładuje wskazanych bibliotek.",
@@ -299,6 +304,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.appinit" => "machine32.appinit",
                 "registry.machine64.ifeo" => "machine64.ifeo",
                 "registry.machine32.ifeo" => "machine32.ifeo",
+                "registry.machine64.shell.delay" => "machine64.shell-delay",
+                "registry.machine32.shell.delay" => "machine32.shell-delay",
                 "startup.user" => "user.startup",
                 "startup.common" => "common.startup",
                 "scheduled.task" => "scheduled-task",
@@ -315,6 +322,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
                     "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Zmiana konfiguracji uruchamiania procesu Windows",
+                    "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "Zmiana konfiguracji rozszerzenia powłoki Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
                 isWinlogon
@@ -379,6 +387,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var policyRunPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
         var winlogonPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
         var appInitPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
+        var shellDelayPath = "Software\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad";
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
@@ -394,6 +403,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
             CaptureImageFileExecutionOptions(RegistryHive.LocalMachine, view, sourcePrefix, entries);
+            CaptureRunKey(RegistryHive.LocalMachine, view, shellDelayPath, $"registry.{sourcePrefix}.shell.delay", entries);
         }
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);

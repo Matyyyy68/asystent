@@ -441,6 +441,35 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task ShellServiceObjectDelayLoadChangeIsRecordedWithoutPersistingExtensionDetails()
+    {
+        var store = await CreateStore();
+        const string source = "registry.machine64.shell.delay";
+        var key = source + ":" + new string('C', 64);
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            [key] = Entry(source, "{00000000-0000-0000-0000-000000000001}", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries[key] = Entry(source, @"C:\Users\Alice\AppData\Local\Temp\shell-extension.dll", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana konfiguracji rozszerzenia powłoki Windows", item.Category);
+        Assert.Equal("Trwałość Windows · HKLM ShellServiceObjectDelayLoad (64-bit)", item.Application);
+        Assert.Contains("persistence.machine64.shell-delay.changed", item.EvidenceCodes!);
+        Assert.Contains("Sprawdź konfigurację ShellServiceObjectDelayLoad", item.Recommendation, StringComparison.OrdinalIgnoreCase);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = await store.ReadAsync(), Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("shell-extension.dll", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alice", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("00000000-0000-0000-0000-000000000001", persisted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task IfeoDebuggerChangeIsRecordedWithoutPersistingExecutableOrDebuggerPath()
     {
         var store = await CreateStore();
@@ -625,7 +654,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
-    public async Task SchemaV28BaselineMigratesToAppInitSources()
+    public async Task SchemaV28BaselineMigratesToAppInitIfeoAndShellExtensionSources()
     {
         var store = await CreateStore();
         var fingerprint = Entry("registry.user.run", "existing command", false).Fingerprint;
@@ -641,12 +670,16 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
             new("existing-run", "registry.user.run", fingerprint, false),
             new("registry.machine64.appinit:" + new string('A', 64), "registry.machine64.appinit", fingerprint, false),
-            new("registry.machine64.ifeo:" + new string('B', 64), "registry.machine64.ifeo", fingerprint, false)
+            new("registry.machine64.ifeo:" + new string('B', 64), "registry.machine64.ifeo", fingerprint, false),
+            new("registry.machine64.shell.delay:" + new string('C', 64), "registry.machine64.shell.delay", fingerprint, false),
+            new("registry.machine32.shell.delay:" + new string('D', 64), "registry.machine32.shell.delay", fingerprint, false)
         ]);
         var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.run");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.appinit");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.ifeo");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.shell.delay");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine32.shell.delay");
     }
 
     [Fact]
@@ -692,6 +725,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
                 "registry.machine64.run", "registry.machine64.runonce", "registry.machine64.policy.run", "registry.machine64.winlogon",
                 "registry.machine32.run", "registry.machine32.runonce", "registry.machine32.policy.run", "registry.machine32.winlogon",
                 "registry.machine64.appinit", "registry.machine32.appinit",
+                "registry.machine64.shell.delay", "registry.machine32.shell.delay",
                 "startup.user", "startup.common", "scheduled.task", "registry.service", "registry.driver"
             });
         });
