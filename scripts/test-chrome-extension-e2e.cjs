@@ -8,7 +8,28 @@ const { spawn, spawnSync } = require('node:child_process');
 const { createServer } = require('node:http');
 
 const hostName = 'com.sentinelai.urlcheck';
-const registryKey = 'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\' + hostName;
+const browserName = process.argv[2] ?? 'chrome';
+const browsers = {
+  chrome: {
+    displayName: 'Chrome',
+    registryPath: 'Software\\Google\\Chrome\\NativeMessagingHosts\\',
+    executablePaths: [
+      path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe')
+    ]
+  },
+  edge: {
+    displayName: 'Edge',
+    registryPath: 'Software\\Microsoft\\Edge\\NativeMessagingHosts\\',
+    executablePaths: [
+      path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+    ]
+  }
+};
+const browserConfig = browsers[browserName];
+if (!browserConfig) throw new Error('Choose chrome or edge as the browser argument.');
+const registryKey = 'HKCU\\' + browserConfig.registryPath + hostName;
 const expectedExtensionId = 'nakmencmekkefmcddpihiiohjgabfemg';
 const timeoutMs = 30_000;
 
@@ -89,11 +110,11 @@ async function waitForExtensionWorker(port, extensionId) {
   throw new Error('The extension service worker did not start.');
 }
 
-async function waitForBrowser(profilePath, chromeProcess) {
+async function waitForBrowser(profilePath, browserProcess) {
   const activePortFile = path.join(profilePath, 'DevToolsActivePort');
   const deadline = Date.now() + timeoutMs;
+  let exitedAt;
   while (Date.now() < deadline) {
-    if (chromeProcess.exitCode !== null) throw new Error(`Chrome exited early with code ${chromeProcess.exitCode}.`);
     try {
       const [port] = fs.readFileSync(activePortFile, 'utf8').split(/\r?\n/);
       if (port) {
@@ -101,9 +122,13 @@ async function waitForBrowser(profilePath, chromeProcess) {
         if (response.ok) return { port, ...(await response.json()) };
       }
     } catch {}
+    if (browserProcess.exitCode !== null) {
+      exitedAt ??= Date.now();
+      if (Date.now() - exitedAt > 2000) throw new Error(`${browserConfig.displayName} exited early with code ${browserProcess.exitCode}.`);
+    }
     await new Promise(resolve => setTimeout(resolve, 200));
   }
-  throw new Error('Chrome DevTools endpoint did not become ready.');
+  throw new Error(`${browserConfig.displayName} DevTools endpoint did not become ready.`);
 }
 
 async function evaluatePage(page, expression) {
@@ -118,16 +143,12 @@ async function main() {
   const manifest = JSON.parse(fs.readFileSync(manifestSource, 'utf8'));
   const extensionId = extensionIdFromKey(manifest.key);
   if (extensionId !== expectedExtensionId) throw new Error('The repository extension ID does not match the Native Messaging host contract.');
-  if (registryValue() !== null) throw new Error(`The Chrome Native Messaging registration already exists; refusing to overwrite ${registryKey}.`);
+  if (registryValue() !== null) throw new Error(`The ${browserConfig.displayName} Native Messaging registration already exists; refusing to overwrite ${registryKey}.`);
 
-  const chromeCandidates = [
-    path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe')
-  ];
-  const chromePath = chromeCandidates.find(candidate => fs.existsSync(candidate));
-  if (!chromePath) throw new Error('Google Chrome was not found in Program Files.');
+  const browserPath = browserConfig.executablePaths.find(candidate => fs.existsSync(candidate));
+  if (!browserPath) throw new Error(`${browserConfig.displayName} was not found in Program Files.`);
 
-  const root = fs.mkdtempSync(path.join(repoRoot, '.tmp-chrome-e2e-'));
+  const root = fs.mkdtempSync(path.join(repoRoot, `.tmp-${browserName}-e2e-`));
   const profilePath = path.join(root, 'profile');
   const extensionPath = path.join(root, 'extension');
   const engineHostProject = path.join(repoRoot, 'tests', 'Sentinel.NativeMessagingEngineHost', 'Sentinel.NativeMessagingEngineHost.csproj');
@@ -142,8 +163,7 @@ async function main() {
     allowed_origins: [`chrome-extension://${extensionId}/`]
   };
 
-  let registryRegistered = false;
-  let chromeProcess;
+  let browserProcess;
   let fixtureServer;
   let browser;
   let worker;
@@ -158,7 +178,7 @@ async function main() {
     run('dotnet', ['publish', engineHostProject, '-c', 'Release', '-o', engineHostOutput, '--nologo', '-p:NuGetAudit=false', '--ignore-failed-sources']);
     fs.writeFileSync(hostManifestPath, `${JSON.stringify(hostManifest, null, 2)}\n`);
     sendRegistryValue(hostManifestPath);
-    registryRegistered = true;
+    if (registryValue() !== hostManifestPath) throw new Error(`${browserConfig.displayName} Native Messaging registration was not written.`);
 
     fixtureServer = createServer((_request, response) => {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
@@ -170,7 +190,7 @@ async function main() {
     });
     const fixturePort = fixtureServer.address().port;
 
-    const chromeArgs = [
+    const browserArgs = [
       `--user-data-dir=${profilePath}`,
       '--no-first-run', '--no-default-browser-check', '--disable-sync',
       '--disable-background-networking', '--disable-component-update', '--disable-default-apps',
@@ -178,17 +198,17 @@ async function main() {
       '--host-resolver-rules=MAP *.test 127.0.0.1,MAP * ~NOTFOUND',
       'about:blank'
     ];
-    chromeProcess = spawn(chromePath, chromeArgs, { stdio: 'ignore', windowsHide: false });
-    const browserInfo = await waitForBrowser(profilePath, chromeProcess);
+    browserProcess = spawn(browserPath, browserArgs, { stdio: 'ignore', windowsHide: false });
+    const browserInfo = await waitForBrowser(profilePath, browserProcess);
     const browserPort = browserInfo.port;
     browser = connectCdp(browserInfo.webSocketDebuggerUrl);
     await browser.opened;
 
     const loaded = await browser.command('Extensions.loadUnpacked', { path: extensionPath, enableInIncognito: false });
-    if (loaded.id !== extensionId) throw new Error(`Chrome loaded unexpected extension ID ${loaded.id}.`);
+    if (loaded.id !== extensionId) throw new Error(`${browserConfig.displayName} loaded unexpected extension ID ${loaded.id}.`);
     const extensions = await browser.command('Extensions.getExtensions');
     if (!extensions.extensions?.some(extension => extension.id === extensionId && extension.enabled)) {
-      throw new Error('Chrome did not enable the unpacked extension.');
+      throw new Error(`${browserConfig.displayName} did not enable the unpacked extension.`);
     }
 
     await browser.command('Target.createTarget', { url: 'about:blank' });
@@ -219,7 +239,7 @@ async function main() {
     const targetsResponse = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
     const targets = await targetsResponse.json();
     const tab = targets.find(target => target.id === created.targetId);
-    if (!tab?.webSocketDebuggerUrl) throw new Error('Chrome did not expose the local fixture tab.');
+    if (!tab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not expose the local fixture tab.`);
     page = connectCdp(tab.webSocketDebuggerUrl);
     await page.opened;
     await page.command('Runtime.enable');
@@ -237,7 +257,7 @@ async function main() {
     if (!observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) {
       const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
       const requestTypes = fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
-      throw new Error(`The warning page was not reached. Final page: ${observed?.href ?? 'unavailable'}; Native Messaging requests: ${requestTypes.join(',') || 'none'}.`);
+      throw new Error(`The warning page was not reached in ${browserConfig.displayName}. Final page: ${observed?.href ?? 'unavailable'}; Native Messaging requests: ${requestTypes.join(',') || 'none'}.`);
     }
     if (!observed.text.includes('Sprawdź ten adres przed kontynuowaniem') ||
         !observed.text.includes('Domena przypomina znaną markę') ||
@@ -265,7 +285,7 @@ async function main() {
       if (spaTab?.webSocketDebuggerUrl) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    if (!spaTab?.webSocketDebuggerUrl) throw new Error('Chrome did not expose the SPA fixture tab.');
+    if (!spaTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not expose the SPA fixture tab.`);
     spaPage = connectCdp(spaTab.webSocketDebuggerUrl);
     await spaPage.opened;
     await spaPage.command('Runtime.enable');
@@ -274,14 +294,14 @@ async function main() {
     while (analyzeCount() <= beforeSpaCount && Date.now() < initialAnalysisDeadline) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    if (analyzeCount() <= beforeSpaCount) throw new Error('The initial SPA fixture navigation was not analyzed.');
+    if (analyzeCount() <= beforeSpaCount) throw new Error(`The initial SPA fixture navigation was not analyzed in ${browserConfig.displayName}.`);
     const beforeHistoryChangeCount = analyzeCount();
     await evaluatePage(spaPage, `history.pushState({}, '', '/spa-route?step=2'); location.href`);
     const historyAnalysisDeadline = Date.now() + timeoutMs;
     while (analyzeCount() <= beforeHistoryChangeCount && Date.now() < historyAnalysisDeadline) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    if (analyzeCount() <= beforeHistoryChangeCount) throw new Error('Chrome SPA history change did not reach the Native Messaging host.');
+    if (analyzeCount() <= beforeHistoryChangeCount) throw new Error(`${browserConfig.displayName} SPA history change did not reach the Native Messaging host.`);
 
     console.log(JSON.stringify({
       result: 'PASS',
@@ -293,29 +313,32 @@ async function main() {
       productionRuleRendered: true,
       submittedUrlRedacted: true,
       spaHistoryChangeAnalyzed: true,
-      externalDns: 'blocked by Chrome host resolver rules'
+      externalDns: `blocked by ${browserConfig.displayName} host resolver rules`
     }, null, 2));
   } finally {
+    try { if (browser) await browser.command('Browser.close'); } catch {}
     try { spaPage?.socket.close(); } catch {}
     try { page?.socket.close(); } catch {}
     try { worker?.socket.close(); } catch {}
     try { browser?.socket.close(); } catch {}
-    if (chromeProcess?.pid) {
-      spawnSync('taskkill.exe', ['/PID', String(chromeProcess.pid), '/T', '/F'], { encoding: 'utf8', windowsHide: true });
+    if (browserProcess?.pid) {
+      spawnSync('taskkill.exe', ['/PID', String(browserProcess.pid), '/T', '/F'], { encoding: 'utf8', windowsHide: true });
     }
     if (fixtureServer) {
       fixtureServer.closeAllConnections?.();
       await new Promise(resolve => fixtureServer.close(resolve));
     }
     try {
-      if (registryRegistered) removeRegistryValue(hostManifestPath);
+      if (registryValue() === hostManifestPath) removeRegistryValue(hostManifestPath);
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+      const temporaryRoot = path.resolve(root);
+      if (!temporaryRoot.startsWith(repoRoot + path.sep)) throw new Error('Refusing to remove a test directory outside the repository.');
+      fs.rmSync(temporaryRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
     }
   }
 }
 
 main().catch(error => {
-  console.error(`Chrome extension E2E failed: ${error.stack ?? error.message}`);
+  console.error(`${browserConfig.displayName} extension E2E failed: ${error.stack ?? error.message}`);
   process.exitCode = 1;
 });
