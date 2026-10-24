@@ -148,6 +148,7 @@ async function main() {
   let browser;
   let worker;
   let page;
+  let spaPage;
   try {
     fs.cpSync(path.dirname(manifestSource), extensionPath, { recursive: true });
     manifest.host_permissions = ['http://*.test/*', 'https://*.test/*'];
@@ -250,6 +251,38 @@ async function main() {
     const requestTypes = fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
     if (!requestTypes.includes('analyze')) throw new Error('The Native Messaging Sentinel host did not receive an analyze request.');
 
+    const analyzeCount = () => fs.existsSync(requestLog)
+      ? fs.readFileSync(requestLog, 'utf8').split(/\r?\n/).filter(type => type === 'analyze').length
+      : 0;
+    const beforeSpaCount = analyzeCount();
+    const spaTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/spa-start` });
+    const spaDeadline = Date.now() + timeoutMs;
+    let spaTab;
+    while (Date.now() < spaDeadline) {
+      const response = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
+      const targets = await response.json();
+      spaTab = targets.find(target => target.id === spaTarget.targetId);
+      if (spaTab?.webSocketDebuggerUrl) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!spaTab?.webSocketDebuggerUrl) throw new Error('Chrome did not expose the SPA fixture tab.');
+    spaPage = connectCdp(spaTab.webSocketDebuggerUrl);
+    await spaPage.opened;
+    await spaPage.command('Runtime.enable');
+
+    const initialAnalysisDeadline = Date.now() + timeoutMs;
+    while (analyzeCount() <= beforeSpaCount && Date.now() < initialAnalysisDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (analyzeCount() <= beforeSpaCount) throw new Error('The initial SPA fixture navigation was not analyzed.');
+    const beforeHistoryChangeCount = analyzeCount();
+    await evaluatePage(spaPage, `history.pushState({}, '', '/spa-route?step=2'); location.href`);
+    const historyAnalysisDeadline = Date.now() + timeoutMs;
+    while (analyzeCount() <= beforeHistoryChangeCount && Date.now() < historyAnalysisDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (analyzeCount() <= beforeHistoryChangeCount) throw new Error('Chrome SPA history change did not reach the Native Messaging host.');
+
     console.log(JSON.stringify({
       result: 'PASS',
       browser: browserInfo.Browser,
@@ -259,9 +292,11 @@ async function main() {
       warningRendered: true,
       productionRuleRendered: true,
       submittedUrlRedacted: true,
+      spaHistoryChangeAnalyzed: true,
       externalDns: 'blocked by Chrome host resolver rules'
     }, null, 2));
   } finally {
+    try { spaPage?.socket.close(); } catch {}
     try { page?.socket.close(); } catch {}
     try { worker?.socket.close(); } catch {}
     try { browser?.socket.close(); } catch {}
