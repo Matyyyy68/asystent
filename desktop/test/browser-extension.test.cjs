@@ -42,6 +42,7 @@ function createWorker(sessionStorage, shared, {
     },
     webNavigation: {
       onBeforeNavigate: { addListener(listener) { listeners.navigate = listener; } },
+      onCommitted: { addListener(listener) { listeners.committed = listener; } },
       onHistoryStateUpdated: { addListener(listener) { listeners.historyNavigate = listener; } }
     },
     tabs: {
@@ -62,6 +63,7 @@ function createWorker(sessionStorage, shared, {
   }, { filename: backgroundPath });
   return {
     navigate(event) { listeners.navigate(event); },
+    commit(event) { listeners.committed(event); },
     historyNavigate(event) { listeners.historyNavigate(event); },
     disconnectNative() { portListeners.disconnect?.(); },
     respondToNative(message) { portListeners.message(message); },
@@ -149,6 +151,31 @@ test('SPA history changes are analyzed once for the main frame', async () => {
   assert.equal(shared.nativeRequests.length, 1);
   assert.equal(shared.nativeRequests[0].type, 'analyze');
   assert.equal(shared.nativeRequests[0].url, route.url);
+});
+
+test('committed redirect destinations are analyzed once and iframe commits are ignored', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared);
+  const source = { tabId: 9, frameId: 0, url: 'https://example.test/redirect' };
+  const destination = { tabId: 9, frameId: 0, url: 'https://paypal-login.test/final' };
+
+  worker.navigate(source);
+  await new Promise((resolve) => setImmediate(resolve));
+  const initialRequest = shared.nativeRequests[0];
+  worker.respondToNative({ id: initialRequest.id, available: true, shouldWarn: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  worker.commit(source);
+  worker.commit(destination);
+  worker.commit(destination);
+  worker.commit({ ...destination, frameId: 2, url: 'https://paypal-login.test/iframe' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 2);
+  assert.equal(shared.nativeRequests[1].url, destination.url);
+  worker.respondToNative({ id: shared.nativeRequests[1].id, available: true, shouldWarn: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.tabUpdates.length, 0);
 });
 
 test('warning details and actions survive a service worker restart within the browser session', async () => {

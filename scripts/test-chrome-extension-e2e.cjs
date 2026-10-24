@@ -168,6 +168,8 @@ async function main() {
   let browser;
   let worker;
   let page;
+  let redirectPage;
+  let iframePage;
   let spaPage;
   try {
     fs.cpSync(path.dirname(manifestSource), extensionPath, { recursive: true });
@@ -180,9 +182,23 @@ async function main() {
     sendRegistryValue(hostManifestPath);
     if (registryValue() !== hostManifestPath) throw new Error(`${browserConfig.displayName} Native Messaging registration was not written.`);
 
-    fixtureServer = createServer((_request, response) => {
+    fixtureServer = createServer((request, response) => {
+      const requestUrl = new URL(request.url, 'http://127.0.0.1');
+      const fixturePort = fixtureServer.address()?.port;
+      if (requestUrl.pathname === '/redirect-to-brand') {
+        response.writeHead(302, { location: `http://paypal-login.test:${fixturePort}/redirect-final` });
+        response.end();
+        return;
+      }
+      if (requestUrl.pathname === '/iframe') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        response.end(`<!doctype html><title>Local iframe fixture</title><h1>Local iframe main</h1><iframe id="child" src="http://paypal-login.test:${fixturePort}/iframe-content" onload="document.body.dataset.frameLoaded='yes'"></iframe>`);
+        return;
+      }
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      response.end('<!doctype html><title>Sentinel local fixture</title><h1>Local .test fixture</h1>');
+      response.end(requestUrl.pathname === '/iframe-content'
+        ? '<!doctype html><title>Local iframe child</title><p>iframe loaded</p>'
+        : '<!doctype html><title>Sentinel local fixture</title><h1>Local .test fixture</h1>');
     });
     await new Promise((resolve, reject) => {
       fixtureServer.once('error', reject);
@@ -274,6 +290,73 @@ async function main() {
     const analyzeCount = () => fs.existsSync(requestLog)
       ? fs.readFileSync(requestLog, 'utf8').split(/\r?\n/).filter(type => type === 'analyze').length
       : 0;
+
+    const beforeRedirectCount = analyzeCount();
+    const redirectTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/redirect-to-brand` });
+    const redirectDeadline = Date.now() + timeoutMs;
+    let redirectTab;
+    while (Date.now() < redirectDeadline) {
+      const response = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
+      const targets = await response.json();
+      redirectTab = targets.find(target => target.id === redirectTarget.targetId);
+      if (redirectTab?.webSocketDebuggerUrl && redirectTab.url.startsWith(`chrome-extension://${extensionId}/warning.html`)) break;
+      if (redirectTab?.url.includes('/redirect-final') && analyzeCount() > beforeRedirectCount + 1) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!redirectTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not expose the redirect fixture tab.`);
+    redirectPage = connectCdp(redirectTab.webSocketDebuggerUrl);
+    await redirectPage.opened;
+    await redirectPage.command('Runtime.enable');
+    let redirectObserved;
+    const redirectWarningDeadline = Date.now() + timeoutMs;
+    while (Date.now() < redirectWarningDeadline) {
+      const redirectState = await evaluatePage(redirectPage, 'JSON.stringify({href:location.href,text:document.body?.innerText||""})');
+      try { redirectObserved = JSON.parse(redirectState); } catch {}
+      if (redirectObserved?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) &&
+          redirectObserved.text.includes('Pełny adres nie jest zapisywany w historii.')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const redirectDestinationWarned = redirectObserved?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) === true;
+    if (!redirectDestinationWarned) {
+      throw new Error(`${browserConfig.displayName} did not warn about the suspicious server-redirect destination; final URL: ${redirectObserved?.href ?? 'unavailable'}.`);
+    }
+    const redirectWarningRedacted = !redirectObserved.text.includes('paypal-login.test') &&
+      !redirectObserved.text.includes('redirect-final');
+    if (!redirectWarningRedacted) {
+      throw new Error(`${browserConfig.displayName} did not redact the suspicious server-redirect URL and host from the warning.`);
+    }
+
+    const beforeIframeCount = analyzeCount();
+    const iframeTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/iframe` });
+    const iframeDeadline = Date.now() + timeoutMs;
+    let iframeTab;
+    while (Date.now() < iframeDeadline) {
+      const response = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
+      const targets = await response.json();
+      iframeTab = targets.find(target => target.id === iframeTarget.targetId);
+      if (iframeTab?.webSocketDebuggerUrl && iframeTab.url.endsWith('/iframe')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!iframeTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not expose the iframe fixture tab.`);
+    iframePage = connectCdp(iframeTab.webSocketDebuggerUrl);
+    await iframePage.opened;
+    await iframePage.command('Runtime.enable');
+    const iframeDeadlineComplete = Date.now() + timeoutMs;
+    let iframeLoaded;
+    while (Date.now() < iframeDeadlineComplete) {
+      iframeLoaded = await evaluatePage(iframePage, `document.body?.dataset.frameLoaded === 'yes'`);
+      if (iframeLoaded) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!iframeLoaded) throw new Error(`${browserConfig.displayName} did not finish loading the iframe fixture.`);
+    const iframeAnalysisDeadline = Date.now() + timeoutMs;
+    while (analyzeCount() <= beforeIframeCount && Date.now() < iframeAnalysisDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const iframeAnalysisDelta = analyzeCount() - beforeIframeCount;
+    if (iframeAnalysisDelta !== 1) throw new Error(`${browserConfig.displayName} should analyze the main-frame URL once and ignore the iframe (observed ${iframeAnalysisDelta}).`);
+
     const beforeSpaCount = analyzeCount();
     const spaTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/spa-start` });
     const spaDeadline = Date.now() + timeoutMs;
@@ -312,11 +395,16 @@ async function main() {
       warningRendered: true,
       productionRuleRendered: true,
       submittedUrlRedacted: true,
+      redirectDestinationWarned: true,
+      redirectWarningRedacted: true,
+      iframeNavigationAnalyzed: false,
       spaHistoryChangeAnalyzed: true,
       externalDns: `blocked by ${browserConfig.displayName} host resolver rules`
     }, null, 2));
   } finally {
     try { if (browser) await browser.command('Browser.close'); } catch {}
+    try { iframePage?.socket.close(); } catch {}
+    try { redirectPage?.socket.close(); } catch {}
     try { spaPage?.socket.close(); } catch {}
     try { page?.socket.close(); } catch {}
     try { worker?.socket.close(); } catch {}

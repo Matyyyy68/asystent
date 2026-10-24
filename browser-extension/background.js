@@ -118,6 +118,7 @@ function inspectNavigation(event, { skipIfCurrent = false } = {}) {
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((event) => inspectNavigation(event));
+chrome.webNavigation.onCommitted.addListener((event) => inspectNavigation(event, { skipIfCurrent: true }));
 chrome.webNavigation.onHistoryStateUpdated.addListener((event) => inspectNavigation(event, { skipIfCurrent: true }));
 
 chrome.tabs.onRemoved.addListener((tabId) => {

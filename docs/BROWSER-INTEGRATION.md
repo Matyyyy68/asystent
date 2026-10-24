@@ -6,7 +6,7 @@ Rozszerzenie Manifest V3 jest dostarczane w repozytorium, lecz nie jest opubliko
 
 ```text
 Edge / Chrome MV3
-  └─ webNavigation.onBeforeNavigate (główna nawigacja HTTP/HTTPS)
+  └─ webNavigation.onBeforeNavigate + onCommitted (główna nawigacja HTTP/HTTPS)
       └─ Native Messaging: com.sentinelai.urlcheck
           └─ Sentinel.UrlHost.exe (ramkowane komunikaty UTF-8)
               └─ lokalny Sentinel.Engine i baza reputacji domen
@@ -29,7 +29,7 @@ Otwórz `edge://extensions` albo `chrome://extensions`, włącz **Tryb deweloper
 
 ## Testy i budowa
 
-Aktualny E2E używa testowego hosta Native Messaging z produkcyjnym `UrlRequestProcessor`. Skrypt `scripts/test-chrome-extension-e2e.cjs` przyjmuje `chrome` (domyślnie) lub `edge`; w obu wariantach tworzy osobny profil, kopię manifestu ograniczoną do `*.test`, blokuje zewnętrzne DNS, sprawdza `status`, `analyze`, ostrzeżenie z redakcją oraz `history.pushState`, a po zakończeniu usuwa profil i tylko własny wpis HKCU. Ostatni wynik 2026-10-24: Chrome 155.0.8059.86 PASS oraz Edge 155.0.4283.62 PASS. To nie testuje pełnej instalacji/aktualizacji/deinstalacji ani hosta produkcyjnego z profilem i historią.
+Aktualny E2E używa testowego hosta Native Messaging z produkcyjnym `UrlRequestProcessor`. Skrypt `scripts/test-chrome-extension-e2e.cjs` przyjmuje `chrome` (domyślnie) lub `edge`; w obu wariantach tworzy osobny profil, kopię manifestu ograniczoną do `*.test`, blokuje zewnętrzne DNS, sprawdza `status`, `analyze`, ostrzeżenie z redakcją, przekierowanie HTTP 302 do podejrzanej domeny, pominięcie iframe oraz `history.pushState`, a po zakończeniu usuwa profil i tylko własny wpis HKCU. Ostatni wynik 2026-10-24: Chrome 155.0.8059.86 PASS oraz Edge 155.0.4283.62 PASS. To nie testuje pełnej instalacji/aktualizacji/deinstalacji ani hosta produkcyjnego z profilem i historią.
 
 `node scripts/check-product.cjs` sprawdza Manifest V3, identyfikator rozszerzenia, uprawnienia i składnię JavaScript. Testy .NET znajdują się w `tests/Sentinel.Tests`; `node scripts/test-engine.cjs` sprawdza protokół i przepływ do lokalnej bazy. `./scripts/build-user.ps1 -Installer` buduje pakiet Windows. Pełny test instalacji i interakcji z kartami wymaga interaktywnego Windows z Edge lub Chrome.
 
