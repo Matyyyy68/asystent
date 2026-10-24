@@ -1,5 +1,7 @@
 # PLAN-004 — wspólny model zdarzeń i detekcja
 
+**F03 — PhreshPhish URL model screening (2026-10-24):** dodano research-only pipeline na train z domenowym podziałem 70/15/15; progi FPR kalibruje się wyłącznie na calibration. Na wewnętrznym holdoucie próg docelowy 0,1% osiągnął recall 63,73% i FPR 0,1106%, wobec zamrożonych reguł 3,459% i 5,596%. Ten sam kandydat z progiem niezmienionym zmierzono na pinned official test: recall 53,18%, FPR 0,1381%; wykonano dwa identyczne przebiegi wyłącznie dla kompletnego raportu. Matematyczna projekcja precision przy bazie 0,05% wynosi 16,16%, więc kandydat nie jest gotowym alertem. Model i pakiety nie trafiają do produktu; źródło ogranicza użycie do badań antyphishingowych. Kolejny krok: oficjalne low-base-rate benchmarki z bootstrap CI, następnie decyzja licencyjna przed ewentualną integracją. Testy guardów 7/7 PASS; dane tylko w `%TEMP%` i usunięte. Szczegóły: `docs/DETECTION-EVALUATION.md`.
+
 **Pochodzenie benchmarku PhishVN (2026-10-23):** oficjalna v4 (v3.1.0) nie zmienia danych v3, więc wcześniejsze checksumy splitów są nadal aktualne i nie stanowią nowego potwierdzenia generalizacji. Audyt źródłowych etykiet raportuje 12,1% szacowanych błędów w phishingowych rekordach (95% CI 7,1–20,0%, skupione głównie w bronze) oraz 4,0% w benign; ewaluacja gold/silver zmniejsza, ale nie wyklucza ryzyka szumu. Szczegóły: `docs/DETECTION-EVALUATION.md`.
 
 1. **Cel:** wersjonowane, testowalne zdarzenie wspólne dla ręcznych reguł, DNS, browsera, plików i przyszłego Enterprise.
