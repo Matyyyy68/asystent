@@ -2,7 +2,6 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
-using System.Xml.Linq;
 using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using UglyToad.PdfPig;
@@ -101,7 +100,7 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
         var bytes = await ReadBoundedAsync(filePath, cancellationToken);
         var extracted = extension switch
         {
-            ".docx" => ExtractDocx(bytes),
+            ".docx" => ExtractDocx(bytes, cancellationToken),
             ".pdf" => ExtractPdf(bytes, cancellationToken),
             _ => DecodeText(bytes)
         };
@@ -339,7 +338,7 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
         return text.ToString();
     }
 
-    private static string ExtractDocx(byte[] bytes)
+    private static string ExtractDocx(byte[] bytes, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(bytes, writable: false);
         using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
@@ -348,10 +347,58 @@ public sealed class LocalKnowledgeBase : IKnowledgeBaseProvider
         using var xmlStream = entry.Open();
         var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = MaximumExtractedCharacters * 4L };
         using var reader = XmlReader.Create(xmlStream, settings);
-        var document = XDocument.Load(reader, LoadOptions.None);
-        XNamespace word = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-        var paragraphs = document.Descendants(word + "p").Select(p => string.Concat(p.Descendants().Where(e => e.Name == word + "t").Select(e => e.Value)));
-        return string.Join(Environment.NewLine, paragraphs);
+        const string wordNamespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+        var output = new StringBuilder(Math.Min(MaximumExtractedCharacters, bytes.Length));
+        var textBuffer = new char[4096];
+        var paragraphDepth = 0;
+        var sawParagraph = false;
+        var inText = false;
+        while (reader.Read())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.NodeType == XmlNodeType.Element)
+            {
+                if (reader.NamespaceURI == wordNamespace && reader.LocalName == "p")
+                {
+                    if (paragraphDepth == 0)
+                    {
+                        if (sawParagraph) AppendBounded(output, Environment.NewLine);
+                        sawParagraph = true;
+                    }
+                    paragraphDepth++;
+                    if (reader.IsEmptyElement) paragraphDepth--;
+                }
+                else if (paragraphDepth > 0 && reader.NamespaceURI == wordNamespace && reader.LocalName == "t")
+                {
+                    inText = !reader.IsEmptyElement;
+                }
+            }
+            else if (reader.NodeType == XmlNodeType.EndElement)
+            {
+                if (reader.NamespaceURI == wordNamespace && reader.LocalName == "t") inText = false;
+                if (reader.NamespaceURI == wordNamespace && reader.LocalName == "p") paragraphDepth--;
+            }
+            else if (inText && reader.NodeType is XmlNodeType.Text or XmlNodeType.CDATA or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace)
+            {
+                int read;
+                while ((read = reader.ReadValueChunk(textBuffer, 0, textBuffer.Length)) > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (output.Length + read > MaximumExtractedCharacters)
+                        throw new InvalidDataException("Tekst po ekstrakcji przekracza limit 2 MB znaków.");
+                    output.Append(textBuffer, 0, read);
+                }
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return output.ToString();
+    }
+
+    private static void AppendBounded(StringBuilder output, string value)
+    {
+        if (output.Length + value.Length > MaximumExtractedCharacters)
+            throw new InvalidDataException("Tekst po ekstrakcji przekracza limit 2 MB znaków.");
+        output.Append(value);
     }
 
     private static List<string> SplitIntoChunks(string text)

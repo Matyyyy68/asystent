@@ -132,6 +132,48 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task StreamsDocxTextAndRejectsExtractionBeyondLimitWithoutChangingIndex()
+    {
+        var store = await CreateAsync();
+        var path = Path.Combine(directory, "oversized-text.docx");
+        var text = new string('x', LocalKnowledgeBase.MaximumExtractedCharacters + 1);
+        var xml = "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>" + text + "</w:t></w:r></w:p></w:body></w:document>";
+        await using (var file = new FileStream(path, FileMode.CreateNew))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("word/document.xml");
+            await using var stream = entry.Open();
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(xml));
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => store.ImportAsync(path));
+
+        Assert.Contains("2 MB", error.Message);
+        Assert.Empty(await store.ListAsync());
+    }
+
+    [Fact]
+    public async Task RejectsDocxExternalEntities()
+    {
+        var store = await CreateAsync();
+        var secretPath = Path.Combine(directory, "local-secret.txt");
+        await File.WriteAllTextAsync(secretPath, "Synthetic secret that must not be read");
+        var uri = new Uri(secretPath).AbsoluteUri;
+        var path = Path.Combine(directory, "external-entity.docx");
+        var xml = "<!DOCTYPE w:document [<!ENTITY xxe SYSTEM \"" + uri + "\">]><w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:p><w:r><w:t>&xxe;</w:t></w:r></w:p></w:body></w:document>";
+        await using (var file = new FileStream(path, FileMode.CreateNew))
+        using (var archive = new ZipArchive(file, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("word/document.xml");
+            await using var stream = entry.Open();
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(xml));
+        }
+
+        await Assert.ThrowsAsync<System.Xml.XmlException>(() => store.ImportAsync(path));
+        Assert.Empty(await store.ListAsync());
+    }
+
+    [Fact]
     public async Task ExtractsSearchablePdfTextLocally()
     {
         var store = await CreateAsync();
