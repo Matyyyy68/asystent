@@ -13,6 +13,9 @@ internal static class Program
 {
     private const string Product = "Sentinel AI";
     internal static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Product, "Logs", "installer.log");
+    private const long MaximumLogBytes = 1024 * 1024;
+    private const int MaximumLogMessageCharacters = 4096;
+    private static readonly object LogGate = new();
     private static readonly string DefaultDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", Product);
     private static string PayloadHash => Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
@@ -173,6 +176,7 @@ internal static class Program
         var data = Path.Combine(localAppData, "SentinelAI-Setup-SelfTest-" + testId);
         try
         {
+            VerifyLogRotation(Path.Combine(data, "installer-log-rotation-test.log"));
             if (!IsUninstallInvocation(new[] { "--uninstall" }, Path.Combine(root, "Sentinel.AI.Setup.exe"))
                 || !IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Uninstall Sentinel AI.exe"))
                 || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel AI.exe"))
@@ -403,12 +407,65 @@ internal static class Program
 
     internal static void Log(string message)
     {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
-            File.AppendAllText(LogPath, $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}", Encoding.UTF8);
-        }
+        try { AppendLogLine(LogPath, message, MaximumLogBytes); }
         catch { }
+    }
+
+    internal static void AppendLogLine(string path, string message, long maximumBytes)
+    {
+        if (maximumBytes < 64) throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        var fullPath = Path.GetFullPath(path);
+        var directory = Path.GetDirectoryName(fullPath) ?? throw new ArgumentException("Ścieżka logu nie ma katalogu nadrzędnego.", nameof(path));
+        var prefix = $"{DateTimeOffset.Now:O} ";
+        var suffix = Environment.NewLine;
+        var availableMessageBytes = (int)Math.Min(MaximumLogMessageCharacters * 4L,
+            Math.Max(0, maximumBytes - Encoding.UTF8.GetByteCount(prefix + suffix)));
+        var cleanMessage = Clean(message);
+        var messageLength = Math.Min(cleanMessage.Length, MaximumLogMessageCharacters);
+        while (messageLength > 0 && Encoding.UTF8.GetByteCount(cleanMessage.AsSpan(0, messageLength)) > availableMessageBytes)
+            messageLength--;
+        if (messageLength < cleanMessage.Length) cleanMessage = cleanMessage[..messageLength];
+        var entry = Encoding.UTF8.GetBytes(prefix + cleanMessage + suffix);
+
+        lock (LogGate)
+        {
+            Directory.CreateDirectory(directory);
+            using (var stream = new FileStream(fullPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read))
+            {
+                if (stream.Length + entry.Length <= maximumBytes)
+                {
+                    stream.Position = stream.Length;
+                    stream.Write(entry);
+                    return;
+                }
+            }
+
+            var previousPath = fullPath + ".1";
+            if (File.Exists(previousPath)) File.Delete(previousPath);
+            if (File.Exists(fullPath)) File.Move(fullPath, previousPath);
+            using var rotated = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            rotated.Write(entry);
+        }
+    }
+
+    private static void VerifyLogRotation(string path)
+    {
+        const long testLimit = 80;
+        var previousPath = path + ".1";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, new string('a', 64), Encoding.UTF8);
+        File.WriteAllText(previousPath, "older log", Encoding.UTF8);
+        AppendLogLine(path, "rotated entry", testLimit);
+        if (File.ReadAllText(previousPath, Encoding.UTF8).TrimStart('\uFEFF') != new string('a', 64)
+            || new FileInfo(path).Length > testLimit
+            || !File.ReadAllText(path, Encoding.UTF8).Contains("rotated entry", StringComparison.Ordinal))
+            throw new InvalidDataException("Rotacja logu nie zachowała poprzedniego pliku ani limitu rozmiaru.");
+
+        AppendLogLine(path, "second entry", testLimit);
+        if (new FileInfo(path).Length > testLimit || new FileInfo(previousPath).Length > testLimit
+            || !File.ReadAllText(previousPath, Encoding.UTF8).Contains("rotated entry", StringComparison.Ordinal)
+            || !File.ReadAllText(path, Encoding.UTF8).Contains("second entry", StringComparison.Ordinal))
+            throw new InvalidDataException("Rotacja logu nie utrzymuje limitu aktywnego i archiwalnego pliku.");
     }
 
     internal static string Clean(string value) => value.Replace('\r', ' ').Replace('\n', ' ').Trim();
