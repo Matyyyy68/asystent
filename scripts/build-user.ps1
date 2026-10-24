@@ -25,6 +25,8 @@ try {
   if ($LASTEXITCODE) { throw 'PhishVN CERT feed evaluation guard failed' }
   pwsh -NoProfile -File scripts/test-evaluate-url-phish-feature-candidates.ps1
   if ($LASTEXITCODE) { throw 'URL-Phish feature candidate diagnostic guard failed' }
+  pwsh -NoProfile -File scripts/test-evaluate-url-label-csv.ps1
+  if ($LASTEXITCODE) { throw 'External URL/label evaluator test failed' }
   pwsh -NoProfile -File scripts/test-implementation-plans.ps1
   if ($LASTEXITCODE) { throw 'Implementation plan structure check failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {

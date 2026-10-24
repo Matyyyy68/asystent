@@ -1,0 +1,11 @@
+{
+  "name": "sentinel-phreshphish-research",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Research-only column-projected PhreshPhish evaluator; not a Sentinel runtime dependency.",
+  "dependencies": {
+    "hyparquet": "1.31.5",
+    "hyparquet-compressors": "1.1.2"
+  }
+}
