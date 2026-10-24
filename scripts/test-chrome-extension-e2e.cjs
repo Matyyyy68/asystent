@@ -150,6 +150,7 @@ async function main() {
 
   const root = fs.mkdtempSync(path.join(repoRoot, `.tmp-${browserName}-e2e-`));
   const profilePath = path.join(root, 'profile');
+  const downloadPath = path.join(root, 'downloads');
   const extensionPath = path.join(root, 'extension');
   const engineHostProject = path.join(repoRoot, 'tests', 'Sentinel.NativeMessagingEngineHost', 'Sentinel.NativeMessagingEngineHost.csproj');
   const engineHostOutput = path.join(root, 'engine-host');
@@ -186,6 +187,15 @@ async function main() {
     fixtureServer = createServer((request, response) => {
       const requestUrl = new URL(request.url, 'http://127.0.0.1');
       const fixturePort = fixtureServer.address()?.port;
+      if (requestUrl.pathname === '/download') {
+        response.writeHead(200, {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-disposition': 'attachment; filename="sentinel-download.txt"',
+          'cache-control': 'no-store'
+        });
+        response.end('sentinel-download-fixture');
+        return;
+      }
       if (requestUrl.pathname === '/redirect-to-brand') {
         response.writeHead(302, { location: `http://paypal-login.test:${fixturePort}/redirect-final` });
         response.end();
@@ -220,6 +230,8 @@ async function main() {
     const browserPort = browserInfo.port;
     browser = connectCdp(browserInfo.webSocketDebuggerUrl);
     await browser.opened;
+    fs.mkdirSync(downloadPath, { recursive: true });
+    await browser.command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath });
 
     const loaded = await browser.command('Extensions.loadUnpacked', { path: extensionPath, enableInIncognito: false });
     if (loaded.id !== extensionId) throw new Error(`${browserConfig.displayName} loaded unexpected extension ID ${loaded.id}.`);
@@ -387,6 +399,30 @@ async function main() {
     }
     if (analyzeCount() <= beforeHistoryChangeCount) throw new Error(`${browserConfig.displayName} SPA history change did not reach the Native Messaging host.`);
 
+    const beforeDownloadCount = analyzeCount();
+    const downloadTarget = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/download` });
+    const downloadDeadline = Date.now() + timeoutMs;
+    let downloadedFile = false;
+    let downloadWarningRendered = false;
+    let downloadTab;
+    while (Date.now() < downloadDeadline) {
+      const [response, names] = await Promise.all([
+        fetch(`http://127.0.0.1:${browserPort}/json/list`),
+        fs.promises.readdir(downloadPath)
+      ]);
+      const targets = await response.json();
+      downloadTab = targets.find(target => target.id === downloadTarget.targetId);
+      downloadedFile = names.includes('sentinel-download.txt');
+      downloadWarningRendered = downloadTab?.url?.startsWith(`chrome-extension://${extensionId}/warning.html`) === true;
+      if (downloadedFile && downloadWarningRendered && analyzeCount() > beforeDownloadCount) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!downloadedFile) throw new Error(`${browserConfig.displayName} did not save the isolated download fixture.`);
+    const downloadContents = fs.readFileSync(path.join(downloadPath, 'sentinel-download.txt'), 'utf8');
+    if (downloadContents !== 'sentinel-download-fixture') throw new Error(`${browserConfig.displayName} downloaded unexpected fixture contents.`);
+    if (analyzeCount() <= beforeDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze the suspicious download URL.`);
+    if (!downloadWarningRendered) throw new Error(`${browserConfig.displayName} did not warn about the suspicious download URL.`);
+
     const lifecycleTargetA = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-a` });
     const lifecycleTargetB = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-b` });
     const lifecycleDeadline = Date.now() + timeoutMs;
@@ -450,6 +486,8 @@ async function main() {
       redirectWarningRedacted: true,
       iframeNavigationAnalyzed: false,
       spaHistoryChangeAnalyzed: true,
+      suspiciousDownloadAnalyzed: true,
+      suspiciousDownloadSavedInTemporaryProfile: true,
       simultaneousTabWarningsIsolated: true,
       closingOneTabKeepsOtherWarning: true,
       externalDns: `blocked by ${browserConfig.displayName} host resolver rules`
