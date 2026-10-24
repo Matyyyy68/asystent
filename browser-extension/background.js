@@ -81,10 +81,12 @@ function request(type, url = null) {
   });
 }
 
-chrome.webNavigation.onBeforeNavigate.addListener((event) => {
+function inspectNavigation(event, { skipIfCurrent = false } = {}) {
   void (async () => {
     await integrationSettingsReady;
     if (!integrationEnabled || event.frameId !== 0 || !/^https?:\/\//i.test(event.url)) return;
+    // SPA route changes can fire alongside a regular navigation for the same URL.
+    if (skipIfCurrent && latestByTab.get(event.tabId) === event.url) return;
     const allow = oneTimeAllow.get(event.tabId);
     if (allow) {
       oneTimeAllow.delete(event.tabId);
@@ -113,7 +115,10 @@ chrome.webNavigation.onBeforeNavigate.addListener((event) => {
       }
     });
   })();
-});
+}
+
+chrome.webNavigation.onBeforeNavigate.addListener((event) => inspectNavigation(event));
+chrome.webNavigation.onHistoryStateUpdated.addListener((event) => inspectNavigation(event, { skipIfCurrent: true }));
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   latestByTab.delete(tabId);

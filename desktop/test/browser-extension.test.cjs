@@ -34,7 +34,10 @@ function createWorker(sessionStorage, shared, { integrationSettings = Promise.re
         remove: async (keys) => { for (const key of Array.isArray(keys) ? keys : [keys]) sessionStorage.delete(key); }
       }
     },
-    webNavigation: { onBeforeNavigate: { addListener(listener) { listeners.navigate = listener; } } },
+    webNavigation: {
+      onBeforeNavigate: { addListener(listener) { listeners.navigate = listener; } },
+      onHistoryStateUpdated: { addListener(listener) { listeners.historyNavigate = listener; } }
+    },
     tabs: {
       onRemoved: { addListener(listener) { listeners.removed = listener; } },
       update: async (tabId, update) => { shared.tabUpdates.push({ tabId, update }); },
@@ -53,6 +56,7 @@ function createWorker(sessionStorage, shared, { integrationSettings = Promise.re
   }, { filename: backgroundPath });
   return {
     navigate(event) { listeners.navigate(event); },
+    historyNavigate(event) { listeners.historyNavigate(event); },
     respondToNative(message) { portListeners.message(message); },
     sendMessage(message, page = 'warning.html') {
       return new Promise((resolve) => {
@@ -90,6 +94,21 @@ test('navigation stays local when the saved integration setting cannot be read',
 
   assert.equal(shared.nativeRequests.length, 0,
     'a storage read failure must not enable browser analysis or contact the native host');
+});
+
+test('SPA history changes are analyzed once for the main frame', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared);
+  const route = { tabId: 5, frameId: 0, url: 'https://example.test/account/login' };
+
+  worker.historyNavigate(route);
+  worker.historyNavigate(route);
+  worker.historyNavigate({ ...route, frameId: 2, url: 'https://example.test/frame/login' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 1);
+  assert.equal(shared.nativeRequests[0].type, 'analyze');
+  assert.equal(shared.nativeRequests[0].url, route.url);
 });
 
 test('warning details and actions survive a service worker restart within the browser session', async () => {
