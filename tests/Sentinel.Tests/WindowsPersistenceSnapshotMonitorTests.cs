@@ -470,6 +470,33 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task RunOnceExChangeIsRecordedWithoutPersistingSubkeyOrCommand()
+    {
+        var store = await CreateStore();
+        const string source = "registry.machine64.runonceex";
+        var key = source + ":" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source + "\0" + "0001|1")));
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            [key] = Entry(source, @"C:\Program Files\Vendor\setup.exe /quiet", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries[key] = Entry(source, @"C:\Users\Alice\AppData\Local\Temp\payload.exe /silent", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Autostart Windows · HKLM RunOnceEx (64-bit)", item.Application);
+        Assert.Contains("persistence.machine64.runonceex.changed", item.EvidenceCodes!);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = await store.ReadAsync(), Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("payload.exe", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alice", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("0001|1", persisted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task IfeoDebuggerChangeIsRecordedWithoutPersistingExecutableOrDebuggerPath()
     {
         var store = await CreateStore();
@@ -672,7 +699,10 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
             new("registry.machine64.appinit:" + new string('A', 64), "registry.machine64.appinit", fingerprint, false),
             new("registry.machine64.ifeo:" + new string('B', 64), "registry.machine64.ifeo", fingerprint, false),
             new("registry.machine64.shell.delay:" + new string('C', 64), "registry.machine64.shell.delay", fingerprint, false),
-            new("registry.machine32.shell.delay:" + new string('D', 64), "registry.machine32.shell.delay", fingerprint, false)
+            new("registry.machine32.shell.delay:" + new string('D', 64), "registry.machine32.shell.delay", fingerprint, false),
+            new("registry.user.runonceex:" + new string('E', 64), "registry.user.runonceex", fingerprint, false),
+            new("registry.machine64.runonceex:" + new string('F', 64), "registry.machine64.runonceex", fingerprint, false),
+            new("registry.machine32.runonceex:" + new string('1', 64), "registry.machine32.runonceex", fingerprint, false)
         ]);
         var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.run");
@@ -680,6 +710,9 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.ifeo");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.shell.delay");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine32.shell.delay");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.runonceex");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.runonceex");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine32.runonceex");
     }
 
     [Fact]
@@ -726,6 +759,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
                 "registry.machine32.run", "registry.machine32.runonce", "registry.machine32.policy.run", "registry.machine32.winlogon",
                 "registry.machine64.appinit", "registry.machine32.appinit",
                 "registry.machine64.shell.delay", "registry.machine32.shell.delay",
+                "registry.user.runonceex", "registry.machine64.runonceex", "registry.machine32.runonceex",
                 "startup.user", "startup.common", "scheduled.task", "registry.service", "registry.driver"
             });
         });

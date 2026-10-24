@@ -243,6 +243,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine64.runonce" => "HKLM RunOnce (64-bit)",
                 "registry.machine32.run" => "HKLM Run (32-bit)",
                 "registry.machine32.runonce" => "HKLM RunOnce (32-bit)",
+                "registry.user.runonceex" => "HKCU RunOnceEx",
+                "registry.machine64.runonceex" => "HKLM RunOnceEx (64-bit)",
+                "registry.machine32.runonceex" => "HKLM RunOnceEx (32-bit)",
                 "registry.user.policy.run" => "HKCU Policies Explorer Run",
                 "registry.machine64.policy.run" => "HKLM Policies Explorer Run (64-bit)",
                 "registry.machine32.policy.run" => "HKLM Policies Explorer Run (32-bit)",
@@ -294,6 +297,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine64.runonce" => "machine64.runonce",
                 "registry.machine32.run" => "machine32.run",
                 "registry.machine32.runonce" => "machine32.runonce",
+                "registry.user.runonceex" => "user.runonceex",
+                "registry.machine64.runonceex" => "machine64.runonceex",
+                "registry.machine32.runonceex" => "machine32.runonceex",
                 "registry.user.policy.run" => "user.policy-run",
                 "registry.machine64.policy.run" => "machine64.policy-run",
                 "registry.machine32.policy.run" => "machine32.policy-run",
@@ -384,12 +390,14 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
         var runPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
         var runOncePath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
+        var runOnceExPath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnceEx";
         var policyRunPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer\\Run";
         var winlogonPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon";
         var appInitPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
         var shellDelayPath = "Software\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad";
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
+        CaptureRunOnceEx(RegistryHive.CurrentUser, RegistryView.Default, runOnceExPath, "registry.user.runonceex", entries);
         CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
         CaptureRegistryValues(RegistryHive.CurrentUser, RegistryView.Default, winlogonPath, "registry.user.winlogon", ["Shell", "Userinit"], entries);
         var views = Environment.Is64BitOperatingSystem
@@ -399,6 +407,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         {
             CaptureRunKey(RegistryHive.LocalMachine, view, runPath, $"registry.{sourcePrefix}.run", entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries);
+            CaptureRunOnceEx(RegistryHive.LocalMachine, view, runOnceExPath, $"registry.{sourcePrefix}.runonceex", entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
@@ -542,6 +551,64 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             }
             entries[keyId] = new(source, fingerprint, LooksLikeWritableLocation(command));
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureRunOnceEx(RegistryHive hive, RegistryView view, string subKeyPath, string source,
+        IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+        using var root = baseKey.OpenSubKey(subKeyPath, writable: false);
+        if (root is null) return;
+        var inspected = 0;
+
+        void CaptureKey(RegistryKey key, string relativePath, int depth)
+        {
+            if (depth > 8 || entries.Count >= MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                return;
+            }
+            foreach (var name in key.GetValueNames().OrderBy(valueName => valueName, StringComparer.OrdinalIgnoreCase))
+            {
+                if (++inspected > MaximumEntries)
+                {
+                    entries["!overflow"] = new("overflow", "", false);
+                    return;
+                }
+                var value = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                var command = value switch
+                {
+                    string text => text,
+                    string[] values => string.Join("\0", values),
+                    int number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    long number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    _ => null
+                };
+                if (command is null) continue;
+                var keyId = CreateKey(source, relativePath + "|" + (name.Length == 0 ? "(Default)" : name));
+                if (!entries.ContainsKey(keyId) && entries.Count >= MaximumEntries)
+                {
+                    entries["!overflow"] = new("overflow", "", false);
+                    return;
+                }
+                entries[keyId] = new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(command))),
+                    LooksLikeWritableLocation(command));
+            }
+            foreach (var childName in key.GetSubKeyNames().OrderBy(valueName => valueName, StringComparer.OrdinalIgnoreCase))
+            {
+                if (++inspected > MaximumEntries)
+                {
+                    entries["!overflow"] = new("overflow", "", false);
+                    return;
+                }
+                using var child = key.OpenSubKey(childName, writable: false);
+                if (child is not null) CaptureKey(child, relativePath.Length == 0 ? childName : relativePath + "\\" + childName, depth + 1);
+                if (entries.ContainsKey("!overflow")) return;
+            }
+        }
+
+        CaptureKey(root, "", 0);
     }
 
     [SupportedOSPlatform("windows")]
