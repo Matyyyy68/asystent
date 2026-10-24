@@ -1,5 +1,11 @@
 # Ewaluacja deterministycznej analizy URL
 
+## Bieżący snapshot PhishTank: aktywne, zweryfikowane phishingi (2026-10-24)
+
+Jednorazowo pobrano oficjalny plik `online-valid.csv.gz` przez HTTPS z `data.phishtank.com`; przekierowanie ręcznie ograniczono do HTTPS na `cdn.phishtank.com`. SHA-256 gzip: `7FE19F854F913571C5F23E0D334DA25171C97866E4F30D9234FF5039403E67E8` (2 065 363 B). Z 57 392 wierszy `verified=yes` i `online=yes` 6 613 osiągnęło próg `Moderate`, 50 779 nie, a 3 URL-e były niepoprawne: recall wierszowy 11,5225%, `URLsOpened=0`, reguły `2026.10.9`. SHA-256 tymczasowego CSV ewaluacyjnego: `BA7CDB0EEF98391E6A977EA309564DB3557ED46925EDCFC511C601365B3F2B44`; archive i CSV usunięto po pomiarze. Nie dostrajano reguł.
+
+To wyłącznie jednopunktowy pomiar czułości na aktywnym feedzie PhishTank, bez przykładów benign. Nie mierzy precision ani FPR; wynik może zawierać powtórzone lub powiązane adresy i nie jest niezależną walidacją produktu. Nie należy porównywać go bezpośrednio z innymi zbiorami. PhishTank opisuje znaczniki czasu zgłoszenia/weryfikacji i ogranicza feed do wpisów zweryfikowanych oraz online w [dokumentacji dla developerów](https://www.phishtank.org/developer_info.php); aktualne [FAQ](https://www.phishtank.org/faq.php) informuje, że użycie API do celów komercyjnych i niekomercyjnych jest dozwolone.
+
 ## Diagnostyczny model n-gramów znakowych (2026-10-24)
 
 Sprawdzono czysto lokalny Multinomial Naive Bayes z n-gramami znakowymi 3–5, trenowanymi na surowym URL-u bez schematu, z `alpha=0.1`. Użyto wyłącznie checksumowanych `url_train.csv` i `url_val.csv`, gold+silver; skrypt `scripts/evaluate_phishvn_char_ngram.py` odrzuca inne nazwy plików, kontroluje sumy i split oraz nie otwiera URL-i. Zbiór testowy nie był czytany. Test skryptu: `python scripts/test_evaluate_phishvn_char_ngram.py` (4/4 PASS).
