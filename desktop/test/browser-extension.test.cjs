@@ -74,7 +74,9 @@ test('navigation waits for saved integration setting before contacting the nativ
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
   const worker = createWorker(new Map(), shared, { integrationSettings });
 
-  worker.navigate({ tabId: 3, frameId: 0, url: 'https://paypal.com.evil.test/login' });
+  const route = { tabId: 3, frameId: 0, url: 'https://paypal.com.evil.test/login' };
+  worker.navigate(route);
+  worker.historyNavigate({ ...route, url: 'https://paypal.com.evil.test/spa-login' });
   resolveSettings({ integrationEnabled: false });
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -89,7 +91,9 @@ test('navigation stays local when the saved integration setting cannot be read',
     integrationSettings: Promise.reject(new Error('storage unavailable'))
   });
 
-  worker.navigate({ tabId: 4, frameId: 0, url: 'https://paypal.com.evil.test/login' });
+  const route = { tabId: 4, frameId: 0, url: 'https://paypal.com.evil.test/login' };
+  worker.navigate(route);
+  worker.historyNavigate({ ...route, url: 'https://paypal.com.evil.test/spa-login' });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(shared.nativeRequests.length, 0,
