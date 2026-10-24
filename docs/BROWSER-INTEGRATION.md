@@ -6,7 +6,8 @@ Rozszerzenie Manifest V3 jest dostarczane w repozytorium, lecz nie jest opubliko
 
 ```text
 Edge / Chrome MV3
-  └─ webNavigation.onBeforeNavigate + onCommitted (główna nawigacja HTTP/HTTPS)
+  ├─ webNavigation.onBeforeNavigate + onCommitted (główna nawigacja HTTP/HTTPS)
+  └─ downloads.onCreated (źródło pobrania HTTP/HTTPS po rozpoczęciu pobierania)
       └─ Native Messaging: com.sentinelai.urlcheck
           └─ Sentinel.UrlHost.exe (ramkowane komunikaty UTF-8)
               └─ lokalny Sentinel.Engine i baza reputacji domen
@@ -14,7 +15,7 @@ Edge / Chrome MV3
 
 Nie ma lokalnego serwera HTTP ani otwartego portu. Przeglądarka uruchamia hosta jako proces bieżącego użytkownika. Host sprawdza dozwolony identyfikator rozszerzenia i zapisuje lokalny marker kontaktu w `%LOCALAPPDATA%\SentinelAI`. Instalator rejestruje hosta dla Edge i Chrome w HKCU.
 
-Rozszerzenie przesyła adres odwiedzanej strony wyłącznie do hosta lokalnego. Host porównuje dokładną domenę z lokalną, świeżą listą CERT Polska, jeśli taka baza jest dostępna. Ścieżka, query i fragment URL nie są wysyłane do zewnętrznej usługi ani zapisywane w historii. Historia zawiera kategorię, ryzyko, sygnały i zalecenia. Rozszerzenie można wyłączyć w ustawieniach Sentinel AI; diagnostyka pokazuje stan rejestracji i ostatni kontakt.
+Rozszerzenie przesyła adres strony lub źródła pobrania wyłącznie do hosta lokalnego. Host porównuje dokładną domenę z lokalną, świeżą listą CERT Polska, jeśli taka baza jest dostępna. Ścieżka, query i fragment URL nie są wysyłane do zewnętrznej usługi ani zapisywane w historii. Nazwa pliku, ścieżka lokalna i referrer pobrania nie są przesyłane przez rozszerzenie. Przy dopasowaniu pobrania rozszerzenie otwiera osobną kartę z ostrzeżeniem; nie zatrzymuje pobrania ani nie analizuje jego treści. Nowa zgoda `downloads` pozwala przeglądarce przekazywać metadane pobrania do rozszerzenia; wysłanie adresu do hosta nadal wymaga opt-in `integrationEnabled`. Rozszerzenie można wyłączyć w ustawieniach Sentinel AI; diagnostyka pokazuje stan rejestracji i ostatni kontakt.
 
 ## Włączenie rozszerzenia
 
@@ -25,11 +26,12 @@ Otwórz `edge://extensions` albo `chrome://extensions`, włącz **Tryb deweloper
 - Zdarzenie `onBeforeNavigate` rozpoczyna się w toku nawigacji. Rozszerzenie może wyświetlić ostrzeżenie po sprawdzeniu domeny, lecz nie zapewnia synchronicznego blokowania przed załadowaniem strony.
 - Dopasowanie do aktywnej listy CERT jest dokładnym dopasowaniem domeny. Lista musi mieć mniej niż 48 godzin; pobieranie ma limit rozmiaru i nie podąża za przekierowaniami.
 - Brak dopasowania nie potwierdza bezpieczeństwa. Heurystyka ani dopasowanie listy nie stanowią gwarancji wykrycia lub blokowania zagrożeń.
-- Rozszerzenie nie analizuje pełnego ruchu, adresów IP, iframe'ów ani treści pobranych plików. Osobny, opt-in monitor Downloads w Sentinel sprawdza nowe pliki lokalnie według własnego planu. Nie obsługujemy Firefoksa.
+- Zdarzenie `downloads.onCreated` pojawia się, gdy pobieranie już się rozpoczyna; ostrzeżenie może więc pojawić się po rozpoczęciu transferu. Rozszerzenie nie zatrzymuje pobrania i nie analizuje treści pliku. Osobny, opt-in monitor Downloads w Sentinel sprawdza nowe pliki lokalnie według własnego planu.
+- Rozszerzenie nie analizuje pełnego ruchu, adresów IP ani iframe'ów i nie obsługuje Firefoksa.
 
 ## Testy i budowa
 
-Aktualny E2E używa testowego hosta Native Messaging z produkcyjnym `UrlRequestProcessor`. Skrypt `scripts/test-chrome-extension-e2e.cjs` przyjmuje `chrome` (domyślnie) lub `edge`; w obu wariantach tworzy osobny profil, kopię manifestu ograniczoną do `*.test`, blokuje zewnętrzne DNS, sprawdza `status`, `analyze`, ostrzeżenie z redakcją, przekierowanie HTTP 302 do podejrzanej domeny, pominięcie iframe, `history.pushState`, podejrzaną nawigację do odpowiedzi `Content-Disposition: attachment` oraz dwa jednoczesne ostrzeżenia, gdzie zamknięcie jednej karty nie wpływa na drugą. Fixture pobierania jest zapisywany i weryfikowany w profilu tymczasowym. Po zakończeniu usuwa profil i tylko własny wpis HKCU. Ostatni wynik 2026-10-24: Chrome 155.0.8059.86 PASS oraz Edge 155.0.4283.62 PASS. Test nie analizuje treści pobranego pliku i nie obejmuje pobrań uruchomionych z linku/API. Nie testuje też pełnej instalacji/aktualizacji/deinstalacji ani hosta produkcyjnego z profilem i historią.
+Aktualny E2E używa testowego hosta Native Messaging z produkcyjnym `UrlRequestProcessor`. Skrypt `scripts/test-chrome-extension-e2e.cjs` przyjmuje `chrome` (domyślnie) lub `edge`; w obu wariantach tworzy osobny profil, kopię manifestu ograniczoną do `*.test`, blokuje zewnętrzne DNS, sprawdza `status`, `analyze`, ostrzeżenie z redakcją, przekierowanie HTTP 302 do podejrzanej domeny, pominięcie iframe, `history.pushState`, bezpośrednią nawigację do podejrzanej odpowiedzi `Content-Disposition: attachment` oraz dwa jednoczesne ostrzeżenia, gdzie zamknięcie jednej karty nie wpływa na drugą. Fixture pobierania jest zapisywany i weryfikowany w profilu tymczasowym. Po zakończeniu usuwa profil i tylko własny wpis HKCU. Ostatni wynik 2026-10-24: Chrome 155.0.8059.86 PASS oraz Edge 155.0.4283.62 PASS dla tego zakresu. Nowe nasłuchiwanie `downloads.onCreated` dla pobrań z linków ma testy jednostkowe 12/12. Harness został rozszerzony o kliknięcie podejrzanego linku i kontrolę ostrzeżenia, ale ten przebieg Chrome/Edge nie został jeszcze uruchomiony. Testy nie analizują treści pobranego pliku, nie zatrzymują pobrania i nie testują pełnej instalacji/aktualizacji/deinstalacji ani hosta produkcyjnego z profilem i historią.
 
 `node scripts/check-product.cjs` sprawdza Manifest V3, identyfikator rozszerzenia, uprawnienia i składnię JavaScript. Testy .NET znajdują się w `tests/Sentinel.Tests`; `node scripts/test-engine.cjs` sprawdza protokół i przepływ do lokalnej bazy. `./scripts/build-user.ps1 -Installer` buduje pakiet Windows. Pełny test instalacji i interakcji z kartami wymaga interaktywnego Windows z Edge lub Chrome.
 

@@ -196,6 +196,20 @@ async function main() {
         response.end('sentinel-download-fixture');
         return;
       }
+      if (requestUrl.pathname === '/download-link-response') {
+        response.writeHead(200, {
+          'content-type': 'text/plain; charset=utf-8',
+          'content-disposition': 'attachment; filename="sentinel-link-download.txt"',
+          'cache-control': 'no-store'
+        });
+        response.end('sentinel-link-download-fixture');
+        return;
+      }
+      if (requestUrl.pathname === '/download-link') {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+        response.end(`<!doctype html><title>Download link fixture</title><a id="download" href="http://paypal-login.test:${fixturePort}/download-link-response">Download fixture</a>`);
+        return;
+      }
       if (requestUrl.pathname === '/redirect-to-brand') {
         response.writeHead(302, { location: `http://paypal-login.test:${fixturePort}/redirect-final` });
         response.end();
@@ -423,6 +437,53 @@ async function main() {
     if (analyzeCount() <= beforeDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze the suspicious download URL.`);
     if (!downloadWarningRendered) throw new Error(`${browserConfig.displayName} did not warn about the suspicious download URL.`);
 
+    const linkTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/download-link` });
+    let linkPage;
+    const linkPageDeadline = Date.now() + timeoutMs;
+    while (Date.now() < linkPageDeadline) {
+      const response = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
+      const targets = await response.json();
+      linkPage = targets.find(target => target.id === linkTarget.targetId && target.webSocketDebuggerUrl);
+      if (linkPage) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!linkPage) throw new Error(`${browserConfig.displayName} download-link fixture did not open.`);
+    const linkBrowser = connectCdp(linkPage.webSocketDebuggerUrl);
+    await linkBrowser.opened;
+    const beforeLinkDownloadCount = analyzeCount();
+    await evaluatePage(linkBrowser, "document.getElementById('download').click()");
+    const linkDownloadDeadline = Date.now() + timeoutMs;
+    let linkFileSaved = false;
+    let linkWarningTab;
+    while (Date.now() < linkDownloadDeadline) {
+      const [response, names] = await Promise.all([
+        fetch(`http://127.0.0.1:${browserPort}/json/list`),
+        fs.promises.readdir(downloadPath)
+      ]);
+      const targets = await response.json();
+      linkFileSaved = names.includes('sentinel-link-download.txt');
+      linkWarningTab = targets.find(target => target.id !== downloadTarget.targetId
+        && target.id !== linkTarget.targetId
+        && target.url?.startsWith(`chrome-extension://${extensionId}/warning.html`));
+      if (linkFileSaved && linkWarningTab && analyzeCount() > beforeLinkDownloadCount) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!linkFileSaved) throw new Error(`${browserConfig.displayName} did not save the isolated link-download fixture.`);
+    if (fs.readFileSync(path.join(downloadPath, 'sentinel-link-download.txt'), 'utf8') !== 'sentinel-link-download-fixture') {
+      throw new Error(`${browserConfig.displayName} downloaded unexpected link fixture contents.`);
+    }
+    if (analyzeCount() <= beforeLinkDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze a link-initiated download.`);
+    if (!linkWarningTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not open a warning tab for the link-initiated download.`);
+    const warningPage = connectCdp(linkWarningTab.webSocketDebuggerUrl);
+    await warningPage.opened;
+    const downloadNotice = await evaluatePage(warningPage, "({ title: document.querySelector('h1')?.textContent, continueHidden: document.getElementById('continue')?.hidden, text: document.body.innerText })");
+    if (!downloadNotice?.title?.includes('pobierania') || !downloadNotice.continueHidden || !downloadNotice.text.includes('Pobieranie mogło już się rozpocząć')) {
+      throw new Error(`${browserConfig.displayName} link-download warning did not explain that the transfer may already have started.`);
+    }
+    await browser.command('Target.closeTarget', { targetId: linkWarningTab.id });
+    await warningPage.socket.close();
+    await linkBrowser.socket.close();
+
     const lifecycleTargetA = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-a` });
     const lifecycleTargetB = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-b` });
     const lifecycleDeadline = Date.now() + timeoutMs;
@@ -488,6 +549,8 @@ async function main() {
       spaHistoryChangeAnalyzed: true,
       suspiciousDownloadAnalyzed: true,
       suspiciousDownloadSavedInTemporaryProfile: true,
+      linkInitiatedDownloadWarned: true,
+      linkDownloadNoticeExplainsTransferStarted: true,
       simultaneousTabWarningsIsolated: true,
       closingOneTabKeepsOtherWarning: true,
       externalDns: `blocked by ${browserConfig.displayName} host resolver rules`

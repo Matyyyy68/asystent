@@ -14,6 +14,7 @@ function createWorker(sessionStorage, shared, {
 } = {}) {
   const listeners = {};
   const portListeners = {};
+  const createdTabs = [];
   const port = {
     onMessage: { addListener(listener) { portListeners.message = listener; } },
     onDisconnect: { addListener(listener) { portListeners.disconnect = listener; } },
@@ -45,9 +46,17 @@ function createWorker(sessionStorage, shared, {
       onCommitted: { addListener(listener) { listeners.committed = listener; } },
       onHistoryStateUpdated: { addListener(listener) { listeners.historyNavigate = listener; } }
     },
+    downloads: {
+      onCreated: { addListener(listener) { listeners.download = listener; } }
+    },
     tabs: {
       onRemoved: { addListener(listener) { listeners.removed = listener; } },
       update: async (tabId, update) => { shared.tabUpdates.push({ tabId, update }); },
+      create: async (createProperties) => {
+        const tab = { id: 100 + createdTabs.length, ...createProperties };
+        createdTabs.push(tab);
+        return tab;
+      },
       remove: async (tabId) => { shared.removedTabs.push(tabId); }
     }
   };
@@ -65,6 +74,8 @@ function createWorker(sessionStorage, shared, {
     navigate(event) { listeners.navigate(event); },
     commit(event) { listeners.committed(event); },
     historyNavigate(event) { listeners.historyNavigate(event); },
+    download(item) { listeners.download(item); },
+    createdTabs,
     removeTab(tabId) { listeners.removed(tabId); },
     disconnectNative() { portListeners.disconnect?.(); },
     respondToNative(message) { portListeners.message(message); },
@@ -177,6 +188,76 @@ test('committed redirect destinations are analyzed once and iframe commits are i
   worker.respondToNative({ id: shared.nativeRequests[1].id, available: true, shouldWarn: false });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(shared.tabUpdates.length, 0);
+});
+
+test('suspicious download final URLs are analyzed and warned in a separate tab without sending file metadata', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(sessionStorage, shared);
+
+  worker.download({
+    id: 42,
+    tabId: 12,
+    url: 'https://downloads.example.test/start',
+    finalUrl: 'https://paypal-login.test/account.exe',
+    filename: 'C:\\Users\\Mateusz\\Downloads\\private-name.exe',
+    referrer: 'https://example.test/private-page'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 1);
+  assert.equal(shared.nativeRequests[0].type, 'analyze');
+  assert.equal(shared.nativeRequests[0].url, 'https://paypal-login.test/account.exe');
+  assert.equal('filename' in shared.nativeRequests[0], false);
+  assert.equal('referrer' in shared.nativeRequests[0], false);
+
+  worker.respondToNative({
+    id: shared.nativeRequests[0].id,
+    available: true,
+    shouldWarn: true,
+    risk: 'High',
+    indicators: [],
+    rulesVersion: 'test'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(worker.createdTabs.length, 1);
+  assert.equal(shared.tabUpdates[0].tabId, worker.createdTabs[0].id);
+  const warningUrl = shared.tabUpdates[0].update.url;
+  assert.match(warningUrl, /^chrome-extension:\/\/sentinel-extension-test\/warning\.html\?token=/);
+  const token = new URL(warningUrl).searchParams.get('token');
+  const details = await worker.sendMessage({ type: 'details', token });
+  assert.equal(details.kind, 'download');
+  assert.equal(details.risk, 'High');
+});
+
+test('downloads remain local when browser integration is disabled', async () => {
+  let resolveSettings;
+  const integrationSettings = new Promise((resolve) => { resolveSettings = resolve; });
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared, { integrationSettings });
+
+  worker.download({ tabId: 13, url: 'https://paypal-login.test/file.exe' });
+  resolveSettings({ integrationEnabled: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 0);
+  assert.equal(worker.createdTabs.length, 0);
+});
+
+test('a top-level navigation download is not warned twice by both browser events', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared);
+  const item = { tabId: 14, url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
+
+  worker.navigate({ tabId: item.tabId, frameId: 0, url: item.url });
+  await new Promise((resolve) => setImmediate(resolve));
+  worker.download(item);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 1,
+    'webNavigation already covers a top-level download navigation');
 });
 
 test('closing a tab ignores pending analysis and clears its saved warning details', async () => {

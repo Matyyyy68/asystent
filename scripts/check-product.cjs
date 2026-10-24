@@ -5,7 +5,7 @@ assert.match(version,/^\d+\.\d+\.\d+$/);
 const manifest = JSON.parse(fs.readFileSync(path.join(root,'browser-extension/manifest.json'),'utf8'));
 assert.equal(manifest.version,version); assert.equal(manifest.manifest_version,3);
 assert.equal(manifest.minimum_chrome_version,'102');
-assert.deepEqual(new Set(manifest.permissions),new Set(['webNavigation','tabs','nativeMessaging','storage']));
+assert.deepEqual(new Set(manifest.permissions),new Set(['webNavigation','downloads','tabs','nativeMessaging','storage']));
 const digest=crypto.createHash('sha256').update(Buffer.from(manifest.key,'base64')).digest();
 const id=[...digest.subarray(0,16)].map(n=>String.fromCharCode(97+(n>>4),97+(n&15))).join('');
 assert.ok(fs.readFileSync(path.join(root,'src/Sentinel.UrlHost/NativeHostRegistration.cs'),'utf8').includes(`ExtensionId = "${id}"`));

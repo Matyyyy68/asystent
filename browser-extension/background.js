@@ -2,6 +2,7 @@ const HOST = "com.sentinelai.urlcheck";
 const WARNING_TARGET_PREFIX = "warningTarget:";
 const pending = new Map();
 const latestByTab = new Map();
+const navigationStartedAtByTab = new Map();
 const oneTimeAllow = new Map();
 let port = null;
 let nextId = 0;
@@ -81,6 +82,25 @@ function request(type, url = null) {
   });
 }
 
+async function presentWarning(tabId, url, result, kind = 'navigation') {
+  const token = crypto.randomUUID();
+  const target = {
+    tabId,
+    url,
+    kind,
+    risk: result.risk,
+    indicators: result.indicators ?? [],
+    rulesVersion: result.rulesVersion,
+    expiresAt: Date.now() + 10 * 60 * 1000
+  };
+  try {
+    await chrome.storage.session.set({ [`${WARNING_TARGET_PREFIX}${token}`]: target });
+    await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}`) });
+  } catch {
+    await removeWarningTarget(token).catch(() => {});
+  }
+}
+
 function inspectNavigation(event, { skipIfCurrent = false } = {}) {
   void (async () => {
     await integrationSettingsReady;
@@ -96,33 +116,43 @@ function inspectNavigation(event, { skipIfCurrent = false } = {}) {
       }
     }
     latestByTab.set(event.tabId, event.url);
+    navigationStartedAtByTab.set(event.tabId, Date.now());
     request("analyze", event.url).then(async (result) => {
       if (!result || !result.available || latestByTab.get(event.tabId) !== event.url || !result.shouldWarn) return;
-      const token = crypto.randomUUID();
-      const target = {
-        tabId: event.tabId,
-        url: event.url,
-        risk: result.risk,
-        indicators: result.indicators ?? [],
-        rulesVersion: result.rulesVersion,
-        expiresAt: Date.now() + 10 * 60 * 1000
-      };
-      try {
-        await chrome.storage.session.set({ [`${WARNING_TARGET_PREFIX}${token}`]: target });
-        await chrome.tabs.update(event.tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}`) });
-      } catch {
-        await removeWarningTarget(token).catch(() => {});
-      }
+      await presentWarning(event.tabId, event.url, result);
     });
+  })();
+}
+
+function inspectDownload(item) {
+  void (async () => {
+    await integrationSettingsReady;
+    if (!integrationEnabled || !Number.isInteger(item?.tabId) || item.tabId < 0 || item.byExtensionId === chrome.runtime.id) return;
+    const url = typeof item.finalUrl === 'string' && item.finalUrl ? item.finalUrl : item.url;
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
+    // A top-level navigation is already analyzed by webNavigation; downloads API
+    // is needed for link-initiated downloads that leave the current page in place.
+    const activeNavigation = Date.now() - (navigationStartedAtByTab.get(item.tabId) ?? 0) < 3000;
+    if (activeNavigation && (latestByTab.get(item.tabId) === url || latestByTab.get(item.tabId) === item.url)) return;
+    const result = await request('analyze', url);
+    if (!integrationEnabled || !result?.available || !result.shouldWarn) return;
+    try {
+      const warningTab = await chrome.tabs.create({ url: 'about:blank', active: true });
+      await presentWarning(warningTab.id, url, result, 'download');
+    } catch {
+      // A failed warning tab must not interrupt the browser's download.
+    }
   })();
 }
 
 chrome.webNavigation.onBeforeNavigate.addListener((event) => inspectNavigation(event));
 chrome.webNavigation.onCommitted.addListener((event) => inspectNavigation(event, { skipIfCurrent: true }));
 chrome.webNavigation.onHistoryStateUpdated.addListener((event) => inspectNavigation(event, { skipIfCurrent: true }));
+chrome.downloads.onCreated.addListener((item) => inspectDownload(item));
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   latestByTab.delete(tabId);
+  navigationStartedAtByTab.delete(tabId);
   oneTimeAllow.delete(tabId);
   chrome.storage.session.get(null).then((items) => {
     const keys = Object.entries(items)
@@ -145,7 +175,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "details" && typeof message.token === "string") {
     getWarningTarget(message.token).then((target) =>
-      sendResponse(target ? { risk: target.risk, indicators: target.indicators, rulesVersion: target.rulesVersion } : null)
+      sendResponse(target ? { kind: target.kind ?? 'navigation', risk: target.risk, indicators: target.indicators, rulesVersion: target.rulesVersion } : null)
     ).catch(() => sendResponse(null));
     return true;
   }
