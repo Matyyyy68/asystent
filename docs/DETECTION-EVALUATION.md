@@ -20,7 +20,29 @@ Progi ustalono wyłącznie na benign calibration dla docelowych FPR 0,1%, 0,5% i
 
 Następnie kandydat oceniono na oficjalnym PhreshPhish `test`, po wykluczeniu pierwszego wiersza odczytanego wcześniej w sprawdzeniu API; test CSV SHA-256 `001926172EDAD6A7E612AC9B53585E2AC775847D14FFCD58CA1A960B7EE691A1`, uporządkowane ID SHA-256 `389C98EAF3D02D0E149218F4A8A0E92F06CA2F45821F1CE08A53E3F935CA343C`, 168 059 rekordów (91 259 benign / 76 800 phish). Progi zamrożone z kalibracji dały: docelowy FPR 0,1% → TP=40 846, FP=126, TN=91 133, FN=35 954 (recall 53,1849%, FPR 0,1381%); 0,5% → TP=58 256, FP=672, TN=90 587, FN=18 544 (recall 75,8542%, FPR 0,7364%); 1,0% → TP=62 760, FP=1 134, TN=90 125, FN=14 040 (recall 81,7188%, FPR 1,2426%). Wykonano dwa identyczne przebiegi z tym samym modelem i progami; drugi powtórzono wyłącznie dlatego, że pierwsze wyjście raportu było obcięte. Wcześniejszy pomiar obecnych reguł na tym samym teście wyniósł TP=3 808, FP=5 399, TN=85 860, FN=72 992 (recall 4,9583%, FPR 5,9161%). Nie użyto etykiet testowych do fitu, kalibracji ani zmian kandydata.
 
-To wynik badawczy, nie gotowa ochrona produkcyjna. Test ma 45,7% phishingu, podczas gdy karta źródłowa opisuje benchmarki o bazowej częstości 0,05–5%; matematyczna projekcja precision z testowego TPR/FPR przy 0,1% kalibracyjnym FPR to 16,16% przy bazie 0,05% (bez przedziału ufności i bez zastępowania oficjalnych benchmarków). Zbiór jest na licencji CC BY 4.0 z warunkiem użycia wyłącznie do badań antyphishingowych, dlatego nie eksportowano wag modelu i nie dodano zależności ML do produktu. Następny krok F03: odtworzyć oficjalne podzbiory benchmarków i bootstrap CI dla progów zamrożonych powyżej; przed integracją produkcyjną rozstrzygnąć warunki licencji modelu/danych. Odtwarzalny pipeline i testy splitu: `scripts/research/phreshphish/train-and-evaluate.ps1`, `train-url-model.py`, `test_train_url_model.py`; test guardów 7/7 PASS, URL-i nie otwierano, dane i pakiety usunięto z `%TEMP%` po ewaluacji. [Karta danych i warunki](https://huggingface.co/datasets/phreshphish/phreshphish), [artykuł](https://arxiv.org/abs/2507.10854).
+## Oficjalne benchmarki niskiej częstości (2026-10-24)
+
+Zamrożony kandydat i progi ustalone wyłącznie na train/calibration oceniono na wszystkich 975 oficjalnych podzbiorach: 586 przy bazie 0,05%, 296 przy 0,1%, 59 przy 0,5%, 29 przy 1% i 5 przy 5%. Każdy używa wspólnej listy 90 262 benign rekordów i własnego zbioru phishing; pełny test URL-only zawierał 168 060 rekordów (91 260 benign / 76 800 phish), w tym jeden wiersz odczytany wcześniej przy sprawdzeniu API. Ten wiersz nie brał udziału w fitowaniu ani doborze progów. Dla każdego progu raportujemy średnią po podzbiorach oraz percentile bootstrap 95% CI (10 000 replik, seed 20261024):
+
+| Baza phish | N podzbiorów | Cel FPR z calibration | Precision mean (95% CI) | Recall mean (95% CI) | FPR mean |
+|---:|---:|---:|---:|---:|---:|
+| 0,05% | 586 | 0,1% | 13,715% (13,563–13,869) | 43,603% (43,049–44,164) | 0,1363% |
+| 0,05% | 586 | 0,5% | 4,385% (4,351–4,419) | 66,981% (66,424–67,531) | 0,7279% |
+| 0,05% | 586 | 1,0% | 2,912% (2,893–2,931) | 74,130% (73,629–74,623) | 1,2320% |
+| 0,1% | 296 | 0,1% | 24,140% (23,890–24,386) | 43,645% (43,041–44,257) | 0,1363% |
+| 0,1% | 296 | 0,5% | 8,400% (8,335–8,465) | 66,974% (66,400–67,530) | 0,7279% |
+| 0,1% | 296 | 1,0% | 5,661% (5,625–5,698) | 74,159% (73,656–74,658) | 1,2320% |
+| 0,5% | 59 | 0,1% | 61,597% (61,246–61,953) | 43,645% (43,009–44,315) | 0,1363% |
+| 0,5% | 59 | 0,5% | 31,585% (31,406–31,757) | 66,977% (66,427–67,512) | 0,7279% |
+| 0,5% | 59 | 1,0% | 23,200% (23,077–23,325) | 74,168% (73,648–74,685) | 1,2320% |
+| 1% | 29 | 0,1% | 76,331% (76,057–76,614) | 43,601% (42,950–44,290) | 0,1363% |
+| 1% | 29 | 0,5% | 48,143% (47,939–48,352) | 66,971% (66,403–67,516) | 0,7279% |
+| 1% | 29 | 1,0% | 37,780% (37,605–37,949) | 74,128% (73,580–74,685) | 1,2320% |
+| 5% | 5 | 0,1% | 94,397% (94,328–94,468) | 43,625% (43,060–44,214) | 0,1363% |
+| 5% | 5 | 0,5% | 82,877% (82,788–82,976) | 66,937% (66,517–67,405) | 0,7279% |
+| 5% | 5 | 1,0% | 75,991% (75,862–76,156) | 74,085% (73,563–74,772) | 1,2320% |
+
+FPR jest stały między bazami, bo podzbiory dzielą tę samą listę benign; dla FPR CI bootstrap jest zdegenerowany. Przy najniższej bazie precision wynosi 13,7% nawet przy najniższym progu, a dla innych progów spada poniżej 5%. Wynik poprawia recall względem bieżących reguł, lecz nie uzasadnia alertu użytkownika ani automatycznej integracji. Dataset card ogranicza użycie do badań antyphishingowych, więc model pozostaje research-only. Pełne checksumy, progi i 15 zestawów przedziałów są zapisane w [raporcie maszynowym](PHRESHPHISH-OFFICIAL-BENCHMARKS.json); odtworzenie i 10 testów guardów: `scripts/research/phreshphish/train-and-evaluate.ps1`, `test_train_url_model.py`. URL-i nie otwierano; URL/label/hash, benchmarki i pakiety usunięto z `%TEMP%`. [Karta danych i warunki](https://huggingface.co/datasets/phreshphish/phreshphish), [artykuł](https://arxiv.org/abs/2507.10854).
 
 ## Kandydat na niezależny holdout PhreshPhish (2026-10-24)
 

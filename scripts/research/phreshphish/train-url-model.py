@@ -28,6 +28,8 @@ EXPECTED_TEST_ROWS = 168_059
 EXPECTED_TEST_COUNTS = {"benign": 91_259, "phish": 76_800}
 EXPECTED_TEST_IDS_SHA256 = "389C98EAF3D02D0E149218F4A8A0E92F06CA2F45821F1CE08A53E3F935CA343C"
 EXPECTED_TEST_CSV_SHA256 = "001926172EDAD6A7E612AC9B53585E2AC775847D14FFCD58CA1A960B7EE691A1"
+EXPECTED_FULL_TEST_ROWS = 168_060
+EXPECTED_FULL_TEST_COUNTS = {"benign": 91_260, "phish": 76_800}
 SPLIT_SEED = "sentinel-phreshphish-train-registrable-domain-v1"
 MAX_URL_LENGTH = 100_000
 
@@ -254,6 +256,66 @@ def evaluate_official_test(csv_path: str, manifest_path: str, vectorizer: Hashin
     return {name: confusion(y_true, scores, threshold) for name, threshold in thresholds.items()}
 
 
+def score_full_test_for_benchmarks(csv_path: str, manifest_path: str, output_path: str,
+                                  vectorizer: HashingVectorizer, model: SGDClassifier) -> dict:
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    expected_counts = EXPECTED_FULL_TEST_COUNTS
+    if (manifest.get("dataset") != "phreshphish/phreshphish" or
+            manifest.get("datasetRevision") != DATASET_REVISION or manifest.get("split") != "test" or
+            manifest.get("excludedRows") != 0 or manifest.get("rows") != EXPECTED_FULL_TEST_ROWS or
+            manifest.get("counts") != expected_counts):
+        raise ValueError("Full benchmark test extraction has an unexpected revision or row set")
+    csv_digest = hashlib.sha256(Path(csv_path).read_bytes()).hexdigest().upper()
+    if csv_digest != manifest.get("extractedCsvSha256"):
+        raise ValueError("Full benchmark test CSV checksum does not match its extraction manifest")
+
+    ids: list[str] = []
+    urls: list[str] = []
+    labels: list[int] = []
+    id_digest = hashlib.sha256()
+    counts: Counter[str] = Counter()
+    seen_ids: set[str] = set()
+    with open(csv_path, "r", encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source)
+        if reader.fieldnames != ["url", "label", "split", "record_sha256"]:
+            raise ValueError("Unexpected full test CSV schema")
+        for row_number, row in enumerate(reader, start=2):
+            label = row["label"]
+            record_id = row["record_sha256"].lower()
+            url = row["url"].strip()
+            if (row["split"] != "test" or label not in {"benign", "phish"} or
+                    len(record_id) != 64 or any(char not in "0123456789abcdef" for char in record_id) or
+                    record_id in seen_ids or not url or len(url) > MAX_URL_LENGTH):
+                raise ValueError(f"Invalid or duplicate full test row {row_number}; URL values are not logged")
+            seen_ids.add(record_id)
+            update_record_id_digest(id_digest, record_id)
+            ids.append(record_id)
+            urls.append(url)
+            labels.append(1 if label == "phish" else 0)
+            counts[label] += 1
+    if (len(ids) != EXPECTED_FULL_TEST_ROWS or dict(counts) != expected_counts or
+            id_digest.hexdigest().upper() != manifest.get("recordIdsSha256")):
+        raise ValueError("Full test rows, labels, or record IDs do not match the extraction manifest")
+
+    score_parts = []
+    for _, matrix in transform_in_batches(vectorizer, urls):
+        score_parts.append(model.decision_function(matrix))
+    scores = np.concatenate(score_parts)
+    score_path = Path(output_path)
+    score_path.parent.mkdir(parents=True, exist_ok=True)
+    with score_path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.writer(output)
+        writer.writerow(["record_sha256", "label", "score"])
+        writer.writerows((record_id, "phish" if label else "benign", format(float(score), ".17g"))
+                         for record_id, label, score in zip(ids, labels, scores))
+    return {
+        "rows": len(ids), "counts": dict(counts), "recordIdsSha256": id_digest.hexdigest().upper(),
+        "inputCsvSha256": csv_digest,
+        "scoreCsvSha256": hashlib.sha256(score_path.read_bytes()).hexdigest().upper(),
+        "scoreFile": score_path.name, "urlsOpened": 0,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--csv", required=True)
@@ -262,6 +324,8 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--official-test-csv", required=True)
     parser.add_argument("--test-manifest", required=True)
+    parser.add_argument("--benchmark-test-csv")
+    parser.add_argument("--benchmark-test-manifest")
     args = parser.parse_args()
 
     psl = PublicSuffixList(args.psl)
@@ -311,6 +375,8 @@ def main() -> int:
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if bool(args.benchmark_test_csv) != bool(args.benchmark_test_manifest):
+        raise ValueError("Pass both --benchmark-test-csv and --benchmark-test-manifest")
     holdout_path = output_dir / "phreshphish-train-derived-holdout.csv"
     with holdout_path.open("w", encoding="utf-8", newline="") as output:
         writer = csv.writer(output)
@@ -335,6 +401,12 @@ def main() -> int:
         "calibrationAndDomainHoldout": results,
         "officialTestOnce": evaluate_official_test(args.official_test_csv, args.test_manifest,
                                                    vectorizer, model, thresholds),
+        "fullTestBenchmarkScores": (
+            score_full_test_for_benchmarks(args.benchmark_test_csv, args.benchmark_test_manifest,
+                                           str(output_dir / "phreshphish-full-test-scores.csv"),
+                                           vectorizer, model)
+            if args.benchmark_test_csv else None
+        ),
         "holdoutCsvSha256": hashlib.sha256(holdout_path.read_bytes()).hexdigest().upper(),
         "urlsOpened": 0,
     }

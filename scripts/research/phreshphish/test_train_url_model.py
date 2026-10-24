@@ -12,6 +12,10 @@ SCRIPT = Path(__file__).with_name("train-url-model.py")
 SPEC = importlib.util.spec_from_file_location("phreshphish_train_url_model", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+BENCHMARK_SCRIPT = Path(__file__).with_name("evaluate-official-benchmarks.py")
+BENCHMARK_SPEC = importlib.util.spec_from_file_location("phreshphish_official_benchmarks", BENCHMARK_SCRIPT)
+BENCHMARKS = importlib.util.module_from_spec(BENCHMARK_SPEC)
+BENCHMARK_SPEC.loader.exec_module(BENCHMARKS)
 
 
 class ResearchModelTests(unittest.TestCase):
@@ -89,6 +93,34 @@ class ResearchModelTests(unittest.TestCase):
                 manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "record hashes"):
                     MODULE.load_data(str(csv_path), str(manifest_path), self.psl)
+
+    def test_official_benchmark_confusion_uses_fixed_scores_and_labels(self):
+        ids = {"a" * 64, "b" * 64, "c" * 64, "d" * 64}
+        scores = {
+            "a" * 64: (1, 2.0),
+            "b" * 64: (1, -2.0),
+            "c" * 64: (0, 2.0),
+            "d" * 64: (0, -2.0),
+        }
+        result = BENCHMARKS.confusion_for_ids(ids, scores, 0.0)
+        self.assertEqual((result["TP"], result["FP"], result["TN"], result["FN"]), (1, 1, 1, 1))
+        self.assertEqual((result["precision"], result["recall"], result["falsePositiveRate"]), (0.5, 0.5, 0.5))
+
+    def test_bootstrap_interval_is_seeded_and_reports_percentile_bounds(self):
+        import numpy as np
+
+        one = BENCHMARKS.bootstrap_interval([0.0, 1.0, 1.0], np.random.default_rng(42))
+        two = BENCHMARKS.bootstrap_interval([0.0, 1.0, 1.0], np.random.default_rng(42))
+        self.assertEqual(one, two)
+        self.assertLessEqual(one["confidence95"][0], one["mean"])
+        self.assertGreaterEqual(one["confidence95"][1], one["mean"])
+
+    def test_benchmark_id_file_rejects_duplicate_identifiers(self):
+        with tempfile.TemporaryDirectory(prefix="sentinel-phreshphish-unit-") as directory:
+            path = Path(directory, "duplicate.txt")
+            path.write_text(("a" * 64) + "\n" + ("a" * 64) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Malformed or duplicate"):
+                BENCHMARKS.read_id_file(path)
 
 
 if __name__ == "__main__":

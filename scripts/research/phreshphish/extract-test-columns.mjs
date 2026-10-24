@@ -10,6 +10,7 @@ const EXPECTED_ROWS = 168_060;
 const EXPECTED_PARQUET_BYTES = 9_175_760_158;
 const outputPath = process.argv[2];
 if (!outputPath) throw new Error('Pass an output CSV path under the system temporary directory.');
+const includePreviouslyInspectedRow = process.argv.includes('--include-previously-inspected-row');
 
 const transfer = { requests: 0, bytes: 0 };
 const fetchOriginal = globalThis.fetch;
@@ -75,7 +76,7 @@ try {
     const rows = await parquetReadObjects({
       file: parquet,
       columns: ['sha256', 'url', 'label'],
-      ...(index === 0 ? { rowStart: 1 } : {}),
+      ...(!includePreviouslyInspectedRow && index === 0 ? { rowStart: 1 } : {}),
       compressors
     });
     for (const row of rows) {
@@ -96,8 +97,12 @@ try {
   throw error;
 }
 
-if (rowsWritten !== EXPECTED_ROWS - 1 || counts.benign + counts.phish !== rowsWritten) {
-  throw new Error(`Expected ${EXPECTED_ROWS - 1} rows after excluding test row 0; extracted ${rowsWritten}.`);
+const expectedRows = EXPECTED_ROWS - (includePreviouslyInspectedRow ? 0 : 1);
+const expectedCounts = includePreviouslyInspectedRow
+  ? { benign: 91_260, phish: 76_800 }
+  : { benign: 91_259, phish: 76_800 };
+if (rowsWritten !== expectedRows || JSON.stringify(counts) !== JSON.stringify(expectedCounts)) {
+  throw new Error(`Unexpected row count or labels in extracted test split: ${rowsWritten}.`);
 }
 const finalRevisionResponse = await fetchOriginal(`https://huggingface.co/api/datasets/${DATASET}`);
 const finalRevision = await finalRevisionResponse.json();
@@ -108,7 +113,7 @@ console.log(JSON.stringify({
   dataset: DATASET,
   datasetRevision: EXPECTED_DATASET_REVISION,
   split: 'test',
-  excludedRows: 1,
+  excludedRows: includePreviouslyInspectedRow ? 0 : 1,
   parquetFiles: files.length,
   parquetBytesTotal: EXPECTED_PARQUET_BYTES,
   rows: rowsWritten,
