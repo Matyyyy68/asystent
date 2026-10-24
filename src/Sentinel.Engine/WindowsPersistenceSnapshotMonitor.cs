@@ -256,6 +256,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.appinit" => "HKLM AppInit_DLLs (32-bit)",
                 "registry.machine64.ifeo" => "HKLM IFEO Debugger (64-bit)",
                 "registry.machine32.ifeo" => "HKLM IFEO Debugger (32-bit)",
+                "registry.machine64.silent.exit" => "HKLM SilentProcessExit (64-bit)",
+                "registry.machine32.silent.exit" => "HKLM SilentProcessExit (32-bit)",
                 "registry.machine64.shell.delay" => "HKLM ShellServiceObjectDelayLoad (64-bit)",
                 "registry.machine32.shell.delay" => "HKLM ShellServiceObjectDelayLoad (32-bit)",
                 "startup.user" => "folder Startup użytkownika",
@@ -271,11 +273,13 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.service" => "usługę Windows",
                 "registry.driver" => "sterownik Windows",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "ustawienie IFEO Debugger Windows",
+                "registry.machine64.silent.exit" or "registry.machine32.silent.exit" => "ustawienie SilentProcessExit Windows",
                 "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "ustawienie rozszerzenia powłoki Windows",
                 _ => "wpis autostartu"
             };
             var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
                 or "registry.machine64.ifeo" or "registry.machine32.ifeo"
+                or "registry.machine64.silent.exit" or "registry.machine32.silent.exit"
                 or "registry.machine64.shell.delay" or "registry.machine32.shell.delay"
                 ? "Trwałość Windows · " + sourceName : "Autostart Windows · " + sourceName;
             var recommendation = source switch
@@ -283,6 +287,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Sprawdź konfigurację IFEO Debugger dla aplikacji w rejestrze Windows. Sentinel nie zmienia wpisu ani nie uruchamia debuggera.",
+                "registry.machine64.silent.exit" or "registry.machine32.silent.exit" => "Sprawdź konfigurację SilentProcessExit Windows. Sentinel nie uruchamia monitor process ani nie tworzy zrzutów pamięci.",
                 "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "Sprawdź konfigurację ShellServiceObjectDelayLoad Windows. Sentinel nie zmienia rejestru ani nie ładuje rozszerzeń powłoki.",
                 "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" => "Sprawdź ustawienia zasad autostartu Windows. Sentinel nie zmienia zasad ani nie uruchamia wpisów.",
                 "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" => "Sprawdź konfigurację logowania Windows. Sentinel nie zmienia powłoki ani skryptów logowania.",
@@ -310,6 +315,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.machine32.appinit" => "machine32.appinit",
                 "registry.machine64.ifeo" => "machine64.ifeo",
                 "registry.machine32.ifeo" => "machine32.ifeo",
+                "registry.machine64.silent.exit" => "machine64.silent-exit",
+                "registry.machine32.silent.exit" => "machine32.silent-exit",
                 "registry.machine64.shell.delay" => "machine64.shell-delay",
                 "registry.machine32.shell.delay" => "machine32.shell-delay",
                 "startup.user" => "user.startup",
@@ -328,6 +335,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
                     "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Zmiana konfiguracji uruchamiania procesu Windows",
+                    "registry.machine64.silent.exit" or "registry.machine32.silent.exit" => "Zmiana monitorowania zakończenia procesu Windows",
                     "registry.machine64.shell.delay" or "registry.machine32.shell.delay" => "Zmiana konfiguracji rozszerzenia powłoki Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
@@ -412,6 +420,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
             CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
             CaptureImageFileExecutionOptions(RegistryHive.LocalMachine, view, sourcePrefix, entries);
+            CaptureSilentProcessExit(RegistryHive.LocalMachine, view, sourcePrefix, entries);
             CaptureRunKey(RegistryHive.LocalMachine, view, shellDelayPath, $"registry.{sourcePrefix}.shell.delay", entries);
         }
         CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
@@ -665,6 +674,62 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             entries[key] = new(source,
                 Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(debugger))),
                 LooksLikeWritableLocation(debugger));
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureSilentProcessExit(RegistryHive hive, RegistryView view, string sourcePrefix,
+        IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        const string subKeyPath = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\SilentProcessExit";
+        var source = $"registry.{sourcePrefix}.silent.exit";
+        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+        using var root = baseKey.OpenSubKey(subKeyPath, writable: false);
+        if (root is null) return;
+
+        var inspected = 0;
+        var settingNames = new[] { "MonitorProcess", "ReportingMode", "IgnoreSelfExits", "LocalDumpFolder", "MaxNumberOfDumpFiles", "DumpType", "ModuleIgnoreList" };
+        void Capture(RegistryKey key, string imageName)
+        {
+            var values = new List<string>(settingNames.Length);
+            var writableTarget = false;
+            foreach (var name in settingNames)
+            {
+                var value = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                var canonical = value switch
+                {
+                    string text => text,
+                    string[] strings => string.Join("\0", strings),
+                    int number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    long number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    _ => null
+                };
+                if (canonical is null) continue;
+                values.Add(name.ToUpperInvariant() + "=" + canonical);
+                if (name is "MonitorProcess" or "LocalDumpFolder")
+                    writableTarget |= LooksLikeWritableLocation(canonical);
+            }
+            if (values.Count == 0) return;
+            var keyId = CreateKey(source, imageName);
+            if (!entries.ContainsKey(keyId) && entries.Count >= MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                return;
+            }
+            entries[keyId] = new(source, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\0", values)))), writableTarget);
+        }
+
+        Capture(root, "(Global)");
+        foreach (var imageName in root.GetSubKeyNames().OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (++inspected > MaximumEntries || entries.Count >= MaximumEntries)
+            {
+                entries["!overflow"] = new("overflow", "", false);
+                return;
+            }
+            using var image = root.OpenSubKey(imageName, writable: false);
+            if (image is not null) Capture(image, imageName);
+            if (entries.ContainsKey("!overflow")) return;
         }
     }
 

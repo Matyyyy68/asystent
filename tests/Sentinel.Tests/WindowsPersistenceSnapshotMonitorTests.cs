@@ -186,15 +186,17 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         var target = await CreateStore();
         var sourceEntry = new WindowsPersistenceFingerprint("source-id", "registry.user.run", Entry("registry.user.run", "source-command", false).Fingerprint, false);
         var targetEntry = new WindowsPersistenceFingerprint("target-id", "registry.machine64.ifeo", Entry("registry.machine64.ifeo", "target-debugger", false).Fingerprint, false);
+        var silentExitEntry = new WindowsPersistenceFingerprint("silent-exit-id", "registry.machine64.silent.exit", Entry("registry.machine64.silent.exit", "reporting-mode", false).Fingerprint, false);
         await source.InitializeWindowsPersistenceMonitorSnapshotAsync([sourceEntry]);
-        await target.InitializeWindowsPersistenceMonitorSnapshotAsync([targetEntry]);
+        await target.InitializeWindowsPersistenceMonitorSnapshotAsync([targetEntry, silentExitEntry]);
         var backup = Path.Combine(root, "state.db");
         await source.BackupAsync(backup);
 
         Assert.Equal(0, await target.RestoreAsync(backup));
         var restored = await target.ReadWindowsPersistenceMonitorSnapshotAsync();
         Assert.True(restored.Initialized);
-        Assert.Equal("target-id", Assert.Single(restored.Entries.Keys));
+        Assert.Contains("target-id", restored.Entries.Keys);
+        Assert.Contains("silent-exit-id", restored.Entries.Keys);
     }
 
     [Fact]
@@ -497,6 +499,34 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task SilentProcessExitChangeIsRecordedWithoutPersistingImageOrMonitorCommand()
+    {
+        var store = await CreateStore();
+        const string source = "registry.machine64.silent.exit";
+        var key = source + ":" + new string('2', 64);
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            [key] = Entry(source, "mode=4", false)
+        };
+        var tasks = new ScheduledTaskSnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        var services = new PersistenceRegistrySnapshotCapture(false, new Dictionary<string, PersistenceSnapshotEntry>(), "niedostępne");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => entries,
+            _ => Task.FromResult(tasks), _ => Task.FromResult(services), TimeSpan.Zero);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+
+        entries[key] = Entry(source, @"MonitorProcess=C:\Users\Alice\AppData\Local\Temp\watcher.exe;LocalDumpFolder=C:\Users\Alice\AppData\Local\Temp\dumps", true);
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana monitorowania zakończenia procesu Windows", item.Category);
+        Assert.Equal("Trwałość Windows · HKLM SilentProcessExit (64-bit)", item.Application);
+        Assert.Contains("persistence.machine64.silent-exit.changed", item.EvidenceCodes!);
+        var persisted = System.Text.Json.JsonSerializer.Serialize(new { Events = await store.ReadAsync(), Snapshot = await store.ReadWindowsPersistenceMonitorSnapshotAsync() });
+        Assert.DoesNotContain("watcher.exe", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alice", persisted, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("dumps", persisted, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task IfeoDebuggerChangeIsRecordedWithoutPersistingExecutableOrDebuggerPath()
     {
         var store = await CreateStore();
@@ -702,7 +732,9 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
             new("registry.machine32.shell.delay:" + new string('D', 64), "registry.machine32.shell.delay", fingerprint, false),
             new("registry.user.runonceex:" + new string('E', 64), "registry.user.runonceex", fingerprint, false),
             new("registry.machine64.runonceex:" + new string('F', 64), "registry.machine64.runonceex", fingerprint, false),
-            new("registry.machine32.runonceex:" + new string('1', 64), "registry.machine32.runonceex", fingerprint, false)
+            new("registry.machine32.runonceex:" + new string('1', 64), "registry.machine32.runonceex", fingerprint, false),
+            new("registry.machine64.silent.exit:" + new string('2', 64), "registry.machine64.silent.exit", fingerprint, false),
+            new("registry.machine32.silent.exit:" + new string('3', 64), "registry.machine32.silent.exit", fingerprint, false)
         ]);
         var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.run");
@@ -713,6 +745,8 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.runonceex");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.runonceex");
         Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine32.runonceex");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.silent.exit");
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine32.silent.exit");
     }
 
     [Fact]
@@ -760,6 +794,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
                 "registry.machine64.appinit", "registry.machine32.appinit",
                 "registry.machine64.shell.delay", "registry.machine32.shell.delay",
                 "registry.user.runonceex", "registry.machine64.runonceex", "registry.machine32.runonceex",
+                "registry.machine64.silent.exit", "registry.machine32.silent.exit",
                 "startup.user", "startup.common", "scheduled.task", "registry.service", "registry.driver"
             });
         });
