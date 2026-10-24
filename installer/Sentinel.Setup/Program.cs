@@ -997,8 +997,6 @@ internal sealed class SetupWizard : Form
         ShowPage(WizardPage.Welcome);
     }
 
-    protected override bool ShowWithoutActivation => true;
-
     private async Task MoveNextAsync()
     {
         switch (page)
@@ -1235,6 +1233,8 @@ internal sealed class SetupWizard : Form
         wizard.Opacity = 0;
         wizard.Show();
         Application.DoEvents();
+        if (wizard.ShowWithoutActivation)
+            throw new InvalidDataException("Kreator instalatora nie może blokować aktywacji okna.");
         if (!ReferenceEquals(wizard.AcceptButton, wizard.next) || !ReferenceEquals(wizard.CancelButton, wizard.cancel))
             throw new InvalidDataException("Kreator nie udostępnia klawiaturowych przycisków Dalej i Anuluj.");
         wizard.lastError = "Kontrolowany błąd testowy instalatora.";
