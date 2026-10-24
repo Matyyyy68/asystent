@@ -8,7 +8,10 @@ const { webcrypto } = require('node:crypto');
 const backgroundPath = path.resolve(__dirname, '../../browser-extension/background.js');
 const backgroundSource = readFileSync(backgroundPath, 'utf8');
 
-function createWorker(sessionStorage, shared, { integrationSettings = Promise.resolve({ integrationEnabled: true }) } = {}) {
+function createWorker(sessionStorage, shared, {
+  integrationSettings = Promise.resolve({ integrationEnabled: true }),
+  connectNative
+} = {}) {
   const listeners = {};
   const portListeners = {};
   const port = {
@@ -20,7 +23,10 @@ function createWorker(sessionStorage, shared, { integrationSettings = Promise.re
     runtime: {
       id: 'sentinel-extension-test',
       getURL(resource) { return `chrome-extension://sentinel-extension-test/${resource}`; },
-      connectNative(host) { assert.equal(host, 'com.sentinelai.urlcheck'); return port; },
+      connectNative(host) {
+        assert.equal(host, 'com.sentinelai.urlcheck');
+        return connectNative ? connectNative(port) : port;
+      },
       onMessage: { addListener(listener) { listeners.message = listener; } }
     },
     storage: {
@@ -57,6 +63,7 @@ function createWorker(sessionStorage, shared, { integrationSettings = Promise.re
   return {
     navigate(event) { listeners.navigate(event); },
     historyNavigate(event) { listeners.historyNavigate(event); },
+    disconnectNative() { portListeners.disconnect?.(); },
     respondToNative(message) { portListeners.message(message); },
     sendMessage(message, page = 'warning.html') {
       return new Promise((resolve) => {
@@ -98,6 +105,35 @@ test('navigation stays local when the saved integration setting cannot be read',
 
   assert.equal(shared.nativeRequests.length, 0,
     'a storage read failure must not enable browser analysis or contact the native host');
+});
+
+test('navigation is not interrupted when the Native Messaging host is missing', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared, {
+    connectNative() { throw new Error('Specified native messaging host not found.'); }
+  });
+
+  worker.navigate({ tabId: 6, frameId: 0, url: 'https://paypal.com.evil.test/login' });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 0);
+  assert.equal(shared.tabUpdates.length, 0,
+    'a missing host must not block navigation or attempt to show a warning');
+});
+
+test('navigation is not interrupted when the Native Messaging host disconnects', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(new Map(), shared);
+
+  worker.navigate({ tabId: 8, frameId: 0, url: 'https://paypal.com.evil.test/login' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.nativeRequests.length, 1);
+
+  worker.disconnectNative();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.tabUpdates.length, 0,
+    'a disconnected host must resolve pending analysis without blocking or showing a warning');
 });
 
 test('SPA history changes are analyzed once for the main frame', async () => {
