@@ -65,6 +65,7 @@ function createWorker(sessionStorage, shared, {
     navigate(event) { listeners.navigate(event); },
     commit(event) { listeners.committed(event); },
     historyNavigate(event) { listeners.historyNavigate(event); },
+    removeTab(tabId) { listeners.removed(tabId); },
     disconnectNative() { portListeners.disconnect?.(); },
     respondToNative(message) { portListeners.message(message); },
     sendMessage(message, page = 'warning.html') {
@@ -176,6 +177,32 @@ test('committed redirect destinations are analyzed once and iframe commits are i
   worker.respondToNative({ id: shared.nativeRequests[1].id, available: true, shouldWarn: false });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(shared.tabUpdates.length, 0);
+});
+
+test('closing a tab ignores pending analysis and clears its saved warning details', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(sessionStorage, shared);
+
+  worker.navigate({ tabId: 21, frameId: 0, url: 'https://paypal-login.test/pending' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const pendingRequest = shared.nativeRequests[0];
+  worker.removeTab(21);
+  worker.respondToNative({ id: pendingRequest.id, available: true, shouldWarn: true, risk: 'High', indicators: [] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.tabUpdates.length, 0, 'a late host response must not redirect a closed tab to a warning');
+
+  worker.navigate({ tabId: 22, frameId: 0, url: 'https://paypal-login.test/warning' });
+  await new Promise((resolve) => setImmediate(resolve));
+  const warningRequest = shared.nativeRequests[1];
+  worker.respondToNative({ id: warningRequest.id, available: true, shouldWarn: true, risk: 'High', indicators: [] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.tabUpdates.length, 1);
+  assert.equal(sessionStorage.size, 1);
+
+  worker.removeTab(22);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sessionStorage.size, 0, 'closing a warning tab must remove its session-only details');
 });
 
 test('warning details and actions survive a service worker restart within the browser session', async () => {
