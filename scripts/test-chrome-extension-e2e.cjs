@@ -171,6 +171,7 @@ async function main() {
   let redirectPage;
   let iframePage;
   let spaPage;
+  let lifecyclePages = [];
   try {
     fs.cpSync(path.dirname(manifestSource), extensionPath, { recursive: true });
     manifest.host_permissions = ['http://*.test/*', 'https://*.test/*'];
@@ -386,6 +387,56 @@ async function main() {
     }
     if (analyzeCount() <= beforeHistoryChangeCount) throw new Error(`${browserConfig.displayName} SPA history change did not reach the Native Messaging host.`);
 
+    const lifecycleTargetA = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-a` });
+    const lifecycleTargetB = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-b` });
+    const lifecycleDeadline = Date.now() + timeoutMs;
+    let lifecycleTabs = [];
+    while (Date.now() < lifecycleDeadline) {
+      const response = await fetch(`http://127.0.0.1:${browserPort}/json/list`);
+      const targets = await response.json();
+      lifecycleTabs = [lifecycleTargetA.targetId, lifecycleTargetB.targetId]
+        .map(id => targets.find(target => target.id === id));
+      if (lifecycleTabs.every(target => target?.webSocketDebuggerUrl)) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!lifecycleTabs.every(target => target?.webSocketDebuggerUrl)) {
+      throw new Error(`${browserConfig.displayName} did not expose both lifecycle fixture tabs.`);
+    }
+    lifecyclePages = lifecycleTabs.map(target => connectCdp(target.webSocketDebuggerUrl));
+    await Promise.all(lifecyclePages.map(async tab => {
+      await tab.opened;
+      await tab.command('Runtime.enable');
+    }));
+    let lifecycleWarningsVisible = false;
+    const lifecycleWarningDeadline = Date.now() + timeoutMs;
+    while (Date.now() < lifecycleWarningDeadline) {
+      const bodies = await Promise.all(lifecyclePages.map(tab => evaluatePage(tab, 'document.body?.innerText||""')));
+      lifecycleWarningsVisible = bodies.every(body => body.includes('Domena przypomina znaną markę'));
+      if (lifecycleWarningsVisible) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!lifecycleWarningsVisible) throw new Error(`${browserConfig.displayName} did not show isolated warnings in both tabs.`);
+
+    await browser.command('Target.closeTarget', { targetId: lifecycleTargetA.targetId });
+    const remainingTabDeadline = Date.now() + timeoutMs;
+    let remainingTabIsWarned = false;
+    while (Date.now() < remainingTabDeadline) {
+      const [response, remainingBody] = await Promise.all([
+        fetch(`http://127.0.0.1:${browserPort}/json/list`),
+        evaluatePage(lifecyclePages[1], 'JSON.stringify({href:location.href,text:document.body?.innerText||""})')
+      ]);
+      const targets = await response.json();
+      let remaining;
+      try { remaining = JSON.parse(remainingBody); } catch {}
+      const closedTabGone = !targets.some(target => target.id === lifecycleTargetA.targetId);
+      remainingTabIsWarned = closedTabGone &&
+        remaining?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) &&
+        remaining.text.includes('Domena przypomina znaną markę');
+      if (remainingTabIsWarned) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!remainingTabIsWarned) throw new Error(`${browserConfig.displayName} closing one warning tab affected the other tab.`);
+
     console.log(JSON.stringify({
       result: 'PASS',
       browser: browserInfo.Browser,
@@ -399,6 +450,8 @@ async function main() {
       redirectWarningRedacted: true,
       iframeNavigationAnalyzed: false,
       spaHistoryChangeAnalyzed: true,
+      simultaneousTabWarningsIsolated: true,
+      closingOneTabKeepsOtherWarning: true,
       externalDns: `blocked by ${browserConfig.displayName} host resolver rules`
     }, null, 2));
   } finally {
@@ -406,6 +459,7 @@ async function main() {
     try { iframePage?.socket.close(); } catch {}
     try { redirectPage?.socket.close(); } catch {}
     try { spaPage?.socket.close(); } catch {}
+    for (const lifecyclePage of lifecyclePages) try { lifecyclePage.socket.close(); } catch {}
     try { page?.socket.close(); } catch {}
     try { worker?.socket.close(); } catch {}
     try { browser?.socket.close(); } catch {}
