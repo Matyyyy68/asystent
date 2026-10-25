@@ -427,6 +427,7 @@ async function main() {
 
     let suspiciousDownloadAnalyzed = false;
     let suspiciousDownloadSavedInTemporaryProfile = false;
+    let suspiciousDownloadWarningTargetId = null;
     let linkInitiatedDownloadWarned = false;
     let linkDownloadNoticeExplainsTransferStarted = false;
     if (allowLocalDownloadFixtures) {
@@ -453,6 +454,7 @@ async function main() {
     if (downloadContents !== 'sentinel-download-fixture') throw new Error(`${browserConfig.displayName} downloaded unexpected fixture contents.`);
     if (analyzeCount() <= beforeDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze the suspicious download URL.`);
     if (!downloadWarningRendered) throw new Error(`${browserConfig.displayName} did not warn about the suspicious download URL.`);
+    suspiciousDownloadWarningTargetId = downloadWarningTab?.id ?? null;
 
     const linkTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/download-link` });
     let linkPage;
@@ -488,7 +490,7 @@ async function main() {
       ]);
       const targets = await response.json();
       linkFileSaved = names.includes('sentinel-link-download.txt');
-      linkWarningTab = targets.find(target => target.id !== downloadTarget.targetId
+      linkWarningTab = targets.find(target => target.id !== suspiciousDownloadWarningTargetId
         && target.id !== linkTarget.targetId
         && target.url?.startsWith(`chrome-extension://${extensionId}/warning.html`));
       if (linkFileSaved && linkWarningTab && analyzeCount() > beforeLinkDownloadCount) break;
