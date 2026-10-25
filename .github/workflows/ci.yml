@@ -60,6 +60,15 @@ jobs:
           if ($LASTEXITCODE) { throw 'Chrome extension E2E failed' }
           node scripts/test-chrome-extension-e2e.cjs edge --allow-headless-browser --allow-local-download-fixtures
           if ($LASTEXITCODE) { throw 'Edge extension E2E failed' }
+      - name: Run isolated installer install-verify-uninstall integration test
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content eng/ProductVersion.props -Raw)).Project.PropertyGroup.VersionPrefix
+          if (!$version) { throw 'Could not read the installer version.' }
+          $installer = Join-Path $PWD "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
+          if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Built installer was not found.' }
+          $test = Start-Process -FilePath $installer -ArgumentList @('--integration-test') -Wait -PassThru -WindowStyle Hidden
+          if ($test.ExitCode -ne 0) { throw "Isolated installer integration test failed with exit code $($test.ExitCode)." }
       - name: Build and test Enterprise API
         shell: pwsh
         run: |
