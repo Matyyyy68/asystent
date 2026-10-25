@@ -3,6 +3,7 @@ const WARNING_TARGET_PREFIX = "warningTarget:";
 const pending = new Map();
 const latestByTab = new Map();
 const navigationStartedAtByTab = new Map();
+const navigationStatesByTab = new Map();
 const oneTimeAllow = new Map();
 let port = null;
 let nextId = 0;
@@ -97,9 +98,27 @@ async function presentWarning(tabId, url, result, kind = 'navigation', downloadI
   try {
     await chrome.storage.session.set({ [`${WARNING_TARGET_PREFIX}${token}`]: target });
     await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}`) });
+    return token;
   } catch {
     await removeWarningTarget(token).catch(() => {});
+    return null;
   }
+}
+
+async function promoteWarningToDownload(tabId, state) {
+  const token = state.warningToken;
+  const key = warningTargetKey(token);
+  if (!key || !Number.isInteger(state.downloadId)) return;
+  const stored = await chrome.storage.session.get(key);
+  const target = stored[key];
+  if (!target || target.tabId !== tabId || target.url !== state.url) return;
+  if (target.kind === 'download' && target.downloadId === state.downloadId) return;
+  target.kind = 'download';
+  target.downloadId = state.downloadId;
+  await chrome.storage.session.set({ [key]: target });
+  // Reload the already-open warning page so it renders download-specific guidance
+  // and exposes cancellation for the exact browser transfer ID.
+  await chrome.tabs.update(tabId, { url: chrome.runtime.getURL(`warning.html?token=${token}&download=1`) });
 }
 
 function inspectNavigation(event, { skipIfCurrent = false } = {}) {
@@ -117,10 +136,18 @@ function inspectNavigation(event, { skipIfCurrent = false } = {}) {
       }
     }
     latestByTab.set(event.tabId, event.url);
-    navigationStartedAtByTab.set(event.tabId, Date.now());
+    const state = { url: event.url, startedAt: Date.now(), downloadId: null, warningToken: null };
+    navigationStartedAtByTab.set(event.tabId, state.startedAt);
+    navigationStatesByTab.set(event.tabId, state);
     request("analyze", event.url).then(async (result) => {
-      if (!result || !result.available || latestByTab.get(event.tabId) !== event.url || !result.shouldWarn) return;
-      await presentWarning(event.tabId, event.url, result);
+      if (!result || !result.available || navigationStatesByTab.get(event.tabId) !== state
+          || latestByTab.get(event.tabId) !== event.url || !result.shouldWarn) return;
+      const kind = state.downloadId === null ? 'navigation' : 'download';
+      const token = await presentWarning(event.tabId, event.url, result, kind, state.downloadId);
+      state.warningToken = token;
+      if (token && state.downloadId !== null && kind !== 'download') {
+        await promoteWarningToDownload(event.tabId, state);
+      }
     });
   })();
 }
@@ -131,10 +158,15 @@ function inspectDownload(item) {
     if (!integrationEnabled || !Number.isInteger(item?.tabId) || item.tabId < 0 || item.byExtensionId === chrome.runtime.id) return;
     const url = typeof item.finalUrl === 'string' && item.finalUrl ? item.finalUrl : item.url;
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
-    // A top-level navigation is already analyzed by webNavigation; downloads API
-    // is needed for link-initiated downloads that leave the current page in place.
     const activeNavigation = Date.now() - (navigationStartedAtByTab.get(item.tabId) ?? 0) < 3000;
-    if (activeNavigation && (latestByTab.get(item.tabId) === url || latestByTab.get(item.tabId) === item.url)) return;
+    if (activeNavigation && (latestByTab.get(item.tabId) === url || latestByTab.get(item.tabId) === item.url)) {
+      const state = navigationStatesByTab.get(item.tabId);
+      if (state && state.url === url && Date.now() - state.startedAt < 3000) {
+        state.downloadId = item.id;
+        if (state.warningToken) await promoteWarningToDownload(item.tabId, state);
+        return;
+      }
+    }
     const result = await request('analyze', url);
     if (!integrationEnabled || !result?.available || !result.shouldWarn) return;
     try {
@@ -154,6 +186,7 @@ chrome.downloads.onCreated.addListener((item) => inspectDownload(item));
 chrome.tabs.onRemoved.addListener((tabId) => {
   latestByTab.delete(tabId);
   navigationStartedAtByTab.delete(tabId);
+  navigationStatesByTab.delete(tabId);
   oneTimeAllow.delete(tabId);
   chrome.storage.session.get(null).then((items) => {
     const keys = Object.entries(items)

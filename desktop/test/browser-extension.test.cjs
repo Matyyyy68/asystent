@@ -324,17 +324,53 @@ test('downloads remain local when browser integration is disabled', async () => 
 });
 
 test('a top-level navigation download is not warned twice by both browser events', async () => {
+  const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
-  const worker = createWorker(new Map(), shared);
+  const worker = createWorker(sessionStorage, shared);
   const item = { tabId: 14, url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
 
   worker.navigate({ tabId: item.tabId, frameId: 0, url: item.url });
   await new Promise((resolve) => setImmediate(resolve));
-  worker.download(item);
+  const request = shared.nativeRequests[0];
+  worker.download({ ...item, id: 72 });
   await new Promise((resolve) => setImmediate(resolve));
+  worker.respondToNative({ id: request.id, available: true, shouldWarn: true, risk: 'High', indicators: [], rulesVersion: 'test' });
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(shared.nativeRequests.length, 1,
     'webNavigation already covers a top-level download navigation');
+  assert.equal(shared.tabUpdates.length, 1, 'the matching events should produce one warning page');
+  const token = new URL(shared.tabUpdates[0].update.url).searchParams.get('token');
+  assert.equal(sessionStorage.get(`warningTarget:${token}`).kind, 'download');
+  assert.equal(sessionStorage.get(`warningTarget:${token}`).downloadId, 72);
+});
+
+test('a top-level navigation warning is upgraded when the response becomes a download', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(sessionStorage, shared);
+  const item = { id: 73, tabId: 29, url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
+
+  worker.navigate({ tabId: item.tabId, frameId: 0, url: item.url });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.nativeRequests.length, 1);
+  worker.respondToNative({
+    id: shared.nativeRequests[0].id, available: true, shouldWarn: true,
+    risk: 'High', indicators: [], rulesVersion: 'test'
+  });
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.tabUpdates.length, 1, 'the initial navigation warning should be shown once');
+  const token = new URL(shared.tabUpdates[0].update.url).searchParams.get('token');
+  assert.equal(sessionStorage.get(`warningTarget:${token}`).kind, 'navigation');
+
+  worker.download(item);
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(shared.nativeRequests.length, 1, 'navigation and download events must share one URL analysis');
+  assert.equal(shared.tabUpdates.length, 2, 'the existing warning page must reload with download guidance');
+  assert.match(shared.tabUpdates[1].update.url, /warning\.html\?token=.*&download=1$/);
+  assert.equal(sessionStorage.get(`warningTarget:${token}`).kind, 'download');
+  assert.equal(sessionStorage.get(`warningTarget:${token}`).downloadId, item.id);
 });
 
 test('closing a tab ignores pending analysis and clears its saved warning details', async () => {
