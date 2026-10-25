@@ -27,3 +27,6 @@
 
 
 **F13 — ukryty start bez mignięcia okna (2026-10-26):** BrowserWindow dostaje `show: false` już przy tworzeniu, gdy proces uruchamia się z `--minimized` (autostart Windows); nie jest najpierw pokazywane i dopiero potem chowane. Dodano pure regression tests dla normalnego startu, `--minimized` oraz `--smoke-test`; desktop `npm test` PASS 53/53 i `node --check electron/main.cjs` PASS. Test jednostkowy potwierdza konfigurację początkową okna, nie wykonuje rzeczywistego logowania Windows ani testu w tray w zainstalowanej kopii.
+
+
+**F13 — naprawa odczytu autostartu dla ścieżek ze spacjami (2026-10-26):** oficjalny Electron v45.0.0 zawiera poprawkę, której brak w używanym 44.9.1 powodował, że `app.getLoginItemSettings()` nie znajdował wpisu Run dla ścieżki typu `...\Sentinel AI.exe` ([PR 54419](https://releases.electronjs.org/pr/54419)). Zaktualizowano Electron do 45.0.0; sprawdzony `preload.cjs` nie używa sandboxowanych globali usuniętych w tej wersji. Dodano runner-only test integracyjny, który z jawną zgodą środowiska CI włącza, odczytuje ścieżkę z odstępami i argument `--minimized`, po czym wyłącza oraz weryfikuje usunięcie własnego wpisu HKCU; test odmówi nadpisania istniejącego wpisu. Lokalne testy statyczne i 53/53 PASS, pełny Windows CI oczekuje. To nie symuluje rzeczywistego logowania/restartu Windows.

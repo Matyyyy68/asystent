@@ -22,7 +22,7 @@
     "@electron/asar": "3.4.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "electron": "^44.9.1",
+    "electron": "^45.0.0",
     "electron-builder": "^26.15.3",
     "typescript": "^5.9.0",
     "vite": "^7.1.0"

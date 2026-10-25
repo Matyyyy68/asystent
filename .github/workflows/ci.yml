@@ -53,6 +53,14 @@ jobs:
       - name: Build and test application
         shell: pwsh
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
+      - name: Verify Electron Windows autostart in isolated runner
+        shell: pwsh
+        working-directory: desktop
+        env:
+          SENTINEL_TEST_ALLOW_LOGIN_ITEM_MUTATION: '1'
+        run: |
+          & .\node_modules\.bin\electron.cmd ..\scripts\test-electron-autostart.cjs
+          if ($LASTEXITCODE) { throw 'Electron Windows autostart integration test failed' }
       - name: Run isolated headless browser-extension E2E
         shell: pwsh
         run: |

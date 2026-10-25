@@ -515,3 +515,6 @@ F03 pozostaje krytyczne; nie wdrażać modelu ani nie obniżać progów bez wiar
 
 
 **F13 — start autostartu od razu ukryty (2026-10-26):** poprawiono Electron `BrowserWindow`: parametr `show` jest false podczas konstrukcji dla `--minimized`, zamiast pokazywać okno i ukrywać je po chwili. Testy `desktop npm test` PASS 53/53 (w tym 3 regresje startu), `node --check electron/main.cjs` PASS, `git diff --check` PASS. To usuwa okno flash w ścieżce autostartu, ale nie jest testem po rzeczywistym logowaniu Windows.
+
+
+**F13 — poprawka odczytu autostartu Electron na Windows (2026-10-26):** zweryfikowane źródła upstream wskazują bug w Electron 44.9.1 przy odczycie wpisu Run ze spacjami; fix jest w v45.0.0. Podniesiono Electron do 45.0.0, ręcznie zsynchronizowano blokadę wersji i SRI potwierdzone trzema niezależnymi `package-lock.json`. Dodano integracyjny krok Windows CI: jawny opt-in, odmowa kolizji istniejącego HKCU, ścieżka testowa `...\Sentinel AI.exe`, weryfikacja wpisu i argumentu `--minimized`, sprzątanie. Safety guard bez opt-in PASS, test manifest/lock PASS, desktop `npm test` 53/53 PASS. Nowy Windows CI dopiero zweryfikuje wersję i rzeczywistą rejestrację; reboot/logon nadal niezweryfikowany.
