@@ -486,7 +486,6 @@ internal static class Program
             if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
                 throw new InvalidDataException("Uninstall did not preserve a user file outside the application payload.");
             DeleteInstallPathSafely(preservedFile, root, isDirectory: false);
-            if (Directory.Exists(root)) DeleteInstallPathSafely(root, Path.GetDirectoryName(root)!, isDirectory: true);
 
             if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI") is not null)
                 throw new InvalidDataException("Uninstall registration remained after integration-test cleanup.");
