@@ -144,6 +144,30 @@ async function evaluatePage(page, expression) {
   return response.result?.value;
 }
 
+async function waitForNativeHostProbe(worker) {
+  const deadline = Date.now() + 5000;
+  let lastResult;
+  while (Date.now() < deadline) {
+    const nativeProbe = await worker.command('Runtime.evaluate', {
+      expression: `new Promise(resolve => {
+        let port;
+        try { port = chrome.runtime.connectNative('${hostName}'); }
+        catch (error) { resolve({ error: String(error) }); return; }
+        const timer = setTimeout(() => resolve({ timeout: true }), 1500);
+        port.onMessage.addListener(message => { clearTimeout(timer); resolve({ reply: message }); });
+        port.onDisconnect.addListener(() => { clearTimeout(timer); resolve({ disconnect: chrome.runtime.lastError?.message || 'unknown' }); });
+        port.postMessage({ id: 'manual-probe', type: 'status', url: null });
+      })`,
+      awaitPromise: true,
+      returnByValue: true
+    });
+    lastResult = nativeProbe.result?.value;
+    if (lastResult?.reply?.available || !lastResult?.error?.includes('chrome is not defined')) return lastResult;
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  return lastResult ?? { timeout: true };
+}
+
 async function main() {
   if (process.platform !== 'win32') throw new Error('This optional E2E test requires Windows.');
   const repoRoot = path.resolve(__dirname, '..');
@@ -266,20 +290,7 @@ async function main() {
     worker = connectCdp(serviceWorker.webSocketDebuggerUrl);
     await worker.opened;
     await worker.command('Runtime.enable');
-    const nativeProbe = await worker.command('Runtime.evaluate', {
-      expression: `new Promise(resolve => {
-        let port;
-        try { port = chrome.runtime.connectNative('${hostName}'); }
-        catch (error) { resolve({ error: String(error) }); return; }
-        const timer = setTimeout(() => resolve({ timeout: true }), 5000);
-        port.onMessage.addListener(message => { clearTimeout(timer); resolve({ reply: message }); });
-        port.onDisconnect.addListener(() => { clearTimeout(timer); resolve({ disconnect: chrome.runtime.lastError?.message || 'unknown' }); });
-        port.postMessage({ id: 'manual-probe', type: 'status', url: null });
-      })`,
-      awaitPromise: true,
-      returnByValue: true
-    });
-    const probeResult = nativeProbe.result?.value;
+    const probeResult = await waitForNativeHostProbe(worker);
     if (!probeResult?.reply?.available) {
       throw new Error(`Native Messaging Sentinel host probe failed: ${JSON.stringify(probeResult)}`);
     }
