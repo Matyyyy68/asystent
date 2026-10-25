@@ -126,7 +126,7 @@ public sealed class UrlAnalyzer(DomainNames domains)
         // Small, explicitly limited confusable set; not a complete Unicode security profile.
         return new string(unicode.Select(c => c switch
         {
-            'а' or 'α' => 'a', 'р' or 'ρ' => 'p', 'о' or 'ο' => 'o', 'с' => 'c',
+            'а' or 'α' => 'a', 'р' or 'ρ' => 'p', 'о' or 'ο' => 'o', 'с' => 'c', 'ѕ' => 's',
             'е' or 'ε' => 'e', 'у' => 'y', 'і' or 'ι' => 'i', 'х' or 'χ' => 'x', _ => c
         }).ToArray());
     }
