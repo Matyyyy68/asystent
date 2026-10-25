@@ -79,8 +79,6 @@ try {
   if ($LASTEXITCODE) { throw 'Implementation gap analysis validator tests failed' }
   node --test scripts/test-audit-npm-license-lock.mjs
   if ($LASTEXITCODE) { throw 'Installed npm license metadata audit tests failed' }
-  node --test scripts/test-audit-packaged-npm-licenses.mjs
-  if ($LASTEXITCODE) { throw 'Packaged npm license audit tests failed' }
   node --test scripts/research/phreshphish/network-opt-in.test.mjs
   if ($LASTEXITCODE) { throw 'Research extractor network opt-in tests failed' }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {
@@ -102,6 +100,8 @@ try {
       node node_modules/electron/install.js
       if ($LASTEXITCODE) { throw 'Electron runtime download failed' }
     }
+    node --test ../scripts/test-audit-packaged-npm-licenses.mjs
+    if ($LASTEXITCODE) { throw 'Packaged npm license audit tests failed' }
     npm.cmd test
     if ($LASTEXITCODE) { throw 'Desktop tests failed' }
     # Load vite.config.js directly; bundling the config with esbuild traverses parent directories
