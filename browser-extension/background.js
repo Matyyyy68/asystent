@@ -155,15 +155,17 @@ function inspectNavigation(event, { skipIfCurrent = false } = {}) {
 function inspectDownload(item) {
   void (async () => {
     await integrationSettingsReady;
-    if (!integrationEnabled || !Number.isInteger(item?.tabId) || item.tabId < 0 || item.byExtensionId === chrome.runtime.id) return;
+    if (!integrationEnabled || !item || item.byExtensionId === chrome.runtime.id) return;
     const url = typeof item.finalUrl === 'string' && item.finalUrl ? item.finalUrl : item.url;
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
-    const activeNavigation = Date.now() - (navigationStartedAtByTab.get(item.tabId) ?? 0) < 3000;
-    if (activeNavigation && (latestByTab.get(item.tabId) === url || latestByTab.get(item.tabId) === item.url)) {
-      const state = navigationStatesByTab.get(item.tabId);
+    const sourceTabId = Number.isInteger(item.tabId) && item.tabId >= 0 ? item.tabId : null;
+    const activeNavigation = sourceTabId !== null
+      && Date.now() - (navigationStartedAtByTab.get(sourceTabId) ?? 0) < 3000;
+    if (activeNavigation && (latestByTab.get(sourceTabId) === url || latestByTab.get(sourceTabId) === item.url)) {
+      const state = navigationStatesByTab.get(sourceTabId);
       if (state && state.url === url && Date.now() - state.startedAt < 3000) {
         state.downloadId = item.id;
-        if (state.warningToken) await promoteWarningToDownload(item.tabId, state);
+        if (state.warningToken) await promoteWarningToDownload(sourceTabId, state);
         return;
       }
     }

@@ -534,7 +534,7 @@ async function main() {
       let runtimeDiagnostics = null;
       try {
         const result = await worker.command('Runtime.evaluate', {
-          expression: `Promise.all([new Promise(resolve => chrome.downloads.search({filename: ${JSON.stringify(path.join(downloadPath, 'sentinel-link-download.txt'))}}, items => resolve(items.map(({ id, tabId, byExtensionId }) => ({ id, tabId, byExtensionId: byExtensionId ?? null }))))), chrome.storage.session.get(null).then(items => Object.values(items).filter(item => item && item.tabId !== undefined && item.kind).map(({ tabId, kind, downloadId }) => ({ tabId, kind, hasDownloadId: Number.isInteger(downloadId) }))) ]).then(([downloads, warnings]) => ({ downloads, warnings }))`,
+          expression: `Promise.all([new Promise(resolve => chrome.downloads.search({filename: ${JSON.stringify(path.join(downloadPath, 'sentinel-link-download.txt'))}}, items => resolve(items.map(item => ({ id: item.id, tabId: Number.isInteger(item.tabId) ? item.tabId : null, tabIdType: typeof item.tabId, hasTabId: Object.prototype.hasOwnProperty.call(item, 'tabId'), byExtensionId: item.byExtensionId ?? null }))))), chrome.storage.session.get(null).then(items => Object.values(items).filter(item => item && item.tabId !== undefined && item.kind).map(({ tabId, kind, downloadId }) => ({ tabId, kind, hasDownloadId: Number.isInteger(downloadId) }))) ]).then(([downloads, warnings]) => ({ downloads, warnings }))`,
           awaitPromise: true,
           returnByValue: true
         });

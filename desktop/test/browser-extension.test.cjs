@@ -289,6 +289,28 @@ test('download warnings cannot continue as a page navigation', async () => {
   assert.equal(sessionStorage.has(`warningTarget:${token}`), true, 'the warning remains available for explicit close or cancellation');
 });
 
+test('download without a source tab still warns and can be stopped by its download ID', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
+  const worker = createWorker(sessionStorage, shared);
+  worker.download({ id: 45, url: 'https://paypal-login.test/unassociated-download.exe' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.nativeRequests.length, 1, 'a missing source tab must not suppress URL analysis');
+  worker.respondToNative({
+    id: shared.nativeRequests[0].id, available: true, shouldWarn: true,
+    risk: 'High', indicators: [], rulesVersion: 'test'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const token = new URL(shared.tabUpdates[0].update.url).searchParams.get('token');
+  const details = await worker.sendMessage({ type: 'details', token });
+  assert.equal(details.kind, 'download');
+  assert.equal(details.canStopDownload, true);
+  assert.equal((await worker.sendMessage({ type: 'stop-download', token })).ok, true);
+  assert.deepEqual(shared.cancelledDownloads, [45]);
+});
+
 test('download cancellation reports a browser error without claiming success', async () => {
   const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
