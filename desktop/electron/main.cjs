@@ -3,6 +3,7 @@ const { EngineClient } = require('./engine-client.cjs');
 const { requestEnterpriseContextConsent } = require('./enterprise-context-consent.cjs');
 const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-log.cjs');
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
+const { shouldShowInitialWindow } = require('./window-visibility.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
@@ -86,7 +87,7 @@ app.whenReady().then(() => {
     }
     return call(method, data);
   });
-  win = new BrowserWindow({ show: !smokeTest, width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
+  win = new BrowserWindow({ show: shouldShowInitialWindow(process.argv), width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
   const stopSmokeTestWatch = smokeTest ? watchSmokeTestWindow(win.webContents, message => {
     console.error(message);
@@ -140,7 +141,6 @@ app.whenReady().then(() => {
     finally { collecting = false; }
   }, 1000);
   app.on('before-quit', () => { clearInterval(collector); engine.dispose(); });
-  if (process.argv.includes('--minimized')) win.hide();
   if (!smokeTest) {
     const icon = nativeImage.createFromPath(path.join(__dirname, "../assets/icon-32.png"));
     tray = new Tray(icon);
