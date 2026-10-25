@@ -483,6 +483,8 @@ async function main() {
     const linkDownloadDeadline = Date.now() + timeoutMs;
     let linkFileSaved = false;
     let linkWarningTab;
+    let warningPage;
+    let downloadNotice;
     while (Date.now() < linkDownloadDeadline) {
       const [response, names] = await Promise.all([
         fetch(`http://127.0.0.1:${browserPort}/json/list`),
@@ -490,10 +492,30 @@ async function main() {
       ]);
       const targets = await response.json();
       linkFileSaved = names.includes('sentinel-link-download.txt');
-      linkWarningTab = targets.find(target => target.id !== suspiciousDownloadWarningTargetId
-        && target.id !== linkTarget.targetId
-        && target.url?.startsWith(`chrome-extension://${extensionId}/warning.html`));
-      if (linkFileSaved && linkWarningTab && analyzeCount() > beforeLinkDownloadCount) break;
+      if (linkFileSaved && analyzeCount() > beforeLinkDownloadCount) {
+        const warningCandidates = targets.filter(target => target.id !== suspiciousDownloadWarningTargetId
+          && target.id !== linkTarget.targetId
+          && typeof target.webSocketDebuggerUrl === 'string'
+          && target.url?.startsWith(`chrome-extension://${extensionId}/warning.html`));
+        for (const candidate of warningCandidates) {
+          const candidatePage = connectCdp(candidate.webSocketDebuggerUrl);
+          try {
+            await candidatePage.opened;
+            const notice = await evaluatePage(candidatePage, "({ title: document.querySelector('h1')?.textContent, continueHidden: document.getElementById('continue')?.hidden, text: document.body.innerText })");
+            if (notice?.title?.includes('pobierania') && notice.continueHidden
+                && notice.text.includes('Pobieranie mogło już się rozpocząć')) {
+              linkWarningTab = candidate;
+              warningPage = candidatePage;
+              downloadNotice = notice;
+              break;
+            }
+          } catch {
+            // Other warning tabs may close while the isolated fixture is running.
+          }
+          if (candidatePage !== warningPage) candidatePage.socket.close();
+        }
+      }
+      if (linkFileSaved && linkWarningTab) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (!linkFileSaved) throw new Error(`${browserConfig.displayName} did not save the isolated link-download fixture.`);
@@ -502,16 +524,7 @@ async function main() {
     }
     if (analyzeCount() <= beforeLinkDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze a link-initiated download.`);
     if (!linkWarningTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not open a warning tab for the link-initiated download.`);
-    const warningPage = connectCdp(linkWarningTab.webSocketDebuggerUrl);
-    await warningPage.opened;
-    let downloadNotice;
-    const noticeDeadline = Date.now() + timeoutMs;
-    while (Date.now() < noticeDeadline) {
-      downloadNotice = await evaluatePage(warningPage, "({ title: document.querySelector('h1')?.textContent, continueHidden: document.getElementById('continue')?.hidden, text: document.body.innerText })");
-      if (downloadNotice?.title?.includes('pobierania') && downloadNotice.continueHidden
-          && downloadNotice.text.includes('Pobieranie mogło już się rozpocząć')) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    if (!warningPage) throw new Error(`${browserConfig.displayName} did not render the expected download-specific warning.`);
     if (!downloadNotice?.title?.includes('pobierania') || !downloadNotice.continueHidden || !downloadNotice.text.includes('Pobieranie mogło już się rozpocząć')) {
       throw new Error(`${browserConfig.displayName} link-download warning had unexpected content: ${JSON.stringify(downloadNotice)}`);
     }
