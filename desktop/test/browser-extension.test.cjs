@@ -349,9 +349,10 @@ test('a top-level navigation download is not warned twice by both browser events
   const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
   const worker = createWorker(sessionStorage, shared);
-  const item = { tabId: 14, url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
+  const sourceTabId = 14;
+  const item = { url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
 
-  worker.navigate({ tabId: item.tabId, frameId: 0, url: item.url });
+  worker.navigate({ tabId: sourceTabId, frameId: 0, url: item.url });
   await new Promise((resolve) => setImmediate(resolve));
   const request = shared.nativeRequests[0];
   worker.download({ ...item, id: 72 });
@@ -371,9 +372,10 @@ test('a top-level navigation warning is upgraded when the response becomes a dow
   const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
   const worker = createWorker(sessionStorage, shared);
-  const item = { id: 73, tabId: 29, url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
+  const sourceTabId = 29;
+  const item = { id: 73, url: 'https://paypal-login.test/download', finalUrl: 'https://paypal-login.test/download' };
 
-  worker.navigate({ tabId: item.tabId, frameId: 0, url: item.url });
+  worker.navigate({ tabId: sourceTabId, frameId: 0, url: item.url });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(shared.nativeRequests.length, 1);
   worker.respondToNative({
