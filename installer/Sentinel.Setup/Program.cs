@@ -160,6 +160,7 @@ internal static class Program
         if (args.Contains("--wizard-self-test", StringComparer.OrdinalIgnoreCase)) return WizardSelfTest();
         if (args.Contains("--self-test-no-app", StringComparer.OrdinalIgnoreCase)) return SelfTest(runApplicationSmoke: false);
         if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase)) return SelfTest();
+        InstallGuiExceptionDiagnostics();
         if (IsUninstallInvocation(args, Environment.ProcessPath))
         {
             ApplicationConfiguration.Initialize();
@@ -186,6 +187,10 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             SetupWizard.ValidateVisualStates();
+            var uiFailure = FormatUiThreadException(new InvalidOperationException("simulated UI failure"));
+            if (!uiFailure.Contains("type=InvalidOperationException", StringComparison.Ordinal)
+                || !uiFailure.Contains("hresult=0x", StringComparison.Ordinal))
+                throw new InvalidOperationException("UI exception diagnostic omits its type or HRESULT.");
             Log("WIZARD_SELF_TEST_SUCCESS states=true repairMode=true settingsPreserved=true failureStopsBeforeChanges=true");
             return 0;
         }
@@ -1116,6 +1121,33 @@ internal static class Program
         try { AppendLogLine(LogPath, message, MaximumLogBytes); }
         catch { }
     }
+
+    private static void InstallGuiExceptionDiagnostics()
+    {
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, eventArgs) =>
+        {
+            var diagnostic = FormatUiThreadException(eventArgs.Exception);
+            Log(diagnostic);
+            try
+            {
+                MessageBox.Show(
+                    $"Wystąpił nieoczekiwany błąd interfejsu Sentinel AI.\r\n\r\nZamknij aplikację i przekaż obsłudze poniższy kod oraz lokalizację logu.\r\n\r\n{diagnostic}\r\nLog: {LogPath}",
+                    Product, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            catch { }
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+        {
+            if (eventArgs.ExceptionObject is Exception exception)
+                Log(FormatUiThreadException(exception).Replace("UI_THREAD_EXCEPTION", "UNHANDLED_EXCEPTION", StringComparison.Ordinal));
+            else
+                Log("UNHANDLED_EXCEPTION type=unknown hresult=unavailable");
+        };
+    }
+
+    internal static string FormatUiThreadException(Exception exception) =>
+        $"UI_THREAD_EXCEPTION type={Clean(exception.GetType().Name)} hresult=0x{exception.HResult:X8}";
 
     internal static void AppendLogLine(string path, string message, long maximumBytes)
     {
