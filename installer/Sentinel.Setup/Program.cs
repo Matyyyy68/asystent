@@ -568,7 +568,13 @@ internal static class Program
 
             VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
             Uninstall(root);
-            if (Directory.Exists(root)) throw new InvalidDataException("Wizard integration test left its installation folder behind.");
+            using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
+            using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
+                foreach (var entry in archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)))
+                {
+                    var installedPath = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
+                    if (File.Exists(installedPath)) throw new InvalidDataException($"Wizard integration test left an application file: {entry.FullName}.");
+                }
             using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"))
                 if (key is not null) throw new InvalidDataException("Wizard integration test left an uninstall registration behind.");
             if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
