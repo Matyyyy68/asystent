@@ -470,7 +470,23 @@ internal static class Program
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
             VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            var preservedFile = Path.Combine(root, "integration-test-user-file.txt");
+            const string preservedContents = "preserve across installed update and uninstall";
+            File.WriteAllText(preservedFile, preservedContents);
+
+            Log("INTEGRATION_TEST_UPDATE_START");
+            Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
+                (_, _) => { }, CancellationToken.None);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
+                throw new InvalidDataException("Update did not preserve a file outside the application payload.");
+            Log("INTEGRATION_TEST_UPDATE_SUCCESS preservedUserFile=true");
+
             Uninstall(root);
+            if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
+                throw new InvalidDataException("Uninstall did not preserve a user file outside the application payload.");
+            DeleteInstallPathSafely(preservedFile, root, isDirectory: false);
+            if (Directory.Exists(root)) DeleteInstallPathSafely(root, Path.GetDirectoryName(root)!, isDirectory: true);
 
             if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI") is not null)
                 throw new InvalidDataException("Uninstall registration remained after integration-test cleanup.");
@@ -493,7 +509,7 @@ internal static class Program
                     if (File.Exists(installedPath)) throw new InvalidDataException($"Uninstall left an application file: {entry.FullName}.");
                 }
 
-            Log("INTEGRATION_TEST_SUCCESS install=true verification=true uninstall=true registry=true nativeMessaging=true shortcuts=false autostart=false");
+            Log("INTEGRATION_TEST_SUCCESS install=true update=true verification=true uninstall=true userFilePreserved=true registry=true nativeMessaging=true shortcuts=false autostart=false");
             return 0;
         }
         catch (Exception ex)
@@ -504,6 +520,11 @@ internal static class Program
                 var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
                 if (Directory.Exists(root) && string.Equals(Path.GetFullPath(registered ?? string.Empty), root, StringComparison.OrdinalIgnoreCase))
                     Uninstall(root);
+                var preservedFile = Path.Combine(root, "integration-test-user-file.txt");
+                if (Directory.Exists(root) && File.Exists(preservedFile))
+                    DeleteInstallPathSafely(preservedFile, root, isDirectory: false);
+                if (Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any())
+                    DeleteInstallPathSafely(root, Path.GetDirectoryName(root)!, isDirectory: true);
             }
             catch (Exception cleanupError) { Log($"INTEGRATION_TEST_CLEANUP_FAILED type={cleanupError.GetType().Name} message={Clean(cleanupError.Message)}"); }
             return 1;
