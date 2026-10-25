@@ -431,20 +431,20 @@ async function main() {
     let linkDownloadNoticeExplainsTransferStarted = false;
     if (allowLocalDownloadFixtures) {
     const beforeDownloadCount = analyzeCount();
-    const downloadTarget = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/download` });
+    await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/download` });
     const downloadDeadline = Date.now() + timeoutMs;
     let downloadedFile = false;
     let downloadWarningRendered = false;
-    let downloadTab;
+    let downloadWarningTab;
     while (Date.now() < downloadDeadline) {
       const [response, names] = await Promise.all([
         fetch(`http://127.0.0.1:${browserPort}/json/list`),
         fs.promises.readdir(downloadPath)
       ]);
       const targets = await response.json();
-      downloadTab = targets.find(target => target.id === downloadTarget.targetId);
       downloadedFile = names.includes('sentinel-download.txt');
-      downloadWarningRendered = downloadTab?.url?.startsWith(`chrome-extension://${extensionId}/warning.html`) === true;
+      downloadWarningTab = targets.find(target => target.url?.startsWith(`chrome-extension://${extensionId}/warning.html`));
+      downloadWarningRendered = Boolean(downloadWarningTab);
       if (downloadedFile && downloadWarningRendered && analyzeCount() > beforeDownloadCount) break;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
