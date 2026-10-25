@@ -157,7 +157,7 @@ async function waitForNativeHostProbe(worker) {
         const timer = setTimeout(() => resolve({ timeout: true }), 1500);
         port.onMessage.addListener(message => { clearTimeout(timer); resolve({ reply: message }); });
         port.onDisconnect.addListener(() => { clearTimeout(timer); resolve({ disconnect: chrome.runtime.lastError?.message || 'unknown' }); });
-        port.postMessage({ id: 'manual-probe', type: 'status', url: null });
+        port.postMessage({ id: 'manual-probe', type: 'status', url: null, browser: '${browserName}', enabled: true });
       })`,
       awaitPromise: true,
       returnByValue: true
