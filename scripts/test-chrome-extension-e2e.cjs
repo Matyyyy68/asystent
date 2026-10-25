@@ -304,7 +304,7 @@ async function main() {
       try { observed = JSON.parse(value); } catch {}
       if (observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) &&
           observed.text.includes('Domena przypomina znaną markę') &&
-          observed.text.includes('reguły 2026.10.11')) break;
+          observed.text.includes('reguły 2026.10.12')) break;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     if (!observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) {
@@ -314,7 +314,7 @@ async function main() {
     }
     if (!observed.text.includes('Sprawdź ten adres przed kontynuowaniem') ||
         !observed.text.includes('Domena przypomina znaną markę') ||
-        !observed.text.includes('reguły 2026.10.11')) {
+        !observed.text.includes('reguły 2026.10.12')) {
       throw new Error(`The warning page did not render the expected production rule and indicator. Page text: ${observed.text}`);
     }
     if (observed.text.includes('paypal-login.test') || observed.text.includes(fixtureUrl)) {

@@ -8,16 +8,16 @@ namespace Sentinel.Core.Analysis;
 /// <summary>Deterministic rules; untrusted content cannot invoke tools or alter the rules.</summary>
 public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
 {
-    public const string RulesVersion = "2026.10.11";
+    public const string RulesVersion = "2026.10.12";
     private const int MaximumEmbeddedUrls = 10;
     private static readonly Regex EmbeddedHttpUrl = new(
         @"\bhttps?://[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex EmbeddedDefangedHttpUrl = new(
-        @"\bhxxps?(?:\[:\]|:)//[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        @"\bhxxps?(?:\[:\]//|://|\[://\])[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex DefangedScheme = new(
-        @"^hxxps?(?:\[:\]|:)//", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        @"^hxxps?(?:\[:\]//|://|\[://\])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex DefangedHostSeparator = new(
-        @"(?i)(?:\[\.\]|\(\.\)|\[dot\])", RegexOptions.CultureInvariant);
+        @"(?i)(?:\[\.\]|\(\.\)|\{\.\}|\[dot\])", RegexOptions.CultureInvariant);
     private readonly object gate = new();
     private readonly Dictionary<string, (DateTimeOffset Seen, DateTimeOffset? UrgencyAt)> sessions = new(StringComparer.Ordinal);
     public ThreatAssessment Analyze(AnalysisContext context)
