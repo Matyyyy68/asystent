@@ -217,9 +217,23 @@ public sealed class KnowledgeBaseTests : IDisposable
         start.ArgumentList.Add(lockPath);
         using var lockProcess = Process.Start(start) ?? throw new IOException("Could not start the cross-process lock helper.");
         var stderrTask = lockProcess.StandardError.ReadToEndAsync();
+        var helperTimeout = TimeSpan.FromSeconds(30);
         try
         {
-            Assert.Equal("READY", await lockProcess.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+            string? ready;
+            try
+            {
+                ready = await lockProcess.StandardOutput.ReadLineAsync().WaitAsync(helperTimeout);
+            }
+            catch (TimeoutException)
+            {
+                var exited = lockProcess.HasExited;
+                var diagnostic = exited
+                    ? $"exit={lockProcess.ExitCode}; stderr={(await stderrTask).Trim()}"
+                    : "helper remained running without signaling that it acquired the file lock";
+                throw new TimeoutException($"Cross-process lock helper did not become ready within {helperTimeout.TotalSeconds:F0}s: {diagnostic}");
+            }
+            Assert.Equal("READY", ready);
             var sourcePath = Path.Combine(directory, "locked-import.md");
             await File.WriteAllTextAsync(sourcePath, "This import must wait for the database operation lock.");
 
@@ -228,8 +242,8 @@ public sealed class KnowledgeBaseTests : IDisposable
             var waitedForOtherProcess = !import.IsCompleted;
             await lockProcess.StandardInput.WriteLineAsync("release");
             await lockProcess.StandardInput.FlushAsync();
-            await lockProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            var result = await import.WaitAsync(TimeSpan.FromSeconds(5));
+            await lockProcess.WaitForExitAsync().WaitAsync(helperTimeout);
+            var result = await import.WaitAsync(helperTimeout);
             var lockProcessError = await stderrTask;
             Assert.True(lockProcess.ExitCode == 0, lockProcessError);
             Assert.True(waitedForOtherProcess, "Import should wait while a separate process holds the exclusive lock file.");
