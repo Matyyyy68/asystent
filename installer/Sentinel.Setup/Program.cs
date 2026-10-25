@@ -149,6 +149,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase)) return IntegrationTest();
+        if (args.Contains("--wizard-integration-test", StringComparer.OrdinalIgnoreCase)) return WizardIntegrationTest();
         if (args.Contains("--uninstall-guard-self-test", StringComparer.OrdinalIgnoreCase)) return UninstallRegistrationSelfTest();
         if (args.Contains("--uninstall-cleanup-self-test", StringComparer.OrdinalIgnoreCase)) return UninstallCleanupSelfTest();
         if (args.Contains("--wizard-self-test", StringComparer.OrdinalIgnoreCase)) return WizardSelfTest();
@@ -526,6 +527,75 @@ internal static class Program
                     DeleteInstallPathSafely(root, Path.GetDirectoryName(root)!, isDirectory: true);
             }
             catch (Exception cleanupError) { Log($"INTEGRATION_TEST_CLEANUP_FAILED type={cleanupError.GetType().Name} message={Clean(cleanupError.Message)}"); }
+            return 1;
+        }
+    }
+
+    private static int WizardIntegrationTest()
+    {
+        Log("WIZARD_INTEGRATION_TEST_REQUESTED");
+        if (!OperatingSystem.IsWindows()) return 2;
+        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs", ".SentinelAI-WizardIntegration-Test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"))
+                if (key is not null) throw new InvalidOperationException("Wizard integration test refused: a Sentinel AI installation is already registered.");
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
+                throw new InvalidOperationException("Wizard integration test refused: a Sentinel AI autostart value already exists.");
+            foreach (var keyPath in new[]
+            {
+                @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck",
+                @"Software\Microsoft\Edge\NativeMessagingHosts\com.sentinelai.urlcheck"
+            })
+                using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+                    if (key is not null) throw new InvalidOperationException($"Wizard integration test refused: Native Messaging key already exists ({keyPath}).");
+            var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
+            var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
+            if (File.Exists(startMenuLink) || File.Exists(desktopLink))
+                throw new InvalidOperationException("Wizard integration test refused: a Sentinel AI shortcut already exists.");
+            if (Directory.Exists(root)) throw new IOException("Generated wizard integration-test folder unexpectedly already exists.");
+
+            ApplicationConfiguration.Initialize();
+            using (var wizard = new SetupWizard(repairModeOverride: false, integrationTestTarget: root))
+            {
+                Application.Run(wizard);
+                if (!string.IsNullOrWhiteSpace(wizard.IntegrationTestFailure))
+                    throw new InvalidOperationException($"Wizard flow failed: {wizard.IntegrationTestFailure}");
+                if (wizard.DialogResult != DialogResult.OK)
+                    throw new InvalidOperationException($"Wizard flow closed with result {wizard.DialogResult}.");
+            }
+
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            Uninstall(root);
+            if (Directory.Exists(root)) throw new InvalidDataException("Wizard integration test left its installation folder behind.");
+            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"))
+                if (key is not null) throw new InvalidDataException("Wizard integration test left an uninstall registration behind.");
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
+                throw new InvalidDataException("Wizard integration test left autostart behind.");
+            foreach (var keyPath in new[]
+            {
+                @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck",
+                @"Software\Microsoft\Edge\NativeMessagingHosts\com.sentinelai.urlcheck"
+            })
+                using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
+                    if (key is not null) throw new InvalidDataException($"Wizard integration test left Native Messaging registration behind ({keyPath}).");
+            if (File.Exists(startMenuLink) || File.Exists(desktopLink))
+                throw new InvalidDataException("Wizard integration test left a Sentinel AI shortcut behind.");
+            Log("WIZARD_INTEGRATION_TEST_SUCCESS form=true install=true verification=true uninstall=true shortcuts=false autostart=false");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Log($"WIZARD_INTEGRATION_TEST_FAILED type={exception.GetType().Name} message={Clean(exception.Message)}");
+            try
+            {
+                var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+                if (Directory.Exists(root) && PathsEqual(registered, root)) Uninstall(root);
+                if (Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any())
+                    DeleteInstallPathSafely(root, Path.GetDirectoryName(root)!, isDirectory: true);
+            }
+            catch (Exception cleanupError) { Log($"WIZARD_INTEGRATION_TEST_CLEANUP_FAILED type={cleanupError.GetType().Name} message={Clean(cleanupError.Message)}"); }
             return 1;
         }
     }
@@ -2197,10 +2267,21 @@ internal sealed class SetupWizard : Form
     private string lastError = string.Empty;
     private bool errorCanRetry;
     private bool repairSettingsReadFailed;
+    private readonly string? integrationTestTarget;
+    private System.Windows.Forms.Timer? integrationTestTimer;
+    private DateTime integrationTestStartedAt;
+    internal string? IntegrationTestFailure { get; private set; }
 
     public SetupWizard(bool? repairModeOverride = null, (bool StartMenu, bool Desktop, bool AutoStart)? existingOptionsOverride = null,
-        Exception? repairOptionsErrorOverride = null)
+        Exception? repairOptionsErrorOverride = null, string? integrationTestTarget = null)
     {
+        this.integrationTestTarget = integrationTestTarget;
+        if (integrationTestTarget is not null)
+        {
+            folder.Text = integrationTestTarget;
+            startMenu.Checked = desktop.Checked = start.Checked = launchAfter.Checked = false;
+            ShowInTaskbar = false;
+        }
         repairMode = repairModeOverride ?? Program.IsRegisteredInstall(folder.Text);
         if (repairMode)
         {
@@ -2260,6 +2341,11 @@ internal sealed class SetupWizard : Form
             cancel.PerformClick();
         };
         folder.Validated += (_, _) => RefreshSpaceInfo();
+        if (integrationTestTarget is not null)
+        {
+            Shown += (_, _) => StartIntegrationTestDriver();
+            FormClosed += (_, _) => integrationTestTimer?.Dispose();
+        }
         if (repairSettingsReadFailed)
         {
             lastError = $"Nie można bezpiecznie odczytać obecnych ustawień Sentinel AI. Nie rozpoczęto żadnych zmian.\r\n\r\nLog diagnostyczny: {Program.LogPath}";
@@ -2267,6 +2353,49 @@ internal sealed class SetupWizard : Form
             back.Visible = false;
         }
         else ShowPage(WizardPage.Welcome);
+    }
+
+    private void StartIntegrationTestDriver()
+    {
+        integrationTestStartedAt = DateTime.UtcNow;
+        integrationTestTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        integrationTestTimer.Tick += (_, _) =>
+        {
+            if (DateTime.UtcNow - integrationTestStartedAt > TimeSpan.FromMinutes(10))
+            {
+                IntegrationTestFailure ??= "The interactive installer flow exceeded its 10-minute limit.";
+                if (installationRunning) installCancellation?.Cancel();
+                else { integrationTestTimer.Stop(); Close(); }
+                return;
+            }
+
+            switch (page)
+            {
+                case WizardPage.Welcome:
+                    next.PerformClick();
+                    break;
+                case WizardPage.Location:
+                    folder.Text = integrationTestTarget!;
+                    next.PerformClick();
+                    break;
+                case WizardPage.Options:
+                    startMenu.Checked = desktop.Checked = start.Checked = launchAfter.Checked = false;
+                    next.PerformClick();
+                    break;
+                case WizardPage.Summary:
+                    next.PerformClick();
+                    break;
+                case WizardPage.Complete:
+                    next.PerformClick();
+                    break;
+                case WizardPage.Error:
+                    IntegrationTestFailure ??= lastError;
+                    integrationTestTimer.Stop();
+                    if (!installationRunning) Close();
+                    break;
+            }
+        };
+        integrationTestTimer.Start();
     }
 
     private async Task MoveNextAsync()

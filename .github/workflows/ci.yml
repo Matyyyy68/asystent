@@ -69,6 +69,19 @@ jobs:
           if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Built installer was not found.' }
           $test = Start-Process -FilePath $installer -ArgumentList @('--integration-test') -Wait -PassThru -WindowStyle Hidden
           if ($test.ExitCode -ne 0) { throw "Isolated installer integration test failed with exit code $($test.ExitCode)." }
+      - name: Run visible installer wizard install-verify-uninstall integration test
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content eng/ProductVersion.props -Raw)).Project.PropertyGroup.VersionPrefix
+          if (!$version) { throw 'Could not read the installer version.' }
+          $installer = Join-Path $PWD "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
+          if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Built installer was not found.' }
+          $test = Start-Process -FilePath $installer -ArgumentList @('--wizard-integration-test') -PassThru
+          if (!$test.WaitForExit(660000)) {
+            Stop-Process -Id $test.Id -Force -ErrorAction SilentlyContinue
+            throw 'Visible installer wizard integration test exceeded its 11-minute CI limit.'
+          }
+          if ($test.ExitCode -ne 0) { throw "Visible installer wizard integration test failed with exit code $($test.ExitCode)." }
       - name: Build and test Enterprise API
         shell: pwsh
         run: |
