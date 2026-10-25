@@ -16,6 +16,7 @@ public sealed class DomainFeedRefreshScheduler
     private string? lastErrorCode;
     private string state = "Wyłączone";
     private Task? currentRefresh;
+    private CancellationTokenSource? refreshCancellation;
 
     public DomainFeedRefreshScheduler(DomainFeedRefreshCheckpoint? checkpoint = null)
     {
@@ -36,14 +37,28 @@ public sealed class DomainFeedRefreshScheduler
     {
         ArgumentNullException.ThrowIfNull(reputation);
         ArgumentNullException.ThrowIfNull(update);
+        if (!isEnabled)
+        {
+            CancellationTokenSource? cancellation;
+            lock (gate)
+            {
+                enabled = false;
+                if (!running)
+                {
+                    state = "Wyłączone";
+                    return;
+                }
+                state = "Anulowanie pobierania";
+                cancellation = refreshCancellation;
+            }
+            try { cancellation?.Cancel(); }
+            catch (ObjectDisposedException) { }
+            return;
+        }
+
         lock (gate)
         {
-            enabled = isEnabled;
-            if (!enabled)
-            {
-                if (!running) state = "Wyłączone";
-                return;
-            }
+            enabled = true;
             if (running) return;
 
             var due = reputation.FetchedAt is null || now < reputation.FetchedAt.Value ||
@@ -76,7 +91,8 @@ public sealed class DomainFeedRefreshScheduler
             }
             running = true;
             state = "Pobieranie";
-            currentRefresh = RefreshAsync(update, now, saveCheckpoint, cancellationToken);
+            refreshCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            currentRefresh = RefreshAsync(update, now, saveCheckpoint, refreshCancellation);
         }
     }
 
@@ -88,12 +104,12 @@ public sealed class DomainFeedRefreshScheduler
     }
 
     private async Task RefreshAsync(Func<CancellationToken, Task> update, DateTimeOffset attemptedAt,
-        Action<DateTimeOffset, string?>? saveCheckpoint, CancellationToken cancellationToken)
+        Action<DateTimeOffset, string?>? saveCheckpoint, CancellationTokenSource cancellation)
     {
         string? errorCode = null;
         var refreshSucceeded = false;
-        try { await update(cancellationToken).ConfigureAwait(false); refreshSucceeded = true; }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { errorCode = "Cancelled"; }
+        try { await update(cancellation.Token).ConfigureAwait(false); refreshSucceeded = true; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception ex) { errorCode = ex.GetType().Name; }
         try { saveCheckpoint?.Invoke(attemptedAt, errorCode); }
         catch (Exception ex) { errorCode ??= ex.GetType().Name; }
@@ -101,7 +117,11 @@ public sealed class DomainFeedRefreshScheduler
         {
             running = false;
             lastErrorCode = errorCode;
-            state = refreshSucceeded ? "Zaktualizowana" : "Błąd aktualizacji";
+            state = !enabled ? "Wyłączone"
+                : cancellation.IsCancellationRequested ? "Anulowano"
+                : refreshSucceeded ? "Zaktualizowana" : "Błąd aktualizacji";
+            if (ReferenceEquals(refreshCancellation, cancellation)) refreshCancellation = null;
         }
+        cancellation.Dispose();
     }
 }

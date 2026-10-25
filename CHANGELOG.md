@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- F04: wyłączenie autoaktualizacji feedu CERT anuluje również trwające żądanie HTTPS; status po anulowaniu wraca do `Wyłączone`, bez zgłoszenia błędu sieci. `DomainFeedRefreshSchedulerTests` PASS 7/7.
 - F03: lokalna ekstrakcja wklejonych linków rozpoznaje teraz schemat `hxxps[://]` oraz separator hosta `{.}` obok dotychczasowych wariantów. Normalizacja jest ograniczona do schematu i etykiety hosta; ścieżki, userinfo i zwykły tekst pozostają nietknięte. Reguły wersja `2026.10.12`; targeted 97/97, pełna bramka offline PASS (390 .NET + 2 platformowe SKIP, desktop 47/47).
 - F03: ograniczony skeleton znanych marek rozpoznaje teraz cyrylickie U+0455 `ѕ` jako łacińskie `s`, dzięki czemu `mіcrоѕоft.example` emituje regułę `url.brand`. Reguły wersja `2026.10.11`; `AnalysisTests` i `BrowserIntegrationTests` 95/95 PASS, pełna suita .NET 388 PASS + 2 platformowe SKIP. Nie jest to pełny UTS #39 skeleton ani niezależna miara recallu.
 - F02: self-test instalatora zapisuje teraz zredagowane wyjście FATAL Chromium i kończy się natychmiast po awarii sandboxa; weryfikuje również ACE `ALL APPLICATION PACKAGES` przed i po atomowej zamianie katalogu. Build Release 0 ostrzeżeń/błędów, .NET 385 PASS + 2 platformowe SKIP, desktop 45/45, plany 14/14 i `--self-test-no-app` PASS. Pełny smoke nadal blokuje FATAL ACL/AppContainer w środowisku audytu, szczegóły w `docs/PROJECT_PROGRESS.md`.

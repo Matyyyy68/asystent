@@ -40,6 +40,36 @@ public sealed class DomainFeedRefreshSchedulerTests
     }
 
     [Fact]
+    public async Task DisablingAutoRefreshCancelsAnInFlightRequest()
+    {
+        var scheduler = new DomainFeedRefreshScheduler();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var now = DateTimeOffset.UtcNow;
+
+        async Task Update(CancellationToken cancellationToken)
+        {
+            started.SetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            catch (OperationCanceledException)
+            {
+                cancelled.SetResult();
+                throw;
+            }
+        }
+
+        scheduler.Evaluate(true, new ReputationStatus(0, null, null, true), now, Update);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        scheduler.Evaluate(false, new ReputationStatus(0, null, null, true), now, Update);
+        await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await scheduler.WaitForIdleAsync();
+
+        Assert.False(scheduler.Status.Enabled);
+        Assert.Equal("Wyłączone", scheduler.Status.State);
+        Assert.Null(scheduler.Status.LastErrorCode);
+    }
+
+    [Fact]
     public async Task FreshFeedIsNotRefetchedAndExpiredFeedIsDueAtTwentyFourHours()
     {
         var scheduler = new DomainFeedRefreshScheduler();
