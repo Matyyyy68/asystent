@@ -1,5 +1,7 @@
 # PLAN-014 — ochrona URL w rozszerzeniu przeglądarki
 
+**F09 — headless E2E w odizolowanym Windows CI (2026-10-25, weryfikacja oczekuje na run):** harness ma jawny `--allow-headless-browser`; workflow uruchamia Chrome i Edge na runnerze GitHub Actions, w osobnym profilu i z Native Messaging hostem używającym produkcyjnego `UrlRequestProcessor`. Kopia rozszerzenia dopuszcza wyłącznie `*.test`, resolver blokuje zewnętrzny DNS, a tryb `--allow-local-download-fixtures` zapisuje tylko kontrolowane fixture w tymczasowym profilu usuwanym w `finally`. Nie uruchamiano lokalnej przeglądarki. Lokalne kontrole składni, opt-in guard, desktop 47/47, diff i plany 14/14 PASS; dopiero CI rozstrzygnie, czy headless Chrome/Edge obsługuje wymagane API rozszerzeń.
+
 **F09 — regresja akcji pobierania (2026-10-24):** handler background odrzuca `continue` dla ważnego ostrzeżenia `kind=download`, nawet jeśli UI jeszcze nie ukryło przycisku. Zapobiega ponownej nawigacji do źródła i rozpoczęciu drugiego pobrania; zachowuje token ostrzeżenia, więc użytkownik nadal może zamknąć kartę albo jawnie zatrzymać pierwotny transfer. Test Node potwierdza odmowę i brak aktualizacji karty. Pełny desktop `npm test` 37/37 PASS; bez startu przeglądarki.
 
 1. **Cel:** ostrzegać użytkownika przed URL-em, który bieżące reguły Sentinel rozpoznają jako podejrzany, przy jawnej kontroli integracji i bez przesyłania historii przeglądania.

@@ -10,6 +10,7 @@ const { createServer } = require('node:http');
 const hostName = 'com.sentinelai.urlcheck';
 const browserName = process.argv[2] ?? 'chrome';
 const allowVisibleBrowser = process.argv.includes('--allow-visible-browser');
+const allowHeadlessBrowser = process.argv.includes('--allow-headless-browser');
 const allowLocalDownloadFixtures = process.argv.includes('--allow-local-download-fixtures');
 const browsers = {
   chrome: {
@@ -35,8 +36,8 @@ const registryKey = 'HKCU\\' + browserConfig.registryPath + hostName;
 const expectedExtensionId = 'nakmencmekkefmcddpihiiohjgabfemg';
 const timeoutMs = 30_000;
 
-if (!allowVisibleBrowser) {
-  console.error('This E2E opens a visible browser and writes a temporary Native Messaging registration under HKCU. Re-run with --allow-visible-browser only when that is intended.');
+if (!allowVisibleBrowser && !allowHeadlessBrowser) {
+  console.error('This E2E launches a browser and writes a temporary Native Messaging registration under HKCU. Re-run with --allow-visible-browser or --allow-headless-browser only in an isolated test environment.');
   process.exit(2);
 }
 
@@ -187,7 +188,7 @@ async function main() {
     manifest.web_accessible_resources[0].matches = ['http://*.test/*', 'https://*.test/*'];
     fs.writeFileSync(path.join(extensionPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
-    run('dotnet', ['publish', engineHostProject, '-c', 'Release', '-o', engineHostOutput, '--nologo', '-p:NuGetAudit=false', '--ignore-failed-sources']);
+    run('dotnet', ['publish', engineHostProject, '-c', 'Release', '-o', engineHostOutput, '--nologo', '--no-restore', '-p:NuGetAudit=false']);
     fs.writeFileSync(hostManifestPath, `${JSON.stringify(hostManifest, null, 2)}\n`);
     sendRegistryValue(hostManifestPath);
     if (registryValue() !== hostManifestPath) throw new Error(`${browserConfig.displayName} Native Messaging registration was not written.`);
@@ -247,7 +248,8 @@ async function main() {
       '--host-resolver-rules=MAP *.test 127.0.0.1,MAP * ~NOTFOUND',
       'about:blank'
     ];
-    browserProcess = spawn(browserPath, browserArgs, { stdio: 'ignore', windowsHide: false });
+    if (allowHeadlessBrowser) browserArgs.unshift('--headless=new');
+    browserProcess = spawn(browserPath, browserArgs, { stdio: 'ignore', windowsHide: !allowVisibleBrowser });
     const browserInfo = await waitForBrowser(profilePath, browserProcess);
     const browserPort = browserInfo.port;
     browser = connectCdp(browserInfo.webSocketDebuggerUrl);

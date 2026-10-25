@@ -53,6 +53,13 @@ jobs:
       - name: Build and test application
         shell: pwsh
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
+      - name: Run isolated headless browser-extension E2E
+        shell: pwsh
+        run: |
+          node scripts/test-chrome-extension-e2e.cjs chrome --allow-headless-browser --allow-local-download-fixtures
+          if ($LASTEXITCODE) { throw 'Chrome extension E2E failed' }
+          node scripts/test-chrome-extension-e2e.cjs edge --allow-headless-browser --allow-local-download-fixtures
+          if ($LASTEXITCODE) { throw 'Edge extension E2E failed' }
       - name: Build and test Enterprise API
         shell: pwsh
         run: |
