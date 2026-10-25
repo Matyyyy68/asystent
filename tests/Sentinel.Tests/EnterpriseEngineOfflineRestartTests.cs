@@ -11,6 +11,48 @@ namespace Sentinel.Tests;
 
 public sealed class EnterpriseEngineOfflineRestartTests
 {
+    [Fact]
+    public async Task StartupExceptionExitsCleanlyAndReportsOnlyItsType()
+    {
+        var repository = FindRepositoryRoot();
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Release";
+        var engineDll = Path.Combine(repository, "src", "Sentinel.Engine", "bin", configuration, "net10.0", "Sentinel.Engine.dll");
+        Assert.True(File.Exists(engineDll), $"Engine was not built: {engineDll}");
+
+        var temp = Path.Combine(Path.GetTempPath(), "sentinel-engine-startup-failure-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
+        var invalidDataRoot = Path.Combine(temp, "not-a-directory");
+        await File.WriteAllTextAsync(invalidDataRoot, "force Directory.CreateDirectory to fail");
+        try
+        {
+            var start = new ProcessStartInfo("dotnet")
+            {
+                Arguments = $"\"{engineDll}\"",
+                WorkingDirectory = repository,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            start.Environment["SENTINEL_DATA_ROOT"] = invalidDataRoot;
+            using var process = Process.Start(start) ?? throw new IOException("Could not start Sentinel Engine startup-failure test process.");
+            var stderrTask = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            var stderr = await stderrTask;
+
+            Assert.Equal(1, process.ExitCode);
+            Assert.Contains("SENTINEL_ENGINE_FATAL type=System.IO.IOException", stderr, StringComparison.Ordinal);
+            Assert.DoesNotContain("Unhandled exception", stderr, StringComparison.Ordinal);
+            Assert.DoesNotContain(invalidDataRoot, stderr, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { Directory.Delete(temp, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     [WindowsDpapiFact]
     public async Task EnterpriseQueueSurvivesEngineRestartWhileOfflineAndConsentStopsRetry()
     {

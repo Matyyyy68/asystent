@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { MAX_FAILURES, readFailures, recordFailure } = require('../electron/diagnostic-log.cjs');
+const { MAX_FAILURES, readFailures, readLastFailure, recordFailure } = require('../electron/diagnostic-log.cjs');
 
 test('persists only bounded, redacted engine failure records', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-engine-log-'));
@@ -17,6 +17,8 @@ test('persists only bounded, redacted engine failure records', t => {
     occurredAtUtc: '2026-10-22T12:00:00.000Z', reasonCode: '3765269347',
     stderrObserved: true, exceptionType: null
   }]);
+  // A fresh process can read the last sanitized record without replaying the full log.
+  assert.deepEqual(readLastFailure(directory), readFailures(directory)[0]);
 
   for (let i = 0; i < MAX_FAILURES + 8; i++) {
     assert.equal(recordFailure(directory, {
@@ -27,6 +29,7 @@ test('persists only bounded, redacted engine failure records', t => {
   const failures = readFailures(directory);
   assert.equal(failures.length, MAX_FAILURES);
   assert.equal(failures.at(-1).reasonCode, 'response-timeout');
+  assert.deepEqual(readLastFailure(directory), failures.at(-1));
   assert.ok(fs.readFileSync(path.join(directory, 'engine-lifecycle.jsonl'), 'utf8').length < 20_000);
 });
 

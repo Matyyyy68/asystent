@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
@@ -38,13 +39,14 @@ var defaultDataDirectory = OperatingSystem.IsWindows()
     ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "SentinelAI", "Server")
     : Path.Combine("/var/lib", "sentinel-ai", "server");
 var dataDirectory = builder.Configuration["Sentinel:DataDirectory"] ?? defaultDataDirectory;
+var dataDirectoryConfigured = !string.IsNullOrWhiteSpace(builder.Configuration["Sentinel:DataDirectory"]);
 var databasePath = Path.GetFullPath(Path.Combine(dataDirectory, "sentinel-server.db"));
 var eventRetentionDays = builder.Configuration.GetValue<int?>("Sentinel:EventRetentionDays") ?? 90;
 if (eventRetentionDays is < 30 or > 3650) throw new InvalidOperationException("Sentinel:EventRetentionDays musi wynosić 30–3650.");
 var store = new SqliteServerStore(databasePath, eventRetentionDays);
 var knowledgeDirectory = Path.Combine(Path.GetFullPath(dataDirectory), "Knowledge");
 var knowledge = new LocalKnowledgeBase(knowledgeDirectory);
-var aiProvider = new OllamaLocalProvider(new HttpClient(new SocketsHttpHandler { UseProxy = false }) { Timeout = Timeout.InfiniteTimeSpan });
+var aiProvider = new OllamaLocalProvider(OllamaLocalProvider.CreateDirectHttpClient());
 var localRules = new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames()));
 var passwordHasher = new AdminPasswordHasher();
 var configuredBootstrapUsername = builder.Configuration["Sentinel:BootstrapAdminUsername"];
@@ -73,6 +75,7 @@ builder.Services.AddSingleton<AnalysisOrchestrator>();
 var app = builder.Build();
 await store.InitializeAsync();
 await knowledge.InitializeAsync();
+var processStartedAtUtc = DateTimeOffset.UtcNow;
 if (configuredBootstrapUsername is not null || configuredBootstrapPassword is not null)
 {
     if (!IsValidUsername(configuredBootstrapUsername) || !AdminPasswordHasher.IsValid(configuredBootstrapPassword ?? ""))
@@ -137,6 +140,33 @@ securityAdmins.AddEndpointFilter(RequireRoles(AdminRole.SystemAdministrator, Adm
 var systemAdmins = app.MapGroup("/api/v1/admin");
 systemAdmins.AddEndpointFilter(AuthenticateAdmin(store));
 systemAdmins.AddEndpointFilter(RequireRoles(AdminRole.SystemAdministrator));
+
+systemAdmins.MapGet("/diagnostics/host", () =>
+{
+    using var process = System.Diagnostics.Process.GetCurrentProcess();
+    process.Refresh();
+    var storeBytes = GetDatabaseFootprint(databasePath);
+    var uptimeSeconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - processStartedAtUtc).TotalSeconds);
+    var productVersion = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "unknown";
+    var listenerSummary = (string.IsNullOrWhiteSpace(configuredUrls) ? "http://127.0.0.1:5080" : configuredUrls)
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(raw => Uri.TryCreate(raw, UriKind.Absolute, out var uri)
+            ? new { scheme = uri.Scheme, port = uri.Port, loopback = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || IPAddress.TryParse(uri.Host, out var ip) && IPAddress.IsLoopback(ip) }
+            : new { scheme = "unknown", port = 0, loopback = false })
+        .ToArray();
+    return Results.Ok(new
+    {
+        capturedAtUtc = DateTimeOffset.UtcNow,
+        productVersion,
+        runtimeVersion = RuntimeInformation.FrameworkDescription,
+        operatingSystem = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsLinux() ? "Linux" : "Other",
+        processUptimeSeconds = uptimeSeconds,
+        processWorkingSetBytes = Math.Max(0, process.WorkingSet64),
+        managedMemoryBytes = Math.Max(0, GC.GetTotalMemory(forceFullCollection: false)),
+        database = new { state = storeBytes is null ? "unavailable" : "available", totalBytes = storeBytes },
+        deployment = new { listeners = listenerSummary, eventRetentionDays, customDataDirectory = dataDirectoryConfigured }
+    });
+});
 
 systemAdmins.MapPost("/backups", async (HttpContext context, SqliteServerStore repository, IServerStore audit, CancellationToken ct) =>
 {
@@ -235,9 +265,14 @@ allAdmins.MapPut("/auth/password", async (ChangePasswordBody body, HttpContext c
 allAdmins.MapGet("/devices", async (IServerStore repository, CancellationToken ct) =>
 {
     var now = DateTimeOffset.UtcNow; var items = await repository.ListDevicesAsync(ct);
-    return Results.Ok(items.Select(device => new { device.Id, device.Name, device.Group, device.ClientVersion,
+    var rows = await Task.WhenAll(items.Select(async device => (Device: device, Policy: await repository.GetEffectivePolicyAsync(device.Id, ct))));
+    return Results.Ok(rows.Select(row => { var device = row.Device; var policy = row.Policy; var applied = device.AppliedPolicy;
+        bool? policyCurrent = policy is null || applied is null ? null : applied.GlobalVersion == policy.GlobalVersion
+            && applied.GroupVersion == policy.GroupVersion && applied.DeviceVersion == policy.DeviceVersion;
+        return new { device.Id, device.Name, device.Group, device.ClientVersion,
         device.RegisteredAt, device.LastSeenAt, isOnline = device.Approved && !device.Revoked && device.LastSeenAt is { } seen && now - seen <= TimeSpan.FromMinutes(2),
-        device.Revoked, device.Approved, device.LastError }));
+        device.Revoked, device.Approved, device.LastError, appliedPolicy = applied, policyCurrent };
+    }));
 });
 allAdmins.MapGet("/groups", async (IServerStore repository, CancellationToken ct) => Results.Ok(await repository.ListGroupsAsync(ct)));
 allAdmins.MapGet("/events", async (int? limit, string? deviceId, IServerStore repository, CancellationToken ct) =>
@@ -247,6 +282,26 @@ allAdmins.MapGet("/knowledge/search", async (string? query, int? limit, IKnowled
 {
     if (query is null || query.Length > 4000 || limit is < 1 or > 20) return Results.BadRequest(new { error = "Podaj zapytanie do 4000 znaków i limit 1–20." });
     return Results.Ok(await repository.SearchAsync(query, limit ?? 5, ct));
+});
+securityAdmins.MapGet("/knowledge/search-semantic", async (string? query, int? limit, string? model,
+    IKnowledgeBaseProvider repository, IServerStore serverStore, IAIProvider provider, CancellationToken ct) =>
+{
+    if (query is null || query.Length > 4000 || limit is < 1 or > 20 || string.IsNullOrWhiteSpace(model) || model.Length > 160 || model.Any(char.IsControl))
+        return Results.BadRequest(new { error = "Podaj zapytanie do 4000 znaków, limit 1–20 i nazwę modelu embeddingowego." });
+    if (repository is not ISemanticKnowledgeBaseProvider semanticRepository || provider is not ITextEmbeddingProvider embeddings)
+        return Results.Problem(title: "Wyszukiwanie semantyczne jest niedostępne", statusCode: StatusCodes.Status501NotImplemented);
+    var config = await serverStore.ReadServerAIConfigurationAsync(ct);
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeout.CancelAfter(TimeSpan.FromSeconds(config.TimeoutSeconds));
+    try
+    {
+        var hits = await semanticRepository.SearchSemanticAsync(query, config.Endpoint, model, embeddings, limit ?? 5, timeout.Token);
+        return Results.Ok(hits);
+    }
+    catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or InvalidDataException or ArgumentException or InvalidOperationException or System.Text.Json.JsonException)
+    {
+        return Results.Problem(title: "Lokalne wyszukiwanie semantyczne nie powiodło się", detail: "Sprawdź dostępność skonfigurowanej usługi Ollama i zgodność wybranego modelu embeddingowego.", statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
 });
 securityAdmins.MapPost("/knowledge/documents", async (HttpContext context, IKnowledgeBaseProvider repository, CancellationToken ct) =>
 {
@@ -260,7 +315,7 @@ securityAdmins.MapPost("/knowledge/documents", async (HttpContext context, IKnow
         return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
     if (context.Request.ContentLength is > LocalKnowledgeBase.MaximumFileBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
     var extension = Path.GetExtension(fileName).ToLowerInvariant();
-    if (extension is not (".txt" or ".md" or ".docx")) return Results.BadRequest(new { error = "Obsługiwane są pliki TXT, Markdown i DOCX." });
+    if (extension is not (".txt" or ".md" or ".docx" or ".pdf")) return Results.BadRequest(new { error = "Obsługiwane są pliki TXT, Markdown, DOCX i tekstowe PDF." });
     var temporaryFile = Path.Combine(Path.GetTempPath(), "sentinel-upload-" + Guid.NewGuid().ToString("N") + extension);
     try
     {
@@ -277,7 +332,7 @@ securityAdmins.MapPost("/knowledge/documents", async (HttpContext context, IKnow
             }
             await output.FlushAsync(ct);
         }
-        var document = await repository.ImportAsync(temporaryFile, ct);
+        var document = await repository.ImportAsync(temporaryFile, fileName, ct);
         await store.RecordAdminActionAsync(actor.Username, "knowledge.document_imported", document.Id, DateTimeOffset.UtcNow, ct);
         return Results.Created($"/api/v1/admin/knowledge/documents/{document.Id}", document);
     }
@@ -468,10 +523,12 @@ authenticatedAgents.MapPost("/credentials/rotate", async (RotateDeviceCredential
 authenticatedAgents.MapPost("/analyze", async (AgentAnalysisBody body, HttpContext context, IServerStore repository, AnalysisOrchestrator analysis, CancellationToken ct) =>
 {
     var device = (Device)context.Items["device"]!;
-    if (body.Text is null || body.Text.Length is 0 or > Sentinel.Core.Context.PrivacyFilter.MaximumTextLength ||
+    if (body.Text is null || body.Text.Length > Sentinel.Core.Context.PrivacyFilter.MaximumTextLength ||
+        body.Text.Length == 0 && string.IsNullOrWhiteSpace(body.TargetUrl) || body.TargetUrl?.Length > 4096 ||
+        body.TargetUrl?.Any(char.IsControl) == true ||
         body.Application is null || body.Application.Length is 0 or > 100 || body.Application.Any(char.IsControl) ||
         !body.ContextSharingConfirmed)
-        return Results.ValidationProblem(new Dictionary<string, string[]> { ["analysis"] = ["Wymagany jest tekst do 16 000 znaków, nazwa aplikacji i jawne potwierdzenie przesłania kontekstu."] });
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["analysis"] = ["Wymagany jest tekst do 16 000 znaków lub adres celu, nazwa aplikacji i jawne potwierdzenie przesłania kontekstu."] });
     var policy = await repository.GetEffectivePolicyAsync(device.Id, ct);
     if (policy?.Effective.IncludeContext != true)
         return Results.Problem(title: "Polityka nie zezwala na analizę serwerową", detail: "Administrator musi jawnie włączyć udostępnianie kontekstu dla urządzenia.", statusCode: StatusCodes.Status403Forbidden);
@@ -480,7 +537,9 @@ authenticatedAgents.MapPost("/analyze", async (AgentAnalysisBody body, HttpConte
     var config = await repository.ReadServerAIConfigurationAsync(ct);
     var useModel = config.Enabled && policy.Effective.AiProvider == "ollama";
     var result = await analysis.AnalyzeAsync(new AnalysisContext(body.Application, body.Text, DateTimeOffset.UtcNow,
-        string.IsNullOrWhiteSpace(body.TargetUrl) ? null : new NavigationSignal(body.TargetUrl)), useModel, config.Endpoint, config.Model, config.TimeoutSeconds, ct);
+        string.IsNullOrWhiteSpace(body.TargetUrl) ? null : new NavigationSignal(body.TargetUrl)), useModel, config.Endpoint, config.Model,
+        embeddingModel: null, timeoutSeconds: config.TimeoutSeconds, cancellationToken: ct,
+        useKnowledge: policy.Effective.RagEnabled == true);
     return Results.Ok(new { result.Category, result.Risk, result.Indicators, result.Uncertainties, result.Recommendations, result.Explanation,
         modelEnabled = useModel, contextPersisted = false });
 });
@@ -490,7 +549,15 @@ authenticatedAgents.MapPost("/heartbeat", async (HeartbeatBody? body, HttpContex
     var error = body?.LastError;
     if (error is not null && error is not ("local_store" or "sync_failed" or "configuration_invalid" or "client_update"))
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["lastError"] = ["Dozwolone są wyłącznie kody: local_store, sync_failed, configuration_invalid, client_update."] });
-    await repository.HeartbeatAsync(device.Id, DateTimeOffset.UtcNow, error, ct);
+    var revisions = new[] { body?.GlobalPolicyVersion, body?.GroupPolicyVersion, body?.DevicePolicyVersion };
+    AppliedPolicyRevision? appliedPolicy = null;
+    if (revisions.Any(value => value.HasValue))
+    {
+        if (revisions.Any(value => value is null or < 0))
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["policyVersion"] = ["Wszystkie trzy nieujemne wersje polityki muszą być podane razem."] });
+        appliedPolicy = new(body!.GlobalPolicyVersion!.Value, body.GroupPolicyVersion!.Value, body.DevicePolicyVersion!.Value);
+    }
+    await repository.HeartbeatAsync(device.Id, DateTimeOffset.UtcNow, error, ct, appliedPolicy);
     return Results.NoContent();
 });
 authenticatedAgents.MapPost("/events", async (EnterpriseEventBatchV1? body, HttpContext context, IServerStore repository, CancellationToken ct) =>
@@ -554,6 +621,23 @@ static string ReadHiddenPassword(string prompt)
 static string HashToken(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 static bool IsValidUsername(string? username) => username is { Length: >= 3 and <= 64 } && username.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '@' or '-');
 static string NormalizeUsername(string username) => username.Trim().ToLowerInvariant();
+static long? GetDatabaseFootprint(string databasePath)
+{
+    try
+    {
+        long total = 0;
+        foreach (var suffix in new[] { "", "-wal", "-shm" })
+        {
+            var path = databasePath + suffix;
+            if (File.Exists(path)) total = checked(total + new FileInfo(path).Length);
+        }
+        return total;
+    }
+    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or OverflowException)
+    {
+        return null;
+    }
+}
 static async Task<IResult> WritePolicy(PolicyWriteBody body, AdminIdentity identity, IServerStore repository, CancellationToken ct,
     Func<PolicyWrite, string, DateTimeOffset, Task<bool>> write)
 {
@@ -588,7 +672,7 @@ static Func<EndpointFilterInvocationContext, EndpointFilterDelegate, ValueTask<o
 
 sealed record CreateInvitationBody(string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, bool RequiresApproval = false);
 sealed record EnrollmentBody(string InvitationCode, string DeviceName, string ClientVersion);
-sealed record HeartbeatBody(string? LastError);
+sealed record HeartbeatBody(string? LastError, long? GlobalPolicyVersion = null, long? GroupPolicyVersion = null, long? DevicePolicyVersion = null);
 sealed record AdminLoginBody(string Username, string Password);
 sealed record CreateAdminBody(string Username, string Password, string Role);
 sealed record SetDisabledBody(bool Disabled);

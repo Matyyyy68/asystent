@@ -1,16 +1,19 @@
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { assertResearchDatasetMetadata } from './dataset-metadata.mjs';
 
 const DATASET = 'phreshphish/phreshphish';
 const REVISION = 'eca603e0ecd4f698f8d4d226c088659e72681239';
+if (!process.argv.includes('--allow-network')) {
+  throw new Error('This extractor downloads official benchmark lists. Pass --allow-network to authorize network access.');
+}
 const outputDirectory = process.argv[2];
 if (!outputDirectory) throw new Error('Pass a unique temporary output directory.');
 
 const metadata = await fetch(`https://huggingface.co/api/datasets/${DATASET}`);
-if (!metadata.ok || (await metadata.json()).sha !== REVISION) {
-  throw new Error('PhreshPhish revision changed; refusing benchmark extraction.');
-}
+if (!metadata.ok) throw new Error(`Dataset metadata request failed: HTTP ${metadata.status}`);
+assertResearchDatasetMetadata(await metadata.json(), REVISION);
 const baseUrl = `https://huggingface.co/datasets/${DATASET}/resolve/${REVISION}/`;
 const groups = [
   { name: 'benchmark-005', count: 586 },

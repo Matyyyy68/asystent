@@ -34,6 +34,10 @@ function readFailures(directory) {
   } catch { return []; }
 }
 
+function readLastFailure(directory) {
+  return readFailures(directory).at(-1) ?? null;
+}
+
 function recordFailure(directory, failure) {
   const safe = safeFailure(failure);
   if (!safe) return false;
@@ -45,4 +49,4 @@ function recordFailure(directory, failure) {
   } catch { return false; }
 }
 
-module.exports = { MAX_FAILURES, readFailures, recordFailure };
+module.exports = { MAX_FAILURES, readFailures, readLastFailure, recordFailure };

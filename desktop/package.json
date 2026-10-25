@@ -8,7 +8,8 @@
     "dev": "node ../scripts/copy-media.mjs desktop && vite --host 127.0.0.1",
     "build": "tsc --noEmit && node ../scripts/copy-media.mjs desktop && vite build",
     "start": "electron .",
-    "package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1",
+    "package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1 -Offline",
+    "package:allow-downloads": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1 -AllowDownloads",
     "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/engine-client.cjs && node --check electron/preload.cjs",
     "test": "node --test test/*.test.cjs"
   },
@@ -31,6 +32,7 @@
   "build": {
     "appId": "pl.sentinelai.user",
     "productName": "Sentinel AI",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "../artifacts/desktop"
     },

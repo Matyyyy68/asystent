@@ -1,18 +1,24 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
+using Microsoft.Win32.SafeHandles;
 
 namespace Sentinel.Setup;
 
 internal static class Program
 {
     private const string Product = "Sentinel AI";
-    internal static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Product, "Logs", "installer.log");
+    private static string? selfTestLogPath;
+    internal static string LogPath => selfTestLogPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Product, "Logs", "installer.log");
     private const long MaximumLogBytes = 1024 * 1024;
     private const int MaximumLogMessageCharacters = 4096;
     private static readonly object LogGate = new();
@@ -21,22 +27,413 @@ internal static class Program
     private static string PayloadHash => Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
         .FirstOrDefault(x => x.Key == "SentinelPayloadSha256")?.Value ?? "";
     private const long MinimumFreeSpaceMargin = 32L * 1024 * 1024;
+    private const uint FileReadAttributes = 0x00000080;
+    private const uint FileListDirectory = 0x00000001;
+    private const uint FileAddSubdirectory = 0x00000004;
+    private const uint DeleteAccess = 0x00010000;
+    private const uint GenericRead = 0x80000000;
+    private const uint GenericWrite = 0x40000000;
+    private const uint SynchronizeAccess = 0x00100000;
+    private const uint ShareRead = 0x00000001;
+    private const uint ShareWrite = 0x00000002;
+    private const uint ShareDelete = 0x00000004;
+    private const uint OpenExisting = 3;
+    private const uint CreateNew = 1;
+    private const uint OpenIf = 3;
+    private const uint FileFlagSequentialScan = 0x08000000;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const int FileAttributeTagInfoClass = 9;
+    private const int FileIdBothDirectoryInfoClass = 10;
+    private const int NtFileRenameInformationClass = 10;
+    private const int ErrorNoMoreFiles = 18;
+    private const int FileIdBothDirectoryInfoFileNameOffset = 104;
+    private const uint ObjectAttributesCaseInsensitive = 0x00000040;
+    private const uint FileAttributeDirectory = 0x00000010;
+    private const uint FileDirectoryFile = 0x00000001;
+    private const uint FileSynchronousIoNonAlert = 0x00000020;
+    private const uint FileOpenForBackupIntent = 0x00004000;
+    private const uint FileOpenReparsePoint = 0x00200000;
+    private const uint NtFileOpen = 1;
+    private const uint NtFileOpenIf = 3;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo
+    {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileDispositionInfo
+    {
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool DeleteFile;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileRenameInfoLayout
+    {
+        public byte ReplaceIfExists;
+        public IntPtr RootDirectory;
+        public uint FileNameLength;
+        public char FileName;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct UnicodeString
+    {
+        public ushort Length;
+        public ushort MaximumLength;
+        public IntPtr Buffer;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ObjectAttributes
+    {
+        public uint Length;
+        public IntPtr RootDirectory;
+        public IntPtr ObjectName;
+        public uint Attributes;
+        public IntPtr SecurityDescriptor;
+        public IntPtr SecurityQualityOfService;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IoStatusBlock
+    {
+        public IntPtr Status;
+        public IntPtr Information;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")]
+    private static extern SafeFileHandle CreateFileHandle(string fileName, uint desiredAccess, uint shareMode,
+        IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "GetFileInformationByHandleEx")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int informationClass,
+        out FileAttributeTagInfo information, uint bufferSize);
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "GetFileInformationByHandleEx")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetDirectoryInformationByHandle(SafeFileHandle file, int informationClass,
+        IntPtr information, uint bufferSize);
+
+    [DllImport("ntdll.dll", SetLastError = false)]
+    private static extern int NtCreateFile(out SafeFileHandle fileHandle, uint desiredAccess,
+        ref ObjectAttributes objectAttributes, out IoStatusBlock ioStatusBlock, IntPtr allocationSize,
+        uint fileAttributes, uint shareAccess, uint createDisposition, uint createOptions,
+        IntPtr eaBuffer, uint eaLength);
+
+    [DllImport("ntdll.dll", SetLastError = false)]
+    private static extern uint RtlNtStatusToDosError(int status);
+
+    [DllImport("ntdll.dll", SetLastError = false)]
+    private static extern int NtSetInformationFile(SafeFileHandle file, out IoStatusBlock ioStatusBlock,
+        IntPtr fileInformation, uint length, int fileInformationClass);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetFinalPathNameByHandleW")]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder path, uint pathLength, uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "SetFileInformationByHandle")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetFileInformationByHandle(SafeFileHandle file, int informationClass,
+        ref FileDispositionInfo information, uint bufferSize);
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "GetFileSizeEx")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileSizeEx(SafeFileHandle file, out long fileSize);
 
     [STAThread]
     private static int Main(string[] args)
     {
         if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase)) return IntegrationTest();
+        if (args.Contains("--uninstall-guard-self-test", StringComparer.OrdinalIgnoreCase)) return UninstallRegistrationSelfTest();
+        if (args.Contains("--uninstall-cleanup-self-test", StringComparer.OrdinalIgnoreCase)) return UninstallCleanupSelfTest();
+        if (args.Contains("--wizard-self-test", StringComparer.OrdinalIgnoreCase)) return WizardSelfTest();
+        if (args.Contains("--self-test-no-app", StringComparer.OrdinalIgnoreCase)) return SelfTest(runApplicationSmoke: false);
         if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase)) return SelfTest();
         if (IsUninstallInvocation(args, Environment.ProcessPath))
         {
             ApplicationConfiguration.Initialize();
             if (MessageBox.Show($"Czy na pewno odinstalować Sentinel AI?\n\nTwoje lokalne dane i historia pozostaną na tym komputerze.", Product, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return 0;
             try { Uninstall(Path.GetDirectoryName(Environment.ProcessPath!)!); return 0; }
-            catch (Exception ex) { MessageBox.Show($"Nie udało się odinstalować Sentinel AI.\n\n{ex.Message}", Product, MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }
+            catch (Exception ex)
+            {
+                Log($"UNINSTALL_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
+                MessageBox.Show($"Nie udało się odinstalować Sentinel AI.\n\n{ex.Message}\n\nLog diagnostyczny: {LogPath}", Product, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 1;
+            }
         }
         ApplicationConfiguration.Initialize();
         Application.Run(new SetupWizard());
         return 0;
+    }
+
+    private static int WizardSelfTest()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "SentinelAI-WizardSelfTest-" + Guid.NewGuid().ToString("N"));
+        var previousLogPath = selfTestLogPath;
+        selfTestLogPath = Path.Combine(directory, "installer.log");
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            SetupWizard.ValidateVisualStates();
+            Log("WIZARD_SELF_TEST_SUCCESS states=true repairMode=true settingsPreserved=true failureStopsBeforeChanges=true");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Log($"WIZARD_SELF_TEST_FAILED type={exception.GetType().Name} message={Clean(exception.Message)}");
+            try { File.Copy(LogPath, Path.Combine(AppContext.BaseDirectory, "installer-wizard-self-test-failure.log"), overwrite: true); } catch { }
+            return 1;
+        }
+        finally { TryDelete(directory); selfTestLogPath = previousLogPath; }
+    }
+
+    private static int UninstallRegistrationSelfTest()
+    {
+        var target = Path.Combine(Path.GetTempPath(), "SentinelAI-UninstallGuard-SelfTest");
+        try
+        {
+            var missingRejected = false;
+            try { ValidateRegisteredUninstallTarget(null, target); }
+            catch (InvalidOperationException) { missingRejected = true; }
+            var mismatchedRejected = false;
+            try { ValidateRegisteredUninstallTarget(Path.Combine(target, "other"), target); }
+            catch (InvalidOperationException) { mismatchedRejected = true; }
+            ValidateRegisteredUninstallTarget(target, Path.Combine(target, "."));
+            var reparseRejected = false;
+            try { RejectReparsePointAttributes(FileAttributes.Directory | FileAttributes.ReparsePoint, target); }
+            catch (InvalidOperationException) { reparseRejected = true; }
+            if (!reparseRejected) throw new InvalidDataException("Punkt ponownej analizy nie został odrzucony.");
+            var expectedRunValue = $"\"{Path.Combine(target, "Sentinel AI.exe")}\" --minimized";
+            if (!AutoStartValueTargetsExecutable(expectedRunValue, Path.Combine(target, "Sentinel AI.exe"))
+                || !AutoStartValueTargetsExecutable(expectedRunValue + " --profile=local", Path.Combine(target, "Sentinel AI.exe"))
+                || AutoStartValueTargetsExecutable("\"C:\\Other\\Sentinel AI.exe\" --minimized", Path.Combine(target, "Sentinel AI.exe"))
+                || AutoStartValueTargetsExecutable("\"unterminated", Path.Combine(target, "Sentinel AI.exe")))
+                throw new InvalidDataException("Ochrona wpisu autostartu nie rozpoznaje własnego pliku ani wpisu obcego.");
+            VerifyReparsePointTreeScan();
+            if (!missingRejected || !mismatchedRejected)
+                throw new InvalidDataException("Brak lub niezgodność ścieżki rejestru nie zablokowała deinstalacji.");
+            var uninstallFailure = FormatUninstallFailureLog("remove_payload_files", new IOException("simulated file lock"));
+            if (!uninstallFailure.Contains("stage=remove_payload_files", StringComparison.Ordinal)
+                || !uninstallFailure.Contains("type=IOException", StringComparison.Ordinal)
+                || !uninstallFailure.Contains("hresult=0x", StringComparison.Ordinal)
+                || !uninstallFailure.Contains("simulated file lock", StringComparison.Ordinal))
+                throw new InvalidDataException("Błąd deinstalacji nie zawiera etapu, typu wyjątku i kodu HRESULT.");
+            Console.WriteLine("UNINSTALL_GUARD_SELF_TEST_SUCCESS missingRegistrationRejected=true mismatchedPathRejected=true matchingPathAccepted=true autostartOwnership=true unrelatedAutostartPreserved=true failureLogging=true reparsePointRejected=true junctionTreeRejected=true handleEnumeration=true paginatedEnumeration=true handleContainment=true safeDirectoryCreation=true safeRename=true safeFileCreation=true safeCopy=true safeDeletion=true");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"UNINSTALL_GUARD_SELF_TEST_FAILED type={exception.GetType().Name} message={Clean(exception.Message)}");
+            return 1;
+        }
+    }
+
+    private static int UninstallCleanupSelfTest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SentinelAI-UninstallCleanup-SelfTest-" + Guid.NewGuid().ToString("N"));
+        var target = Path.Combine(root, "install");
+        var uninstallPath = Path.Combine(target, "Uninstall Sentinel AI.exe");
+        var logPath = Path.Combine(root, "diagnostics.log");
+        try
+        {
+            Directory.CreateDirectory(target);
+            File.WriteAllText(uninstallPath, "temporary cleanup test file");
+            var script = BuildUninstallCleanupScript(uninstallPath, target, logPath, parentProcessId: -1, waitTimeoutSeconds: 1, attempts: 4, retryDelayMilliseconds: 25);
+            var firstExitCode = RunUninstallCleanupScriptForTest(script);
+            if (firstExitCode != 0)
+                throw new IOException($"Testowe sprzątanie zakończyło się kodem {firstExitCode}.");
+            if (File.Exists(uninstallPath) || Directory.Exists(target))
+                throw new InvalidDataException("Testowe sprzątanie nie usunęło wyłącznie wskazanego uninstalatora i pustego katalogu.");
+            var result = File.ReadAllText(logPath);
+            if (!result.Contains("UNINSTALL_CLEANUP_RESULT status=complete uninstallerRemoved=true installDirectoryRemoved=true remainingEntries=0", StringComparison.Ordinal))
+                throw new InvalidDataException("Log nie potwierdził wyniku testowego sprzątania deinstalatora.");
+
+            var preservedTarget = Path.Combine(root, "install-with-user-file");
+            var preservedUninstaller = Path.Combine(preservedTarget, "Uninstall Sentinel AI.exe");
+            var userFile = Path.Combine(preservedTarget, "user-data.dat");
+            var preservedLog = Path.Combine(root, "preserved-diagnostics.log");
+            Directory.CreateDirectory(preservedTarget);
+            File.WriteAllText(preservedUninstaller, "temporary cleanup test file");
+            File.WriteAllText(userFile, "preserve this user file");
+            var preservedScript = BuildUninstallCleanupScript(preservedUninstaller, preservedTarget, preservedLog,
+                parentProcessId: -1, waitTimeoutSeconds: 1, attempts: 4, retryDelayMilliseconds: 25);
+            var preservedExitCode = RunUninstallCleanupScriptForTest(preservedScript);
+            if (preservedExitCode != 0 || File.Exists(preservedUninstaller) || !File.Exists(userFile)
+                || File.ReadAllText(userFile) != "preserve this user file" || !Directory.Exists(preservedTarget))
+                throw new InvalidDataException("Końcowe sprzątanie zmieniło plik użytkownika poza zawartością deinstalatora.");
+            var preservedResult = File.ReadAllText(preservedLog);
+            if (!preservedResult.Contains("UNINSTALL_CLEANUP_RESULT status=partial uninstallerRemoved=true installDirectoryRemoved=false remainingEntries=1", StringComparison.Ordinal))
+                throw new InvalidDataException("Log nie opisał pozostawionego pliku użytkownika.");
+
+            Console.WriteLine("UNINSTALL_CLEANUP_SELF_TEST_SUCCESS temporaryFileRemoved=true emptyInstallDirectoryRemoved=true completionLogged=true userFilePreserved=true partialStateLogged=true");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"UNINSTALL_CLEANUP_SELF_TEST_FAILED type={exception.GetType().Name} message={Clean(exception.Message)}");
+            return 1;
+        }
+        finally { TryDelete(root); }
+    }
+
+    private static void VerifyReparsePointTreeScan()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SentinelAI-ReparseGuard-" + Guid.NewGuid().ToString("N"));
+        var trustedRoot = Path.Combine(root, "trusted");
+        var install = Path.Combine(trustedRoot, "install");
+        var outside = Path.Combine(root, "outside");
+        var junction = Path.Combine(install, "redirected");
+        try
+        {
+            Directory.CreateDirectory(install);
+            Directory.CreateDirectory(outside);
+            Directory.CreateDirectory(Path.Combine(install, "empty-directory"));
+            Directory.CreateDirectory(Path.Combine(outside, "preserve-directory"));
+            var safeCreatedDirectoryTree = Path.Combine(install, "safe-created-tree");
+            CreateInstallDirectorySafely(Path.Combine(safeCreatedDirectoryTree, "nested"), install, trustedRoot);
+            var safeDirectoryCreated = Directory.Exists(Path.Combine(safeCreatedDirectoryTree, "nested"));
+            DeleteInstallTreeSafely(safeCreatedDirectoryTree, trustedRoot);
+            var renameSource = Path.Combine(install, "rename-source");
+            var renameDestination = Path.Combine(install, "rename-destination");
+            CreateInstallDirectorySafely(renameSource, install, trustedRoot);
+            File.WriteAllText(Path.Combine(renameSource, "marker.txt"), "rename");
+            RenameInstallDirectorySafely(renameSource, renameDestination, trustedRoot);
+            var safeRenameSucceeded = !Directory.Exists(renameSource)
+                && File.ReadAllText(Path.Combine(renameDestination, "marker.txt")) == "rename";
+            DeleteInstallTreeSafely(renameDestination, trustedRoot);
+            var conflictSource = Path.Combine(install, "rename-conflict-source");
+            var conflictDestination = Path.Combine(install, "rename-conflict-destination");
+            CreateInstallDirectorySafely(conflictSource, install, trustedRoot);
+            CreateInstallDirectorySafely(conflictDestination, install, trustedRoot);
+            File.WriteAllText(Path.Combine(conflictSource, "marker.txt"), "source");
+            File.WriteAllText(Path.Combine(conflictDestination, "marker.txt"), "destination");
+            var renameConflictRejected = false;
+            try { RenameInstallDirectorySafely(conflictSource, conflictDestination, trustedRoot); }
+            catch (IOException) { renameConflictRejected = true; }
+            var renameConflictPreserved = File.ReadAllText(Path.Combine(conflictSource, "marker.txt")) == "source"
+                && File.ReadAllText(Path.Combine(conflictDestination, "marker.txt")) == "destination";
+            DeleteInstallTreeSafely(conflictSource, trustedRoot);
+            DeleteInstallTreeSafely(conflictDestination, trustedRoot);
+            var paginationDirectory = Path.Combine(install, "enumeration-buffer");
+            Directory.CreateDirectory(paginationDirectory);
+            for (var index = 0; index < 1_200; index++)
+                File.WriteAllText(Path.Combine(paginationDirectory, $"entry-{index:D4}-{new string('x', 60)}.tmp"), "x");
+            File.WriteAllText(Path.Combine(outside, "preserve.txt"), "preserve");
+            File.WriteAllText(Path.Combine(install, "inside.txt"), "inside");
+            File.WriteAllText(Path.Combine(install, "delete-me.txt"), "delete");
+            var paginatedFileCount = EnumerateInstallFiles(install, trustedRoot).Count();
+            if (paginatedFileCount != 1_202)
+                throw new InvalidDataException($"Enumeracja katalogu nie zachowała wpisów z wielu buforów: {paginatedFileCount}.");
+            ValidateInstallTreeHasNoReparsePoints(install, trustedRoot);
+            var start = new ProcessStartInfo("cmd.exe")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+            foreach (var argument in new[] { "/d", "/c", "mklink", "/J", junction, outside })
+                start.ArgumentList.Add(argument);
+            using var process = Process.Start(start) ?? throw new IOException("Nie można uruchomić testu junction.");
+            if (!process.WaitForExit(10_000))
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit();
+                throw new TimeoutException("Test tworzenia junction przekroczył limit czasu.");
+            }
+            if (process.ExitCode != 0)
+                throw new IOException("Windows nie utworzył tymczasowego junction wymaganego do testu ochrony ścieżek.");
+
+            var renameThroughJunctionRejected = false;
+            try { RenameInstallDirectorySafely(junction, Path.Combine(install, "junction-rename-target"), trustedRoot); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("ponownej analizy", StringComparison.Ordinal))
+            { renameThroughJunctionRejected = true; }
+
+            var junctionRejected = false;
+            try { ValidateInstallTreeHasNoReparsePoints(install, trustedRoot); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("ponownej analizy", StringComparison.Ordinal))
+            { junctionRejected = true; }
+            var fileEnumerationRejected = false;
+            try { _ = EnumerateInstallFiles(install, trustedRoot).ToArray(); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("ponownej analizy", StringComparison.Ordinal))
+            { fileEnumerationRejected = true; }
+            var directoryEnumerationRejected = false;
+            try { _ = EnumerateInstallDirectories(install, trustedRoot).ToArray(); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("ponownej analizy", StringComparison.Ordinal))
+            { directoryEnumerationRejected = true; }
+            var escapedReadRejected = false;
+            try { using var escaped = OpenInstallFileRead(Path.Combine(junction, "preserve.txt"), install, trustedRoot); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("zaufany katalog", StringComparison.Ordinal))
+            { escapedReadRejected = true; }
+            var escapedCopyRejected = false;
+            try { CopyInstallFileSafely(Path.Combine(junction, "preserve.txt"), Path.Combine(install, "escaped-copy.txt"), install, install); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("zaufany katalog", StringComparison.Ordinal))
+            { escapedCopyRejected = true; }
+            var escapedDeleteRejected = false;
+            try { DeleteInstallPathSafely(Path.Combine(junction, "preserve.txt"), install, isDirectory: false, trustedRoot: trustedRoot); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("zaufany katalog", StringComparison.Ordinal))
+            { escapedDeleteRejected = true; }
+            var escapedCreateRejected = false;
+            try { using var escaped = CreateInstallFileSafely(Path.Combine(junction, "created-outside.txt"), install, trustedRoot); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("zaufany katalog", StringComparison.Ordinal))
+            { escapedCreateRejected = true; }
+            var escapedDirectoryRejected = false;
+            try { CreateInstallDirectorySafely(Path.Combine(junction, "preserve-directory"), install, trustedRoot); }
+            catch (InvalidOperationException)
+            { escapedDirectoryRejected = true; }
+            var escapedDirectoryCreateRejected = false;
+            try { CreateInstallDirectorySafely(Path.Combine(junction, "created-outside"), install, trustedRoot); }
+            catch (InvalidOperationException)
+            { escapedDirectoryCreateRejected = true; }
+            var createdFile = CreateInstallFileSafely(Path.Combine(install, "safe-created.txt"), install, trustedRoot);
+            var createdFileHandle = createdFile.SafeFileHandle;
+            using (createdFile)
+            {
+                createdFile.Write(Encoding.UTF8.GetBytes("created safely"));
+                createdFile.Flush(flushToDisk: true);
+            }
+            if (!createdFileHandle.IsClosed) throw new InvalidDataException("Uchwyt utworzonego pliku pozostał otwarty po Dispose.");
+            var safeCreatedExists = File.Exists(Path.Combine(install, "safe-created.txt"));
+            var safeCreatedLength = GetInstallFileLength(Path.Combine(install, "safe-created.txt"), install, trustedRoot);
+            DeleteInstallPathSafely(Path.Combine(install, "safe-created.txt"), install, isDirectory: false, trustedRoot: trustedRoot);
+            CopyInstallFileSafely(Path.Combine(install, "inside.txt"), Path.Combine(install, "safe-copy.txt"), install, install);
+            var safeCopyLength = GetInstallFileLength(Path.Combine(install, "safe-copy.txt"), install, trustedRoot);
+            DeleteInstallPathSafely(Path.Combine(install, "safe-copy.txt"), install, isDirectory: false, trustedRoot: trustedRoot);
+            DeleteInstallPathSafely(Path.Combine(install, "delete-me.txt"), install, isDirectory: false, trustedRoot: trustedRoot);
+            DeleteInstallPathSafely(Path.Combine(install, "empty-directory"), install, isDirectory: true, trustedRoot: trustedRoot);
+            var recursiveCleanupRejected = false;
+            try { DeleteInstallTreeSafely(install, trustedRoot); }
+            catch (InvalidOperationException exception) when (exception.Message.Contains("ponownej analizy", StringComparison.Ordinal))
+            { recursiveCleanupRejected = true; }
+            var cleanupTree = Path.Combine(trustedRoot, "cleanup-tree");
+            Directory.CreateDirectory(Path.Combine(cleanupTree, "nested"));
+            File.WriteAllText(Path.Combine(cleanupTree, "nested", "owned.txt"), "owned");
+            DeleteInstallTreeSafely(cleanupTree, trustedRoot);
+            using var safeRead = OpenInstallFileRead(Path.Combine(install, "inside.txt"), install, trustedRoot);
+            var safeReadContent = new StreamReader(safeRead).ReadToEnd();
+            if (!junctionRejected || !fileEnumerationRejected || !directoryEnumerationRejected || !escapedReadRejected || !escapedDeleteRejected
+                || !escapedReadRejected || !escapedCopyRejected || !escapedDeleteRejected
+                || !escapedCreateRejected || !escapedDirectoryRejected || !escapedDirectoryCreateRejected
+                || Directory.Exists(Path.Combine(outside, "created-outside")) || File.Exists(Path.Combine(install, "escaped-copy.txt"))
+                || File.Exists(Path.Combine(outside, "created-outside.txt"))
+                || !Directory.Exists(Path.Combine(outside, "preserve-directory")) || !safeDirectoryCreated
+                || Directory.Exists(safeCreatedDirectoryTree) || !safeRenameSucceeded || !renameConflictRejected
+                || !renameConflictPreserved || !renameThroughJunctionRejected
+                || !safeCreatedExists || safeCreatedLength != 14 || safeCopyLength != 6
+                || !recursiveCleanupRejected || !File.Exists(Path.Combine(install, "inside.txt")) || Directory.Exists(cleanupTree)
+                || File.Exists(Path.Combine(install, "delete-me.txt")) || Directory.Exists(Path.Combine(install, "empty-directory"))
+                || safeReadContent != "inside" || !File.Exists(Path.Combine(outside, "preserve.txt")))
+                throw new InvalidDataException("Skan lub enumeracja drzewa nie odrzuciły junction albo zmieniły plik poza instalacją.");
+        }
+        finally
+        {
+            if (Directory.Exists(junction)) Directory.Delete(junction, recursive: false);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     private static bool IsUninstallInvocation(string[] args, string? executablePath) =>
@@ -131,10 +528,14 @@ internal static class Program
         catch (Exception ex)
         {
             Log($"PAYLOAD_VERIFY_FAILED type={ex.GetType().Name} message={Clean(ex.Message)} expected={PayloadHash}");
-            if (showErrors) MessageBox.Show($"Nie można zweryfikować instalatora. Pobierz go ponownie ze strony Sentinel AI.\n\n{ex.Message}", Product, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (showErrors) MessageBox.Show(FormatPayloadVerificationError(ex), Product, MessageBoxButtons.OK, MessageBoxIcon.Error);
             return false;
         }
     }
+
+    internal static string FormatPayloadVerificationError(Exception exception) =>
+        $"Nie można zweryfikować pakietu aplikacji osadzonego w tym instalatorze. Instalator nie pobiera aplikacji z internetu.\r\n\r\n" +
+        $"Jeśli chcesz ponowić instalację lub naprawę, pobierz nową kopię instalatora ze strony Sentinel AI.\r\n\r\n{exception.Message}";
 
     private static bool PayloadHashMatches(Stream payload, string expectedHash)
     {
@@ -167,21 +568,60 @@ internal static class Program
         return true;
     }
 
-    private static int SelfTest()
+    private static int SelfTest(bool runApplicationSmoke = true)
     {
-        ApplicationConfiguration.Initialize();
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var previousLogPath = selfTestLogPath;
         var testId = Guid.NewGuid().ToString("N");
-        var root = Path.Combine(localAppData, "Programs", ".SentinelAI-Setup-SelfTest-" + testId);
-        var data = Path.Combine(localAppData, "SentinelAI-Setup-SelfTest-" + testId);
+        var diagnosticDirectory = Path.Combine(Path.GetTempPath(), "SentinelAI-Setup-SelfTest-" + testId);
+        var testDirectory = Path.Combine(Path.GetTempPath(), "SentinelAI-Setup-SelfTestData-" + testId);
+        selfTestLogPath = Path.Combine(diagnosticDirectory, "installer.log");
+        var root = string.Empty;
+        var data = string.Empty;
         try
         {
+            ApplicationConfiguration.Initialize();
+            root = Path.Combine(testDirectory, "Programs", ".SentinelAI-Setup-SelfTest-" + testId);
+            data = Path.Combine(testDirectory, "data");
+            selfTestLogPath = Path.Combine(data, "installer.log");
+            if (Directory.Exists(root)
+                || !PathsEqual(ValidateInstallSelection(root), root)
+                || Directory.Exists(root))
+                throw new InvalidDataException("Nowa, nieistniejąca lokalizacja instalacji nie została zaakceptowana bez tworzenia folderu.");
             VerifyLogRotation(Path.Combine(data, "installer-log-rotation-test.log"));
+            var failureLog = FormatInstallFailureLog("copy", "extract_payload", new IOException("controlled install failure"));
+            if (!failureLog.Contains("stage=copy", StringComparison.Ordinal)
+                || !failureLog.Contains("operation=extract_payload", StringComparison.Ordinal)
+                || !failureLog.Contains("type=IOException", StringComparison.Ordinal))
+                throw new InvalidDataException("Log błędu instalacji nie zawiera etapu, operacji i typu wyjątku.");
+            var taggedFailure = new IOException("controlled install failure");
+            taggedFailure.Data["SentinelInstallStage"] = "copy";
+            taggedFailure.Data["SentinelInstallOperation"] = "extract_payload";
+            var failureMessage = FormatInstallErrorMessage(taggedFailure);
+            if (!failureMessage.Contains("Etap: copy", StringComparison.Ordinal)
+                || !failureMessage.Contains("Operacja: extract_payload", StringComparison.Ordinal))
+                throw new InvalidDataException("Ekran błędu instalacji nie pokazuje etapu i operacji.");
+            var payloadFailureMessage = FormatPayloadVerificationError(new InvalidDataException("Pakiet jest niekompletny."));
+            if (!payloadFailureMessage.Contains("Instalator nie pobiera aplikacji z internetu.", StringComparison.Ordinal)
+                || !payloadFailureMessage.Contains("ponowić instalację lub naprawę", StringComparison.Ordinal)
+                || !payloadFailureMessage.Contains("Pakiet jest niekompletny.", StringComparison.Ordinal))
+                throw new InvalidDataException("Komunikat błędu pakietu nie wyjaśnia, że instalator nie pobiera aplikacji.");
             if (!IsUninstallInvocation(new[] { "--uninstall" }, Path.Combine(root, "Sentinel.AI.Setup.exe"))
                 || !IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Uninstall Sentinel AI.exe"))
                 || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel AI.exe"))
                 || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel.AI.Setup.exe")))
                 throw new InvalidDataException("Uruchomienie pliku deinstalatora bez parametru nie rozpoznaje trybu odinstalowania.");
+            if (!PathsEqual(root, Path.Combine(root, ".")) || PathsEqual(root, Path.Combine(root, "other"))
+                || PathsEqual("\0", root) || PathsEqual(root, null))
+                throw new InvalidDataException("Porównanie lokalizacji instalacji nie obsługuje ścieżek równoważnych i nieprawidłowych.");
+            var missingUninstallRegistrationRejected = false;
+            try { ValidateRegisteredUninstallTarget(null, root); }
+            catch (InvalidOperationException) { missingUninstallRegistrationRejected = true; }
+            var mismatchedUninstallRegistrationRejected = false;
+            try { ValidateRegisteredUninstallTarget(Path.Combine(root, "other"), root); }
+            catch (InvalidOperationException) { mismatchedUninstallRegistrationRejected = true; }
+            if (!missingUninstallRegistrationRejected || !mismatchedUninstallRegistrationRejected)
+                throw new InvalidDataException("Deinstalator nie odrzuca braku lub niezgodności rejestracji instalacji.");
+            ValidateRegisteredUninstallTarget(root, Path.Combine(root, "."));
 
             long previousProgressTick = long.MinValue;
             var progressUpdates = 0;
@@ -221,7 +661,6 @@ internal static class Program
                 || !AutoStartValueMatches(null, Path.Combine(root, "Sentinel AI.exe"), enabled: false)
                 || AutoStartValueMatches(expectedRunValue, Path.Combine(root, "Sentinel AI.exe"), enabled: false))
                 throw new InvalidDataException("Weryfikacja wartości autostartu nie odróżnia prawidłowej ścieżki od braku lub błędnej wartości.");
-
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
             SetupWizard.ValidateVisualStates();
             foreach (var resourceName in new[] { "welcome", "prepare", "configure", "installing", "complete", "error", "cancel" })
@@ -275,7 +714,12 @@ internal static class Program
                     (_, percent) => { if (percent > 10) throw new IOException("Simulated disk full during staging."); }, CancellationToken.None,
                     testMode: true, registeredInstallOverride: root);
             }
-            catch (IOException ex) when (ex.Message == "Simulated disk full during staging.") { spaceFailureInjected = true; }
+            catch (IOException ex) when (ex.Message == "Simulated disk full during staging.")
+            {
+                spaceFailureInjected = true;
+                if (!Equals(ex.Data["SentinelInstallStage"], "copy") || !Equals(ex.Data["SentinelInstallOperation"], "extract_payload"))
+                    throw new InvalidDataException("Błąd podczas rozpakowywania nie zachował etapu i operacji.");
+            }
             if (!spaceFailureInjected) throw new InvalidDataException("Testowy błąd braku miejsca nie przerwał stagingu.");
             using (var engine = File.OpenRead(engineExecutable))
                 if (!CryptographicOperations.FixedTimeEquals(engineBeforeSpaceFailure, SHA256.HashData(engine)))
@@ -286,41 +730,84 @@ internal static class Program
 
             Directory.CreateDirectory(data);
             var app = Path.Combine(root, "Sentinel AI.exe");
-            using var process = new Process
+            if (runApplicationSmoke)
             {
-                StartInfo = new ProcessStartInfo(app)
+                using var process = new Process
                 {
-                    WorkingDirectory = root,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
+                    StartInfo = new ProcessStartInfo(app)
+                    {
+                        WorkingDirectory = root,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+                process.StartInfo.ArgumentList.Add("--smoke-test");
+                process.StartInfo.ArgumentList.Add("--disable-gpu");
+                process.StartInfo.ArgumentList.Add("--enable-logging=stderr");
+                process.StartInfo.ArgumentList.Add("--user-data-dir=" + Path.Combine(data, "electron-profile"));
+                process.StartInfo.Environment["SENTINEL_DATA_ROOT"] = data;
+                process.StartInfo.Environment["LOCALAPPDATA"] = data;
+                process.StartInfo.Environment["APPDATA"] = data;
+                var bundleExtractionDirectory = Path.Combine(data, "dotnet-bundle");
+                Directory.CreateDirectory(bundleExtractionDirectory);
+                process.StartInfo.Environment["DOTNET_BUNDLE_EXTRACT_BASE_DIR"] = bundleExtractionDirectory;
+                if (!process.Start()) throw new IOException("Nie udało się uruchomić aplikacji testowej.");
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                var stderrBuffer = new StringBuilder();
+                string? fatalErrorLine = null;
+                var stderrGate = new object();
+                process.ErrorDataReceived += (_, eventArgs) =>
+                {
+                    if (eventArgs.Data is null) return;
+                    lock (stderrGate)
+                    {
+                        stderrBuffer.AppendLine(eventArgs.Data);
+                        if (eventArgs.Data.Contains("FATAL:", StringComparison.OrdinalIgnoreCase)) fatalErrorLine = eventArgs.Data;
+                    }
+                };
+                process.BeginErrorReadLine();
+                var smokeDeadline = Stopwatch.StartNew();
+                while (!process.WaitForExit(250))
+                {
+                    string? fatalLine;
+                    lock (stderrGate) fatalLine = fatalErrorLine;
+                    if (fatalLine is not null)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        process.WaitForExit();
+                        var diagnostic = fatalLine.Replace(root, "<isolated-install>", StringComparison.OrdinalIgnoreCase)
+                            .Replace(data, "<isolated-data>", StringComparison.OrdinalIgnoreCase);
+                        throw new InvalidOperationException("Smoke test Electron zakończył się awarią Chromium. " + Clean(diagnostic));
+                    }
+                    if (smokeDeadline.Elapsed >= TimeSpan.FromSeconds(120))
+                    {
+                        process.Kill(entireProcessTree: true);
+                        process.WaitForExit();
+                        string timeoutOutput;
+                        lock (stderrGate) timeoutOutput = stderrBuffer.ToString();
+                        timeoutOutput = timeoutOutput.Replace(root, "<isolated-install>", StringComparison.OrdinalIgnoreCase)
+                            .Replace(data, "<isolated-data>", StringComparison.OrdinalIgnoreCase);
+                        if (timeoutOutput.Length > 2000) timeoutOutput = timeoutOutput[^2000..];
+                        throw new TimeoutException("Test uruchomienia aplikacji przekroczył 120 sekund. " + Clean(timeoutOutput));
+                    }
                 }
-            };
-            process.StartInfo.ArgumentList.Add("--smoke-test");
-            process.StartInfo.ArgumentList.Add("--disable-gpu");
-            process.StartInfo.ArgumentList.Add("--user-data-dir=" + Path.Combine(data, "electron-profile"));
-            process.StartInfo.Environment["SENTINEL_DATA_ROOT"] = data;
-            if (!process.Start()) throw new IOException("Nie udało się uruchomić aplikacji testowej.");
-            var stdout = process.StandardOutput.ReadToEndAsync();
-            var stderr = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(120_000))
-            {
-                process.Kill(entireProcessTree: true);
-                throw new TimeoutException("Test uruchomienia aplikacji przekroczył 120 sekund.");
+                process.WaitForExit();
+                var output = stdout.GetAwaiter().GetResult();
+                string error;
+                lock (stderrGate) error = stderrBuffer.ToString();
+                if (process.ExitCode != 0 || !output.Contains("PASS: Electron renderer", StringComparison.Ordinal)
+                    || !File.Exists(Path.Combine(data, "smoke-test.passed")))
+                    throw new InvalidOperationException($"Smoke test nie powiódł się (kod {process.ExitCode}). {error.Trim()}");
+                var databaseDirectory = Path.Combine(data, "data");
+                var dataPathPointer = Path.Combine(data, "data-path.txt");
+                if (!File.Exists(dataPathPointer) || !Path.GetFullPath(File.ReadAllText(dataPathPointer).Trim())
+                        .Equals(Path.GetFullPath(databaseDirectory), StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Aplikacja zapisała nieprawidłową ścieżkę lokalnych danych.");
+                VerifySmokeDatabase(databaseDirectory, "sentinel.db");
+                VerifySmokeDatabase(databaseDirectory, "knowledge.db");
             }
-            var output = stdout.GetAwaiter().GetResult();
-            var error = stderr.GetAwaiter().GetResult();
-            if (process.ExitCode != 0 || !output.Contains("PASS: Electron renderer", StringComparison.Ordinal)
-                || !File.Exists(Path.Combine(data, "smoke-test.passed")))
-                throw new InvalidOperationException($"Smoke test nie powiódł się (kod {process.ExitCode}). {error.Trim()}");
-            var databaseDirectory = Path.Combine(data, "data");
-            var dataPathPointer = Path.Combine(data, "data-path.txt");
-            if (!File.Exists(dataPathPointer) || !Path.GetFullPath(File.ReadAllText(dataPathPointer).Trim())
-                    .Equals(Path.GetFullPath(databaseDirectory), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("Aplikacja zapisała nieprawidłową ścieżkę lokalnych danych.");
-            VerifySmokeDatabase(databaseDirectory, "sentinel.db");
-            VerifySmokeDatabase(databaseDirectory, "knowledge.db");
 
             const string rollbackMarker = "old-installation-rollback-marker";
             File.WriteAllText(engineExecutable, rollbackMarker);
@@ -351,18 +838,38 @@ internal static class Program
                     var installedPath = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
                     if (File.Exists(installedPath)) throw new InvalidDataException($"Deinstalacja pozostawiła plik aplikacji: {entry.FullName}.");
                 }
-            VerifySmokeDatabase(databaseDirectory, "sentinel.db");
-            VerifySmokeDatabase(databaseDirectory, "knowledge.db");
+            if (runApplicationSmoke)
+            {
+                VerifySmokeDatabase(Path.Combine(data, "data"), "sentinel.db");
+                VerifySmokeDatabase(Path.Combine(data, "data"), "knowledge.db");
+            }
 
-            Log("SELF_TEST_SUCCESS uninstallInvocation=true progressThrottle=true payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke=true uninstall=true userDataPreserved=true");
+            if (UninstallCleanupSelfTest() != 0)
+                throw new InvalidDataException("Test końcowego sprzątania deinstalatora nie przeszedł.");
+
+            Log($"SELF_TEST_SUCCESS uninstallInvocation=true uninstallCleanup=true progressThrottle=true payload=true tamperRejected=true diskSpacePreflight=true stagingFailurePreservedInstall=true chromiumAcl=true update=true rollback=true appSmoke={runApplicationSmoke} uninstall=true userDataPreserved=true");
             return 0;
         }
         catch (Exception ex)
         {
             Log($"SELF_TEST_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
+            var failureLogPath = Path.Combine(diagnosticDirectory, "installer-self-test-failure.log");
+            try
+            {
+                Directory.CreateDirectory(diagnosticDirectory);
+                var installLog = File.Exists(selfTestLogPath) ? File.ReadAllText(selfTestLogPath) : string.Empty;
+                installLog = installLog.Replace(root, "<isolated-install>", StringComparison.OrdinalIgnoreCase)
+                    .Replace(data, "<isolated-data>", StringComparison.OrdinalIgnoreCase);
+                if (installLog.Length > 6000) installLog = installLog[^6000..];
+                var details = $"SELF_TEST_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}{Environment.NewLine}{ex.StackTrace}"
+                    + (installLog.Length == 0 ? string.Empty : $"{Environment.NewLine}INSTALL_LOG_TAIL{Environment.NewLine}{installLog}");
+                File.WriteAllText(failureLogPath, details);
+                Console.Error.WriteLine($"SELF_TEST_FAILED type={ex.GetType().Name} log={failureLogPath}");
+            }
+            catch { Console.Error.WriteLine($"SELF_TEST_FAILED type={ex.GetType().Name} log=unavailable"); }
             return 1;
         }
-        finally { TryDelete(root); TryDelete(data); }
+        finally { TryDelete(root); TryDelete(data); TryDelete(testDirectory); selfTestLogPath = previousLogPath; }
     }
 
     private static void VerifySmokeDatabase(string dataDirectory, string fileName)
@@ -392,6 +899,20 @@ internal static class Program
         var outputSummary = SummarizeProcessOutputForLog(stdout, stderr);
         Log($"CHROMIUM_ACL exit={process.ExitCode} outputChars={stdout.Length} errorChars={stderr.Length} summary={outputSummary}");
         if (process.ExitCode != 0) throw new IOException($"Windows nie ustawił uprawnień wymaganych przez Chromium (kod {process.ExitCode}). {outputSummary}");
+        VerifyChromiumPermissions(directory);
+    }
+
+    private static void VerifyChromiumPermissions(string directory)
+    {
+        var security = new DirectoryInfo(directory).GetAccessControl(AccessControlSections.Access);
+        var rules = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
+        var allPackagesSid = new SecurityIdentifier("S-1-15-2-1");
+        var hasReadExecute = rules.Cast<FileSystemAccessRule>().Any(rule =>
+            rule.AccessControlType == AccessControlType.Allow
+            && allPackagesSid.Equals(rule.IdentityReference)
+            && (rule.FileSystemRights & FileSystemRights.ReadAndExecute) == FileSystemRights.ReadAndExecute);
+        Log($"CHROMIUM_ACL_VERIFY allApplicationPackagesReadExecute={hasReadExecute}");
+        if (!hasReadExecute) throw new IOException("Katalog aplikacji nie ma odczytu i wykonania dla ALL APPLICATION PACKAGES po nadaniu uprawnień Chromium.");
     }
 
     private static string SummarizeProcessOutputForLog(string stdout, string stderr)
@@ -477,12 +998,46 @@ internal static class Program
         return ResolveInstallDirectory(registered, DefaultDirectory);
     }
 
+    internal static bool IsRegisteredInstall(string target)
+    {
+        var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")
+            ?.GetValue("InstallLocation") as string;
+        return PathsEqual(registered, target);
+    }
+
+    internal static bool PathsEqual(string? left, string? right)
+    {
+        if (string.IsNullOrWhiteSpace(left) || string.IsNullOrWhiteSpace(right)) return false;
+        try { return Path.GetFullPath(left).Equals(Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+    }
+
+    internal static void ValidateRegisteredUninstallTarget(string? registered, string target)
+    {
+        if (string.IsNullOrWhiteSpace(registered))
+            throw new InvalidOperationException("Nie znaleziono zarejestrowanej instalacji Sentinel AI do usunięcia.");
+        if (!PathsEqual(registered, target))
+            throw new InvalidOperationException("Lokalizacja w rejestrze nie zgadza się z uruchomionym deinstalatorem.");
+    }
+
+    internal static (bool StartMenu, bool Desktop, bool AutoStart) ReadRegisteredInstallOptions(string target)
+    {
+        if (!IsRegisteredInstall(target)) throw new InvalidOperationException("Nie znaleziono zarejestrowanej instalacji do naprawy.");
+        var runValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") as string;
+        var executable = Path.Combine(target, "Sentinel AI.exe");
+        return (
+            ShortcutPointsToInstall(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk"), target),
+            ShortcutPointsToInstall(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk"), target),
+            AutoStartValueMatches(runValue, executable, enabled: true));
+    }
+
     internal static string ValidateInstallSelection(string target, string? registeredOverride = null)
     {
         target = Path.GetFullPath(target);
         var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
         if (!target.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Wybierz folder w swoim profilu użytkownika. Instalacja nie wymaga uprawnień administratora.");
+        ValidateInstallTreeHasNoReparsePoints(target, local);
         var registeredInstall = registeredOverride ?? Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
         if (!string.IsNullOrWhiteSpace(registeredInstall) && !Path.GetFullPath(registeredInstall).Equals(target, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Sentinel AI jest już zainstalowany w folderze {registeredInstall}. Użyj tej lokalizacji, aby go zaktualizować lub naprawić.");
@@ -490,6 +1045,451 @@ internal static class Program
             !Path.GetFullPath(registeredInstall ?? string.Empty).Equals(target, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Wybrany folder zawiera pliki, które nie należą do Sentinel AI. Wybierz pusty folder albo lokalizację istniejącej instalacji.");
         return target;
+    }
+
+    private static void ValidateInstallTreeHasNoReparsePoints(string target, string trustedRoot)
+    {
+        target = Path.GetFullPath(target);
+        trustedRoot = Path.GetFullPath(trustedRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var relative = Path.GetRelativePath(trustedRoot, target);
+        if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException("Ścieżka instalacji musi znajdować się wewnątrz profilu użytkownika.");
+
+        var current = trustedRoot;
+        var components = relative.Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+        for (var index = 0; index < components.Length; index++)
+        {
+            current = Path.Combine(current, components[index]);
+            var attributes = TryGetAttributes(current);
+            if (attributes is null) continue;
+            RejectReparsePointAttributes(attributes.Value, current);
+            if (index < components.Length - 1 && (attributes.Value & FileAttributes.Directory) == 0)
+                throw new InvalidOperationException("Element ścieżki instalacji nie jest folderem.");
+        }
+
+        // A fresh install target does not exist yet. Validate existing trees here;
+        // creation of a missing target is performed later through verified parent handles.
+        if (Directory.Exists(target))
+            _ = EnumerateInstallTreeEntries(target, trustedRoot).ToArray();
+    }
+
+    private static IEnumerable<(string Path, FileAttributes Attributes)> EnumerateInstallTreeEntries(string root, string? trustedRoot = null)
+    {
+        trustedRoot ??= Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        using var trustedHandle = OpenPathNoFollow(trustedRoot, expectedDirectory: true);
+        var finalTrustedRoot = GetFinalPath(trustedHandle);
+        using var rootHandle = OpenPathNoFollow(root, expectedDirectory: true);
+        var finalRoot = GetFinalPath(rootHandle);
+        EnsurePathWithinRoot(finalRoot, finalTrustedRoot, root);
+
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            using var directoryHandle = OpenPathNoFollow(directory, expectedDirectory: true, forEnumeration: true);
+            EnsurePathAtOrWithinRoot(GetFinalPath(directoryHandle), finalRoot, directory);
+            foreach (var name in EnumerateDirectoryNames(directoryHandle))
+            {
+                if (name is "." or "..") continue;
+                var entry = Path.Combine(directory, name);
+                using var entryHandle = OpenPathNoFollow(entry, expectedDirectory: null);
+                var attributes = GetHandleAttributes(entryHandle, entry);
+                EnsurePathWithinRoot(GetFinalPath(entryHandle), finalRoot, entry);
+                yield return (entry, attributes);
+                if ((attributes & FileAttributes.Directory) != 0) pending.Push(entry);
+            }
+        }
+    }
+
+    private static IEnumerable<string> EnumerateDirectoryNames(SafeFileHandle directoryHandle)
+    {
+        const int bufferSize = 64 * 1024;
+        var buffer = Marshal.AllocHGlobal(bufferSize);
+        try
+        {
+            while (true)
+            {
+                if (!GetDirectoryInformationByHandle(directoryHandle, FileIdBothDirectoryInfoClass, buffer, bufferSize))
+                {
+                    var error = Marshal.GetLastWin32Error();
+                    if (error == ErrorNoMoreFiles) yield break;
+                    throw new IOException("Nie można bezpiecznie wyliczyć wpisów katalogu instalacji.", new Win32Exception(error));
+                }
+
+                var offset = 0;
+                while (true)
+                {
+                    var nextOffset = Marshal.ReadInt32(buffer, offset);
+                    var nameLength = Marshal.ReadInt32(buffer, offset + 60);
+                    var recordSize = nextOffset == 0 ? bufferSize - offset : nextOffset;
+                    if (nameLength < 0 || nameLength % 2 != 0
+                        || FileIdBothDirectoryInfoFileNameOffset + nameLength > recordSize)
+                        throw new InvalidDataException("Windows zwrócił nieprawidłowy wpis katalogu.");
+                    var name = Marshal.PtrToStringUni(IntPtr.Add(buffer, offset + FileIdBothDirectoryInfoFileNameOffset), nameLength / 2);
+                    if (!string.IsNullOrEmpty(name)) yield return name;
+                    if (nextOffset == 0) break;
+                    if (nextOffset < FileIdBothDirectoryInfoFileNameOffset || nextOffset > bufferSize - offset)
+                        throw new InvalidDataException("Windows zwrócił nieprawidłowy offset wpisu katalogu.");
+                    offset += nextOffset;
+                }
+            }
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static IEnumerable<string> EnumerateInstallFiles(string root, string? trustedRoot = null)
+    {
+        foreach (var entry in EnumerateInstallTreeEntries(root, trustedRoot))
+            if ((entry.Attributes & FileAttributes.Directory) == 0) yield return entry.Path;
+    }
+
+    private static IEnumerable<string> EnumerateInstallDirectories(string root, string? trustedRoot = null)
+    {
+        foreach (var entry in EnumerateInstallTreeEntries(root, trustedRoot))
+            if ((entry.Attributes & FileAttributes.Directory) != 0) yield return entry.Path;
+    }
+
+    private static SafeFileHandle OpenPathNoFollow(string path, bool? expectedDirectory, bool forRead = false,
+        bool forDelete = false, bool forEnumeration = false, bool forDirectoryChanges = false, uint? shareModeOverride = null)
+    {
+        var desiredAccess = (forRead ? GenericRead : 0) | FileReadAttributes
+            | (forDelete ? DeleteAccess : 0) | (forEnumeration ? FileListDirectory : 0)
+            | (forDirectoryChanges ? FileListDirectory | FileAddSubdirectory | SynchronizeAccess : 0);
+        var shareMode = shareModeOverride ?? (ShareRead | ShareWrite | ShareDelete);
+        var flags = FileFlagOpenReparsePoint | FileFlagBackupSemantics;
+        if (expectedDirectory == false) flags |= FileFlagSequentialScan;
+        var handle = CreateFileHandle(path, desiredAccess, shareMode, IntPtr.Zero, OpenExisting, flags, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new IOException($"Nie można bezpiecznie otworzyć elementu instalacji (Win32 {error}): {path}", new Win32Exception(error));
+        }
+
+        try
+        {
+            var attributes = GetHandleAttributes(handle, path);
+            RejectReparsePointAttributes(attributes, path);
+            var isDirectory = (attributes & FileAttributes.Directory) != 0;
+            if (expectedDirectory.HasValue && isDirectory != expectedDirectory.Value)
+                throw new IOException("Typ elementu instalacji zmienił się podczas sprawdzania.");
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private static FileAttributes GetHandleAttributes(SafeFileHandle handle, string path)
+    {
+        if (!GetFileInformationByHandleEx(handle, FileAttributeTagInfoClass, out var information,
+                (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+            throw new IOException($"Nie można odczytać atrybutów elementu instalacji: {path}",
+                new Win32Exception(Marshal.GetLastWin32Error()));
+        return (FileAttributes)information.FileAttributes;
+    }
+
+    private static string GetFinalPath(SafeFileHandle handle)
+    {
+        uint capacity = 512;
+        while (capacity <= 32_768)
+        {
+            var buffer = new StringBuilder((int)capacity);
+            var length = GetFinalPathNameByHandle(handle, buffer, capacity, flags: 0);
+            if (length == 0)
+                throw new IOException("Nie można rozwiązać ścieżki uchwytu instalacji.", new Win32Exception(Marshal.GetLastWin32Error()));
+            if (length < capacity) return buffer.ToString().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            capacity = checked(length + 1);
+        }
+        throw new PathTooLongException("Ścieżka uchwytu instalacji przekracza limit Windows.");
+    }
+
+    private static void EnsurePathWithinRoot(string path, string root, string displayPath)
+    {
+        var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!path.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Ścieżka instalacji opuściła zaufany katalog podczas operacji: {displayPath}");
+    }
+
+    private static void EnsurePathAtOrWithinRoot(string path, string root, string displayPath)
+    {
+        var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (!path.Equals(normalizedRoot, StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith(normalizedRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Ścieżka instalacji opuściła zaufany katalog podczas operacji: {displayPath}");
+    }
+
+    private static long GetInstallFileLength(string path, string installRoot, string? trustedRoot = null)
+    {
+        using var stream = OpenInstallFileRead(path, installRoot, trustedRoot);
+        if (!GetFileSizeEx(stream.SafeFileHandle, out var length))
+            throw new IOException("Nie można odczytać rozmiaru pliku instalacji.", new Win32Exception(Marshal.GetLastWin32Error()));
+        return length;
+    }
+
+    private static FileStream OpenInstallFileRead(string path, string installRoot, string? trustedRoot = null)
+    {
+        trustedRoot ??= Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        using var trustedHandle = OpenPathNoFollow(trustedRoot, expectedDirectory: true);
+        var finalTrustedRoot = GetFinalPath(trustedHandle);
+        using var rootHandle = OpenPathNoFollow(installRoot, expectedDirectory: true);
+        var finalRoot = GetFinalPath(rootHandle);
+        EnsurePathWithinRoot(finalRoot, finalTrustedRoot, installRoot);
+        var fileHandle = OpenPathNoFollow(path, expectedDirectory: false, forRead: true);
+        try
+        {
+            EnsurePathWithinRoot(GetFinalPath(fileHandle), finalRoot, path);
+            return new FileStream(fileHandle, FileAccess.Read, 128 * 1024, isAsync: false);
+        }
+        catch
+        {
+            fileHandle.Dispose();
+            throw;
+        }
+    }
+
+    private static string GetVerifiedInstallRoot(string installRoot, string trustedRoot)
+    {
+        using var trustedHandle = OpenPathNoFollow(trustedRoot, expectedDirectory: true);
+        var finalTrustedRoot = GetFinalPath(trustedHandle);
+        using var rootHandle = OpenPathNoFollow(installRoot, expectedDirectory: true);
+        var finalRoot = GetFinalPath(rootHandle);
+        EnsurePathWithinRoot(finalRoot, finalTrustedRoot, installRoot);
+        return finalRoot;
+    }
+
+    private static void EnsureLexicallyWithinRoot(string path, string root)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        if (Path.IsPathRooted(relative) || relative == ".."
+            || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || relative.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal))
+            throw new InvalidOperationException("Ścieżka stagingu wychodzi poza katalog instalacji.");
+    }
+
+    private static void CreateInstallDirectorySafely(string path, string installRoot, string? trustedRoot = null)
+    {
+        trustedRoot ??= Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        path = Path.GetFullPath(path);
+        installRoot = Path.GetFullPath(installRoot);
+        EnsureLexicallyWithinRoot(path, installRoot);
+        CreateInstallDirectoryTreeSafely(path, trustedRoot);
+    }
+
+    private static void CreateInstallDirectoryTreeSafely(string path, string trustedRoot)
+    {
+        path = Path.GetFullPath(path);
+        trustedRoot = Path.GetFullPath(trustedRoot);
+        EnsureLexicallyWithinRoot(path, trustedRoot);
+        var relative = Path.GetRelativePath(trustedRoot, path);
+        if (relative == ".") return;
+
+        var handles = new List<SafeFileHandle>();
+        try
+        {
+            var current = OpenPathNoFollow(trustedRoot, expectedDirectory: true,
+                shareModeOverride: ShareRead | ShareWrite);
+            handles.Add(current);
+            var finalTrustedRoot = GetFinalPath(current);
+            foreach (var component in relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                var child = OpenOrCreateDirectoryRelative(current, component);
+                handles.Add(child);
+                var attributes = GetHandleAttributes(child, component);
+                RejectReparsePointAttributes(attributes, component);
+                EnsurePathWithinRoot(GetFinalPath(child), finalTrustedRoot, path);
+                current = child;
+            }
+        }
+        finally
+        {
+            for (var index = handles.Count - 1; index >= 0; index--) handles[index].Dispose();
+        }
+    }
+
+    private static SafeFileHandle OpenOrCreateDirectoryRelative(SafeFileHandle parentHandle, string component)
+        => OpenDirectoryRelative(parentHandle, component, createIfMissing: true);
+
+    private static SafeFileHandle OpenDirectoryRelative(SafeFileHandle parentHandle, string component, bool createIfMissing)
+    {
+        if (component.Length == 0 || component is "." or ".." || component.IndexOfAny(['\\', '/']) >= 0)
+            throw new InvalidOperationException("Nazwa katalogu stagingu nie jest pojedynczym składnikiem ścieżki.");
+        var nameBuffer = Marshal.StringToHGlobalUni(component);
+        var unicodeStringPointer = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
+        var parentReferenceAdded = false;
+        try
+        {
+            parentHandle.DangerousAddRef(ref parentReferenceAdded);
+            var unicodeName = new UnicodeString
+            {
+                Length = checked((ushort)(component.Length * sizeof(char))),
+                MaximumLength = checked((ushort)((component.Length + 1) * sizeof(char))),
+                Buffer = nameBuffer
+            };
+            Marshal.StructureToPtr(unicodeName, unicodeStringPointer, fDeleteOld: false);
+            var objectAttributes = new ObjectAttributes
+            {
+                Length = (uint)Marshal.SizeOf<ObjectAttributes>(),
+                RootDirectory = parentHandle.DangerousGetHandle(),
+                ObjectName = unicodeStringPointer,
+                Attributes = ObjectAttributesCaseInsensitive
+            };
+            var status = NtCreateFile(out var handle,
+                FileListDirectory | FileReadAttributes | DeleteAccess | SynchronizeAccess,
+                ref objectAttributes, out _, IntPtr.Zero, FileAttributeDirectory,
+                ShareRead | ShareWrite, createIfMissing ? NtFileOpenIf : NtFileOpen,
+                FileDirectoryFile | FileSynchronousIoNonAlert | FileOpenForBackupIntent | FileOpenReparsePoint,
+                IntPtr.Zero, 0);
+            if (status < 0)
+            {
+                handle.Dispose();
+                var error = RtlNtStatusToDosError(status);
+                throw new IOException($"Nie można bezpiecznie otworzyć ani utworzyć katalogu stagingu (Win32 {error}).",
+                    new Win32Exception((int)error));
+            }
+            return handle;
+        }
+        finally
+        {
+            if (parentReferenceAdded) parentHandle.DangerousRelease();
+            Marshal.FreeHGlobal(unicodeStringPointer);
+            Marshal.FreeHGlobal(nameBuffer);
+        }
+    }
+
+    private static void RenameInstallDirectorySafely(string sourcePath, string destinationPath, string trustedRoot)
+    {
+        sourcePath = Path.GetFullPath(sourcePath);
+        destinationPath = Path.GetFullPath(destinationPath);
+        trustedRoot = Path.GetFullPath(trustedRoot);
+        var parentPath = Path.GetDirectoryName(sourcePath) ?? throw new IOException("Brak katalogu źródłowego.");
+        if (!parentPath.Equals(Path.GetDirectoryName(destinationPath), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Atomowa zmiana nazwy wymaga wspólnego katalogu nadrzędnego.");
+        var sourceName = Path.GetFileName(sourcePath);
+        var destinationName = Path.GetFileName(destinationPath);
+        if (sourceName.Length == 0 || destinationName.Length is 0 or > 255
+            || destinationName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new InvalidOperationException("Nieprawidłowa nazwa katalogu do zmiany.");
+        EnsureLexicallyWithinRoot(sourcePath, trustedRoot);
+        EnsureLexicallyWithinRoot(destinationPath, trustedRoot);
+
+        using var trustedHandle = OpenPathNoFollow(trustedRoot, expectedDirectory: true);
+        var finalTrustedRoot = GetFinalPath(trustedHandle);
+        using var parentHandle = OpenPathNoFollow(parentPath, expectedDirectory: true, forDirectoryChanges: true);
+        var finalParent = GetFinalPath(parentHandle);
+        EnsurePathWithinRoot(finalParent, finalTrustedRoot, parentPath);
+        using var sourceHandle = OpenPathNoFollow(sourcePath, expectedDirectory: true,
+            forDelete: true, forDirectoryChanges: true);
+        EnsurePathWithinRoot(GetFinalPath(sourceHandle), finalParent, sourcePath);
+
+        var encodedName = Encoding.Unicode.GetBytes(destinationName);
+        var nameOffset = (int)Marshal.OffsetOf<FileRenameInfoLayout>(nameof(FileRenameInfoLayout.FileName));
+        var bufferSize = checked(Marshal.SizeOf<FileRenameInfoLayout>() + encodedName.Length);
+        var information = Marshal.AllocHGlobal(bufferSize);
+        var parentReferenceAdded = false;
+        try
+        {
+            Marshal.Copy(new byte[bufferSize], 0, information, bufferSize);
+            Marshal.WriteByte(information, 0, 0);
+            Marshal.WriteIntPtr(information, (int)Marshal.OffsetOf<FileRenameInfoLayout>(nameof(FileRenameInfoLayout.RootDirectory)),
+                parentHandle.DangerousGetHandle());
+            Marshal.WriteInt32(information, (int)Marshal.OffsetOf<FileRenameInfoLayout>(nameof(FileRenameInfoLayout.FileNameLength)), encodedName.Length);
+            Marshal.Copy(encodedName, 0, IntPtr.Add(information, nameOffset), encodedName.Length);
+
+            parentHandle.DangerousAddRef(ref parentReferenceAdded);
+            var status = NtSetInformationFile(sourceHandle, out _, information, (uint)bufferSize, NtFileRenameInformationClass);
+            if (status < 0)
+            {
+                var error = RtlNtStatusToDosError(status);
+                throw new IOException($"Nie można bezpiecznie zmienić nazwy katalogu instalacji (Win32 {error}).",
+                    new Win32Exception((int)error));
+            }
+            EnsurePathWithinRoot(GetFinalPath(sourceHandle), finalParent, destinationPath);
+        }
+        finally
+        {
+            if (parentReferenceAdded) parentHandle.DangerousRelease();
+            Marshal.FreeHGlobal(information);
+        }
+    }
+
+    private static FileStream CreateInstallFileSafely(string path, string installRoot, string? trustedRoot = null)
+    {
+        trustedRoot ??= Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        path = Path.GetFullPath(path);
+        installRoot = Path.GetFullPath(installRoot);
+        EnsureLexicallyWithinRoot(path, installRoot);
+        var finalRoot = GetVerifiedInstallRoot(installRoot, trustedRoot);
+        var handle = CreateFileHandle(path, GenericWrite | FileReadAttributes | DeleteAccess,
+            ShareRead | ShareWrite | ShareDelete, IntPtr.Zero, CreateNew,
+            FileFlagOpenReparsePoint | FileFlagSequentialScan, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            var error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new IOException($"Nie można bezpiecznie utworzyć pliku stagingu: {path}", new Win32Exception(error));
+        }
+
+        try
+        {
+            RejectReparsePointAttributes(GetHandleAttributes(handle, path), path);
+            EnsurePathWithinRoot(GetFinalPath(handle), finalRoot, path);
+            return new FileStream(handle, FileAccess.Write, 128 * 1024, isAsync: false);
+        }
+        catch
+        {
+            try
+            {
+                var disposition = new FileDispositionInfo { DeleteFile = true };
+                _ = SetFileInformationByHandle(handle, informationClass: 4, ref disposition,
+                    (uint)Marshal.SizeOf<FileDispositionInfo>());
+            }
+            catch { }
+            handle.Dispose();
+            throw;
+        }
+    }
+
+    private static void DeleteInstallPathSafely(string path, string installRoot, bool isDirectory, string? trustedRoot = null)
+    {
+        trustedRoot ??= Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        using var trustedHandle = OpenPathNoFollow(trustedRoot, expectedDirectory: true);
+        var finalTrustedRoot = GetFinalPath(trustedHandle);
+        using var rootHandle = OpenPathNoFollow(installRoot, expectedDirectory: true);
+        var finalRoot = GetFinalPath(rootHandle);
+        EnsurePathAtOrWithinRoot(finalRoot, finalTrustedRoot, installRoot);
+        using var targetHandle = OpenPathNoFollow(path, expectedDirectory: isDirectory, forDelete: true);
+        EnsurePathWithinRoot(GetFinalPath(targetHandle), finalRoot, path);
+        var disposition = new FileDispositionInfo { DeleteFile = true };
+        if (!SetFileInformationByHandle(targetHandle, informationClass: 4, ref disposition,
+                (uint)Marshal.SizeOf<FileDispositionInfo>()))
+            throw new IOException($"Nie można bezpiecznie usunąć elementu instalacji: {path}",
+                new Win32Exception(Marshal.GetLastWin32Error()));
+    }
+
+    private static void CopyInstallFileSafely(string sourcePath, string destinationPath, string sourceRoot, string destinationRoot)
+    {
+        using var input = OpenInstallFileRead(sourcePath, sourceRoot);
+        using var output = CreateInstallFileSafely(destinationPath, destinationRoot);
+        input.CopyTo(output);
+        output.Flush();
+    }
+
+    private static FileAttributes? TryGetAttributes(string path)
+    {
+        try { return File.GetAttributes(path); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
+    private static void RejectReparsePointAttributes(FileAttributes attributes, string path)
+    {
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException($"Folder instalacji zawiera dowiązanie lub punkt ponownej analizy: {path}");
     }
 
     internal static string GetInstallSpaceSummary(string selectedTarget)
@@ -504,11 +1504,11 @@ internal static class Program
         var payloadPaths = entries.Select(entry => entry.FullName.Replace('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
         long preservedBytes = 0;
         if (Directory.Exists(target))
-            foreach (var existing in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
+            foreach (var existing in EnumerateInstallFiles(target))
             {
                 var relative = Path.GetRelativePath(target, existing).Replace('\\', '/');
                 if (relative.Equals("Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase) || payloadPaths.Contains(relative)) continue;
-                preservedBytes = checked(preservedBytes + new FileInfo(existing).Length);
+                preservedBytes = checked(preservedBytes + GetInstallFileLength(existing, target));
             }
         var requiredBytes = CalculateRequiredFreeSpace(payloadBytes, preservedBytes);
         var volumeRoot = Path.GetPathRoot(parent) ?? throw new IOException("Nie można określić dysku instalacji.");
@@ -555,7 +1555,7 @@ internal static class Program
             throw new InvalidDataException("Weryfikacja manifestu Native Messaging nie powiodła się.");
     }
 
-    private static bool AutoStartValueMatches(string? value, string executable, bool enabled)
+    internal static bool AutoStartValueMatches(string? value, string executable, bool enabled)
     {
         var expected = $"\"{Path.GetFullPath(executable)}\" --minimized";
         return enabled
@@ -563,7 +1563,38 @@ internal static class Program
             : string.IsNullOrEmpty(value);
     }
 
-    private static bool ShortcutPointsToInstall(string shortcutPath, string installPath)
+    internal static bool AutoStartValueTargetsExecutable(string? value, string executable)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var command = value.TrimStart();
+        string target;
+        if (command[0] == '"')
+        {
+            var closingQuote = command.IndexOf('"', 1);
+            if (closingQuote <= 1 || (closingQuote + 1 < command.Length && !char.IsWhiteSpace(command[closingQuote + 1]))) return false;
+            target = command[1..closingQuote];
+        }
+        else
+        {
+            var separator = command.IndexOfAny([' ', '\t']);
+            target = separator < 0 ? command : command[..separator];
+        }
+        return PathsEqual(target, executable);
+    }
+
+    private static void DeleteAutoStartIfOwned(string installPath)
+    {
+        var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        if (run is null) return;
+        using (run)
+        {
+            var value = run.GetValue("Sentinel AI") as string;
+            if (AutoStartValueTargetsExecutable(value, Path.Combine(installPath, "Sentinel AI.exe")))
+                run.DeleteValue("Sentinel AI", false);
+        }
+    }
+
+    internal static bool ShortcutPointsToInstall(string shortcutPath, string installPath)
     {
         if (!File.Exists(shortcutPath)) return false;
         object? shell = null;
@@ -602,9 +1633,53 @@ internal static class Program
     internal static void Install(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart, Action<string, int> progress,
         CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null)
     {
+        var stage = "preflight";
+        var operation = "verify_payload";
+        try
+        {
+            InstallCore(target, startMenuShortcut, desktopShortcut, autoStart, progress, cancellationToken,
+                (nextStage, nextOperation) => { stage = nextStage; operation = nextOperation; }, testMode, registeredInstallOverride);
+        }
+        catch (OperationCanceledException)
+        {
+            Log($"INSTALL_CANCELLED stage={stage} operation={operation}");
+            throw;
+        }
+        catch (Exception exception)
+        {
+            exception.Data["SentinelInstallStage"] = stage;
+            exception.Data["SentinelInstallOperation"] = operation;
+            Log(FormatInstallFailureLog(stage, operation, exception));
+            throw;
+        }
+    }
+
+    internal static string FormatInstallFailureLog(string stage, string operation, Exception exception) =>
+        $"INSTALL_FAILED stage={Clean(stage)} operation={Clean(operation)} type={exception.GetType().Name} message={Clean(exception.Message)}";
+
+    internal static string FormatUninstallFailureLog(string stage, Exception exception) =>
+        $"UNINSTALL_FAILED stage={Clean(stage)} type={exception.GetType().Name} hresult=0x{exception.HResult:X8} message={Clean(exception.Message)}";
+
+    internal static string FormatInstallErrorMessage(Exception exception)
+    {
+        var stage = exception.Data["SentinelInstallStage"] as string;
+        var operation = exception.Data["SentinelInstallOperation"] as string;
+        var failureLocation = stage is not null && operation is not null
+            ? $"Etap: {stage}\r\nOperacja: {operation}\r\n\r\n"
+            : string.Empty;
+        return $"Nie udało się zakończyć instalacji.\r\n\r\n{failureLocation}{exception.Message}\r\n\r\nLog diagnostyczny: {LogPath}";
+    }
+
+    private static void InstallCore(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart,
+        Action<string, int> progress, CancellationToken cancellationToken, Action<string, string> setStage,
+        bool testMode, string? registeredInstallOverride)
+    {
+        setStage("preflight", "verify_payload");
         if (!VerifyPayload(showErrors: true)) throw new InvalidDataException("Weryfikacja instalatora nie powiodła się.");
+        setStage("preflight", "validate_install_selection");
         target = ValidateInstallSelection(target, testMode ? registeredInstallOverride : null);
 
+        setStage("preflight", "calculate_required_space");
         var parent = Path.GetDirectoryName(target) ?? throw new InvalidOperationException("Nieprawidłowy folder instalacji.");
         using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
         using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
@@ -614,11 +1689,11 @@ internal static class Program
             var payloadBytes = files.Sum(x => x.Length);
             long preservedBytes = 0;
             if (Directory.Exists(target))
-                foreach (var existingFile in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
+                foreach (var existingFile in EnumerateInstallFiles(target))
                 {
                     var relative = Path.GetRelativePath(target, existingFile).Replace('\\', '/');
                     if (relative.Equals("Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase) || payloadPaths.Contains(relative)) continue;
-                    preservedBytes = checked(preservedBytes + new FileInfo(existingFile).Length);
+                    preservedBytes = checked(preservedBytes + GetInstallFileLength(existingFile, target));
                 }
 
             var requiredBytes = CalculateRequiredFreeSpace(payloadBytes, preservedBytes);
@@ -627,12 +1702,15 @@ internal static class Program
             EnsureSufficientFreeSpace(availableBytes, requiredBytes);
             Log($"INSTALL_SPACE_CHECK required={requiredBytes} available={availableBytes}");
         }
-        Directory.CreateDirectory(parent);
+        setStage("prepare", "create_parent_directory");
+        var localApplicationData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        CreateInstallDirectoryTreeSafely(parent, localApplicationData);
         var staging = Path.Combine(parent, ".sentinel-install-" + Guid.NewGuid().ToString("N"));
         var backup = Path.Combine(parent, ".sentinel-backup-" + Guid.NewGuid().ToString("N"));
         var integrationBackup = Path.Combine(Path.GetTempPath(), "SentinelAI-Integration-" + Guid.NewGuid().ToString("N"));
         var uninstallKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI";
         var runKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        setStage("prepare", "capture_previous_configuration");
         var oldUninstallValues = CaptureRegistry(uninstallKeyPath);
         var oldRunValue = CaptureRegistryValue(runKeyPath, "Sentinel AI");
         var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
@@ -642,8 +1720,10 @@ internal static class Program
         try
         {
             Log($"INSTALL_START target={target} startMenu={startMenuShortcut} autostart={autoStart} desktop={desktopShortcut}");
-            Directory.CreateDirectory(staging);
+            setStage("prepare", "create_staging_directory");
+            CreateInstallDirectoryTreeSafely(staging, localApplicationData);
             progress("Przygotowuję pliki programu…", 10);
+            setStage("copy", "extract_payload");
             using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
             using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
             {
@@ -658,10 +1738,10 @@ internal static class Program
                     var destination = Path.GetFullPath(Path.Combine(staging, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
                     if (!destination.StartsWith(staging + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException("Pakiet zawiera nieprawidłową ścieżkę.");
-                    if (string.IsNullOrEmpty(entry.Name)) { Directory.CreateDirectory(destination); continue; }
-                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    if (string.IsNullOrEmpty(entry.Name)) { CreateInstallDirectorySafely(destination, staging); continue; }
+                    CreateInstallDirectorySafely(Path.GetDirectoryName(destination)!, staging);
                     using var input = entry.Open();
-                    using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, buffer.Length, FileOptions.SequentialScan);
+                    using var output = CreateInstallFileSafely(destination, staging);
                     int read;
                     while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
                     {
@@ -672,47 +1752,79 @@ internal static class Program
                         progress($"Rozpakowuję aplikację z pakietu lokalnego… {copied / 1_048_576:N0} z {totalBytes / 1_048_576:N0} MB", Math.Min(75, percent));
                     }
                     output.Flush();
-                    var copiedLength = new FileInfo(destination).Length;
+                    var copiedLength = GetInstallFileLength(destination, staging);
                     if (copiedLength != entry.Length)
                         throw new IOException($"Nie skopiowano kompletnego pliku {entry.FullName} ({copiedLength} z {entry.Length} bajtów).");
                 }
                 if (Directory.Exists(target))
                 {
-                    foreach (var existingFile in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
+                    setStage("copy", "preserve_unmanaged_files");
+                    foreach (var existingFile in EnumerateInstallFiles(target))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         var relative = Path.GetRelativePath(target, existingFile).Replace('\\', '/');
                         if (relative.Equals("Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase) || payloadPaths.Contains(relative)) continue;
                         var preserved = Path.GetFullPath(Path.Combine(staging, relative.Replace('/', Path.DirectorySeparatorChar)));
-                        Directory.CreateDirectory(Path.GetDirectoryName(preserved)!);
-                        File.Copy(existingFile, preserved, overwrite: false);
+                        CreateInstallDirectorySafely(Path.GetDirectoryName(preserved)!, staging);
+                        CopyInstallFileSafely(existingFile, preserved, target, staging);
                         Log($"UPDATE_PRESERVED relative={Clean(relative)}");
                     }
                 }
             }
+            setStage("verify", "check_staged_files");
             progress("Sprawdzam pliki programu…", 80);
             cancellationToken.ThrowIfCancellationRequested();
-            if (!File.Exists(Path.Combine(staging, "Sentinel AI.exe")) || !File.Exists(Path.Combine(staging, "resources", "engine", "Sentinel.Engine.exe")))
-                throw new InvalidDataException("Brakuje wymaganych plików aplikacji.");
-            File.Copy(Environment.ProcessPath!, Path.Combine(staging, "Uninstall Sentinel AI.exe"), overwrite: true);
-            ApplyChromiumPermissions(staging);
-
-            if (Directory.Exists(target)) { Directory.Move(target, backup); oldMoved = true; }
-            Directory.Move(staging, target);
             try
             {
+                using var mainExecutable = OpenInstallFileRead(Path.Combine(staging, "Sentinel AI.exe"), staging);
+                using var engineExecutable = OpenInstallFileRead(Path.Combine(staging, "resources", "engine", "Sentinel.Engine.exe"), staging);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            { throw new InvalidDataException("Brakuje wymaganych plików aplikacji albo ścieżka stagingu została zmieniona.", exception); }
+            setStage("prepare", "copy_uninstaller");
+            using (var uninstallerSource = File.OpenRead(Environment.ProcessPath!))
+            using (var uninstallerDestination = CreateInstallFileSafely(Path.Combine(staging, "Uninstall Sentinel AI.exe"), staging))
+                uninstallerSource.CopyTo(uninstallerDestination);
+            setStage("secure", "apply_chromium_permissions");
+            ApplyChromiumPermissions(staging);
+
+            setStage("replace", "swap_install_directory");
+            if (Directory.Exists(target)) { RenameInstallDirectorySafely(target, backup, localApplicationData); oldMoved = true; }
+            try { RenameInstallDirectorySafely(staging, target, localApplicationData); }
+            catch
+            {
+                if (oldMoved && Directory.Exists(backup) && !Directory.Exists(target))
+                {
+                    RenameInstallDirectorySafely(backup, target, localApplicationData);
+                    oldMoved = false;
+                }
+                throw;
+            }
+            try
+            {
+                setStage("secure", "verify_chromium_permissions_after_swap");
+                VerifyChromiumPermissions(target);
+                setStage("configure", "apply_user_settings");
                 progress("Kończę konfigurację…", 90);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!testMode)
                 {
                     var executable = Path.Combine(target, "Sentinel AI.exe");
                     SetUninstallRegistration(target);
-                    using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
-                    if (autoStart) run.SetValue("Sentinel AI", $"\"{executable}\" --minimized"); else run.DeleteValue("Sentinel AI", false);
+                    if (autoStart)
+                    {
+                        var existingRunValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") as string;
+                        if (!string.IsNullOrWhiteSpace(existingRunValue) && !AutoStartValueTargetsExecutable(existingRunValue, executable))
+                            throw new InvalidOperationException("Wpis autostartu Sentinel AI wskazuje na inny plik; pozostawiono go bez zmian.");
+                        using var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+                        run.SetValue("Sentinel AI", $"\"{executable}\" --minimized");
+                    }
+                    else DeleteAutoStartIfOwned(target);
                     ApplyShortcutOption(startMenuLink, executable, target, startMenuShortcut);
                     ApplyShortcutOption(desktopLink, executable, target, desktopShortcut);
                     RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--register", 8000);
                 }
+                setStage("complete", "report_installation_success");
                 progress("Gotowe.", 100);
                 Log($"INSTALL_SUCCESS target={target} testMode={testMode} startMenu={startMenuShortcut} autostart={autoStart} desktop={desktopShortcut}");
             }
@@ -720,8 +1832,8 @@ internal static class Program
             {
                 Log($"INSTALL_CONFIG_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
                 if (!testMode) try { RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000); } catch (Exception cleanupError) { Log($"ROLLBACK_HOST_UNREGISTER_FAILED message={Clean(cleanupError.Message)}"); }
-                TryDelete(target);
-                if (oldMoved && Directory.Exists(backup)) Directory.Move(backup, target);
+                TryDeleteInstallTree(target);
+                if (oldMoved && Directory.Exists(backup)) RenameInstallDirectorySafely(backup, target, localApplicationData);
                 if (!testMode)
                 {
                     RestoreRegistry(uninstallKeyPath, oldUninstallValues);
@@ -732,19 +1844,9 @@ internal static class Program
                     try { RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--register", 8000); } catch (Exception restoreError) { Log($"ROLLBACK_HOST_REGISTER_FAILED message={Clean(restoreError.Message)}"); }
                 throw;
             }
-            if (oldMoved) TryDelete(backup);
+            if (oldMoved) TryDeleteInstallTree(backup);
         }
-        catch (OperationCanceledException)
-        {
-            Log("INSTALL_CANCELLED stage=transaction");
-            throw;
-        }
-        catch (Exception ex)
-        {
-            Log($"INSTALL_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
-            throw;
-        }
-        finally { TryDelete(staging); if (Directory.Exists(backup) && Directory.Exists(target)) TryDelete(backup); TryDelete(integrationBackup); }
+        finally { TryDeleteInstallTree(staging); if (Directory.Exists(backup) && Directory.Exists(target)) TryDeleteInstallTree(backup); TryDelete(integrationBackup); }
     }
 
     private static void RunHostCommand(string executable, string argument, int timeoutMs)
@@ -850,51 +1952,145 @@ internal static class Program
 
     private static void Uninstall(string target, bool testMode = false)
     {
-        target = Path.GetFullPath(target);
-        if (!target.StartsWith(Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Odmowa usunięcia folderu poza profilem użytkownika.");
-        var registered = testMode ? null : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
-        if (!string.IsNullOrWhiteSpace(registered) && !Path.GetFullPath(registered).Equals(target, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Lokalizacja w rejestrze nie zgadza się z uruchomionym deinstalatorem.");
-        Log($"UNINSTALL_START target={target}");
-        if (!testMode)
+        var stage = "resolve_target";
+        try
         {
-            RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000);
-            using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")) run.DeleteValue("Sentinel AI", false);
-            Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI", false);
-            DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk"), target);
-            DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk"), target);
-        }
-        using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
-        using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
-        {
-            foreach (var entry in archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)))
+            target = Path.GetFullPath(target);
+            var local = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            stage = "validate_install_location";
+            Log($"UNINSTALL_STAGE stage={stage} status=started");
+            if (!target.StartsWith(local + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Odmowa usunięcia folderu poza profilem użytkownika.");
+            ValidateInstallTreeHasNoReparsePoints(target, local);
+            var registered = testMode ? null : Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
+            if (!testMode) ValidateRegisteredUninstallTarget(registered, target);
+            Log($"UNINSTALL_START target={target}");
+            Log($"UNINSTALL_STAGE stage={stage} status=complete");
+            if (!testMode)
             {
-                var path = Path.GetFullPath(Path.Combine(target, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
-                if (!path.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("Pakiet zawiera nieprawidłową ścieżkę podczas odinstalowania.");
-                if (File.Exists(path)) File.Delete(path);
-            }
-        }
-        if (Directory.Exists(target))
-            foreach (var directory in Directory.GetDirectories(target, "*", SearchOption.AllDirectories).OrderByDescending(x => x.Length))
-                try { Directory.Delete(directory, recursive: false); } catch (IOException) { }
+                stage = "unregister_native_messaging";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000);
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
 
-        var uninstallPath = Path.Combine(target, "Uninstall Sentinel AI.exe");
-        if (testMode)
-        {
-            if (File.Exists(uninstallPath)) File.Delete(uninstallPath);
-            foreach (var directory in Directory.GetDirectories(target, "*", SearchOption.AllDirectories).OrderByDescending(x => x.Length))
-                try { Directory.Delete(directory, recursive: false); } catch (IOException) { }
-            Log("UNINSTALL_SUCCESS testMode=true appFilesRemoved=true userFilesPreserved=true");
-            return;
+                stage = "remove_owned_autostart";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                DeleteAutoStartIfOwned(target);
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
+
+                stage = "remove_uninstall_registration";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                Registry.CurrentUser.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI", false);
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
+
+                stage = "remove_start_menu_shortcut";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk"), target);
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
+
+                stage = "remove_desktop_shortcut";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                DeleteShortcutIfOwned(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk"), target);
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
+            }
+
+            stage = "remove_embedded_payload_files";
+            Log($"UNINSTALL_STAGE stage={stage} status=started");
+            var deletedFiles = 0;
+            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
+            {
+                foreach (var entry in archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)))
+                {
+                    var path = Path.GetFullPath(Path.Combine(target, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!path.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Pakiet zawiera nieprawidłową ścieżkę podczas odinstalowania.");
+                    if (File.Exists(path)) { DeleteInstallPathSafely(path, target, isDirectory: false); deletedFiles++; }
+                }
+            }
+            Log($"UNINSTALL_STAGE stage={stage} status=complete files={deletedFiles}");
+
+            stage = "remove_install_directories";
+            Log($"UNINSTALL_STAGE stage={stage} status=started");
+            var deferredDirectories = 0;
+            if (Directory.Exists(target))
+                foreach (var directory in EnumerateInstallDirectories(target).OrderByDescending(x => x.Length))
+                    try { DeleteInstallPathSafely(directory, target, isDirectory: true); }
+                    catch (IOException exception) { deferredDirectories++; Log($"UNINSTALL_DIRECTORY_DEFERRED type={exception.GetType().Name}"); }
+            Log($"UNINSTALL_STAGE stage={stage} status=complete deferred={deferredDirectories}");
+
+            var uninstallPath = Path.Combine(target, "Uninstall Sentinel AI.exe");
+            if (testMode)
+            {
+                stage = "remove_test_uninstaller";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                if (File.Exists(uninstallPath)) DeleteInstallPathSafely(uninstallPath, target, isDirectory: false);
+                foreach (var directory in EnumerateInstallDirectories(target).OrderByDescending(x => x.Length))
+                    try { DeleteInstallPathSafely(directory, target, isDirectory: true); }
+                    catch (IOException exception) { deferredDirectories++; Log($"UNINSTALL_DIRECTORY_DEFERRED type={exception.GetType().Name}"); }
+                Log($"UNINSTALL_STAGE stage={stage} status=complete deferred={deferredDirectories}");
+                Log("UNINSTALL_SUCCESS testMode=true appFilesRemoved=true userFilesPreserved=true");
+                return;
+            }
+
+            stage = "schedule_uninstaller_cleanup";
+            Log($"UNINSTALL_STAGE stage={stage} status=started");
+            var script = BuildUninstallCleanupScript(uninstallPath, target, LogPath, Environment.ProcessId);
+            var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+            var cleanup = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
+            cleanup.ArgumentList.Add("-NoProfile"); cleanup.ArgumentList.Add("-EncodedCommand"); cleanup.ArgumentList.Add(encoded);
+            using var cleanupProcess = Process.Start(cleanup) ?? throw new IOException("Nie udało się uruchomić bezpiecznego czyszczenia deinstalatora.");
+            Log($"UNINSTALL_STAGE stage={stage} status=complete cleanupProcessId={cleanupProcess.Id}");
+            Log($"UNINSTALL_SUCCESS appFilesRemoved=true cleanupPending=true userFilesPreserved=true");
         }
-        var script = "$id=" + Environment.ProcessId + "; try { Wait-Process -Id $id -Timeout 120 -ErrorAction Stop } catch {}; $p=" + PowerShellQuote(uninstallPath) + "; for($i=0;$i -lt 30 -and (Test-Path -LiteralPath $p);$i++){try{Remove-Item -LiteralPath $p -Force -ErrorAction Stop;break}catch{Start-Sleep -Milliseconds 500}}; $d=Split-Path -Parent $p; $r=" + PowerShellQuote(target) + "; while($d.StartsWith($r,[StringComparison]::OrdinalIgnoreCase)){try{if((Get-ChildItem -LiteralPath $d -Force | Measure-Object).Count -ne 0){break}; Remove-Item -LiteralPath $d -Force; $d=Split-Path -Parent $d}catch{break}}";
+        catch (Exception exception)
+        {
+            Log(FormatUninstallFailureLog(stage, exception));
+            throw;
+        }
+    }
+
+    private static string BuildUninstallCleanupScript(string uninstallPath, string target, string logPath,
+        int parentProcessId, int waitTimeoutSeconds = 120, int attempts = 30, int retryDelayMilliseconds = 500)
+    {
+        if (waitTimeoutSeconds < 1 || attempts < 1 || retryDelayMilliseconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(waitTimeoutSeconds));
+        return "$id=" + parentProcessId + "; try { Wait-Process -Id $id -Timeout " + waitTimeoutSeconds + " -ErrorAction Stop } catch {}; " +
+            "$p=" + PowerShellQuote(uninstallPath) + "; $r=" + PowerShellQuote(target) + "; $l=" + PowerShellQuote(logPath) + "; $removed=$false; " +
+            "for($i=0;$i -lt " + attempts + ";$i++){if(-not(Test-Path -LiteralPath $p)){$removed=$true;break}; try{Remove-Item -LiteralPath $p -Force -ErrorAction Stop; if(-not(Test-Path -LiteralPath $p)){$removed=$true;break}}catch{}; Start-Sleep -Milliseconds " + retryDelayMilliseconds + "}; " +
+            "$directoryRemoved=$false; if($removed){if(-not(Test-Path -LiteralPath $r)){$directoryRemoved=$true}else{try{if((Get-ChildItem -LiteralPath $r -Force | Measure-Object).Count -eq 0){Remove-Item -LiteralPath $r -Force -ErrorAction Stop; $directoryRemoved=-not(Test-Path -LiteralPath $r)}}catch{}}}; " +
+            "$remaining=0; if(Test-Path -LiteralPath $r){try{$remaining=(Get-ChildItem -LiteralPath $r -Force | Measure-Object).Count}catch{$remaining=-1}}; " +
+            "$status='partial'; if($removed -and $directoryRemoved){$status='complete'} elseif(-not $removed){$status='failed'}; " +
+            "$line=(Get-Date -Format o)+' UNINSTALL_CLEANUP_RESULT status='+$status+' uninstallerRemoved='+$removed.ToString().ToLowerInvariant()+' installDirectoryRemoved='+$directoryRemoved.ToString().ToLowerInvariant()+' remainingEntries='+$remaining+[Environment]::NewLine; " +
+            "try{[IO.File]::AppendAllText($l,$line,[Text.UTF8Encoding]::new($false))}catch{}; if(-not $removed){exit 1}";
+    }
+
+    private static int RunUninstallCleanupScriptForTest(string script)
+    {
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-        var cleanup = new ProcessStartInfo("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-        cleanup.ArgumentList.Add("-NoProfile"); cleanup.ArgumentList.Add("-EncodedCommand"); cleanup.ArgumentList.Add(encoded);
-        if (Process.Start(cleanup) is null) throw new IOException("Nie udało się uruchomić bezpiecznego czyszczenia deinstalatora.");
-        Log("UNINSTALL_SUCCESS appFilesRemoved=true userFilesPreserved=true");
+        var start = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-EncodedCommand");
+        start.ArgumentList.Add(encoded);
+        using var process = Process.Start(start) ?? throw new IOException("Nie uruchomiono testu sprzątania deinstalatora.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(15_000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new TimeoutException("Testowe sprzątanie deinstalatora przekroczyło limit czasu.");
+        }
+        var stdout = stdoutTask.GetAwaiter().GetResult();
+        var stderr = stderrTask.GetAwaiter().GetResult();
+        if (process.ExitCode != 0) Log($"UNINSTALL_CLEANUP_SELF_TEST_PROCESS_ERROR type=ProcessExit code={process.ExitCode} message={Clean(stdout + " " + stderr)}");
+        return process.ExitCode;
     }
 
     private static void DeleteShortcutIfOwned(string shortcutPath, string installPath)
@@ -920,11 +2116,40 @@ internal static class Program
 
     private static string PowerShellQuote(string value) => "'" + value.Replace("'", "''") + "'";
     private static void TryDelete(string path) { try { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); } catch { } }
+
+    private static void TryDeleteInstallTree(string path)
+    {
+        try
+        {
+            var target = Path.GetFullPath(path);
+            var trustedRoot = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            DeleteInstallTreeSafely(target, trustedRoot);
+        }
+        catch { }
+    }
+
+    private static void DeleteInstallTreeSafely(string target, string trustedRoot)
+    {
+        target = Path.GetFullPath(target);
+        trustedRoot = Path.GetFullPath(trustedRoot);
+        if (!target.StartsWith(trustedRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Nie można sprzątać poza zaufanym katalogiem instalacji.");
+        if (!Directory.Exists(target)) return;
+
+        var files = EnumerateInstallFiles(target, trustedRoot).ToArray();
+        var directories = EnumerateInstallDirectories(target, trustedRoot).ToArray();
+        foreach (var file in files) DeleteInstallPathSafely(file, target, isDirectory: false, trustedRoot: trustedRoot);
+        foreach (var directory in directories.OrderByDescending(x => x.Length))
+            DeleteInstallPathSafely(directory, target, isDirectory: true, trustedRoot: trustedRoot);
+        var parent = Path.GetDirectoryName(target);
+        if (parent is not null) DeleteInstallPathSafely(target, parent, isDirectory: true, trustedRoot: trustedRoot);
+    }
 }
 
 internal sealed class SetupWizard : Form
 {
     private enum WizardPage { Welcome, Location, Options, Summary, Installing, Verify, Complete, Error }
+    private readonly bool repairMode;
 
     private readonly Label heading = new() { AutoSize = true, Font = new Font("Segoe UI Semibold", 22), ForeColor = Color.White, Location = new Point(32, 24) };
     private readonly Label step = new() { AutoSize = true, ForeColor = Color.FromArgb(255, 166, 72), Location = new Point(34, 66) };
@@ -951,9 +2176,30 @@ internal sealed class SetupWizard : Form
     private WizardPage page = WizardPage.Welcome;
     private string lastError = string.Empty;
     private bool errorCanRetry;
+    private bool repairSettingsReadFailed;
 
-    public SetupWizard()
+    public SetupWizard(bool? repairModeOverride = null, (bool StartMenu, bool Desktop, bool AutoStart)? existingOptionsOverride = null,
+        Exception? repairOptionsErrorOverride = null)
     {
+        repairMode = repairModeOverride ?? Program.IsRegisteredInstall(folder.Text);
+        if (repairMode)
+        {
+            launchAfter.Text = "Uruchom Sentinel AI po &naprawie / aktualizacji";
+            try
+            {
+                if (repairOptionsErrorOverride is not null) throw repairOptionsErrorOverride;
+                var options = existingOptionsOverride ?? Program.ReadRegisteredInstallOptions(folder.Text);
+                startMenu.Checked = options.StartMenu;
+                desktop.Checked = options.Desktop;
+                start.Checked = options.AutoStart;
+                launchAfter.Checked = false;
+            }
+            catch (Exception exception)
+            {
+                repairSettingsReadFailed = true;
+                Program.Log($"REPAIR_PREFLIGHT_FAILED type={exception.GetType().Name} message={Program.Clean(exception.Message)}");
+            }
+        }
         Text = "Sentinel AI — Instalator"; ClientSize = new Size(700, 480); MinimumSize = new Size(680, 500); StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi; BackColor = Color.FromArgb(19, 28, 42); Font = new Font("Segoe UI", 10); FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = false;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
@@ -994,7 +2240,13 @@ internal sealed class SetupWizard : Form
             cancel.PerformClick();
         };
         folder.Validated += (_, _) => RefreshSpaceInfo();
-        ShowPage(WizardPage.Welcome);
+        if (repairSettingsReadFailed)
+        {
+            lastError = $"Nie można bezpiecznie odczytać obecnych ustawień Sentinel AI. Nie rozpoczęto żadnych zmian.\r\n\r\nLog diagnostyczny: {Program.LogPath}";
+            ShowPage(WizardPage.Error, retryable: false);
+            back.Visible = false;
+        }
+        else ShowPage(WizardPage.Welcome);
     }
 
     private async Task MoveNextAsync()
@@ -1062,24 +2314,24 @@ internal sealed class SetupWizard : Form
             }, installCancellation.Token));
             installationRunning = false;
             ShowPage(WizardPage.Verify);
-            status.Text = "Sprawdzam pliki, ustawienia, skróty i rejestrację przeglądarki…";
+            status.Text = repairMode
+                ? "Sprawdzam naprawione pliki, ustawienia, skróty i rejestrację przeglądarki…"
+                : "Sprawdzam pliki, ustawienia, skróty i rejestrację przeglądarki…";
             await Task.Run(() => Program.VerifyInstallation(selectedPath, startMenu.Checked, desktop.Checked, start.Checked));
-            Program.Log($"INSTALL_VERIFIED files=true registration=true shortcuts=true autostart={start.Checked} target={selectedPath}");
-            status.Text = "Instalacja została zweryfikowana.";
+            Program.Log($"INSTALL_VERIFIED repair={repairMode} files=true registration=true shortcuts=true autostart={start.Checked} target={selectedPath}");
+            status.Text = repairMode ? "Naprawa została zweryfikowana." : "Instalacja została zweryfikowana.";
             progress.Value = 100;
             ShowPage(WizardPage.Complete);
         }
         catch (OperationCanceledException)
         {
-            lastError = "Instalacja została anulowana. Poprzedni stan został przywrócony.";
-            Program.Log("UI_INSTALL_CANCELLED rollback=true");
-            ShowPage(WizardPage.Error, retryable: false);
+            ShowCancellationError();
         }
         catch (Exception ex)
         {
             Program.Log($"UI_INSTALL_ERROR type={ex.GetType().Name} message={Program.Clean(ex.Message)}");
             installationRunning = false;
-            lastError = $"Nie udało się zakończyć instalacji.\r\n\r\n{ex.Message}\r\n\r\nLog diagnostyczny: {Program.LogPath}";
+            lastError = Program.FormatInstallErrorMessage(ex);
             ShowPage(WizardPage.Error, retryable: true);
         }
         finally
@@ -1088,6 +2340,14 @@ internal sealed class SetupWizard : Form
             installCancellation?.Dispose();
             installCancellation = null;
         }
+    }
+
+    private void ShowCancellationError()
+    {
+        installationRunning = false;
+        lastError = "Instalacja została anulowana. Poprzedni stan został przywrócony.";
+        Program.Log("UI_INSTALL_CANCELLED rollback=true");
+        ShowPage(WizardPage.Error, retryable: false);
     }
 
     private void ShowPage(WizardPage target, bool retryable = false)
@@ -1115,10 +2375,10 @@ internal sealed class SetupWizard : Form
         next.Enabled = !installationRunning;
         next.Text = target switch
         {
-            WizardPage.Welcome => "Rozpocznij",
+            WizardPage.Welcome => repairMode ? "Dalej" : "Rozpocznij",
             WizardPage.Location or WizardPage.Options => "Dalej",
-            WizardPage.Summary => "Zainstaluj",
-            WizardPage.Error when errorCanRetry => "Ponów instalację",
+            WizardPage.Summary => repairMode ? "Zastosuj" : "Zainstaluj",
+            WizardPage.Error when errorCanRetry => repairMode ? "Ponów naprawę" : "Ponów instalację",
             WizardPage.Error => "Zakończ",
             WizardPage.Complete => "Zakończ",
             _ => "Dalej"
@@ -1131,44 +2391,52 @@ internal sealed class SetupWizard : Form
             WizardPage.Location => "KROK 2 Z 7  •  LOKALIZACJA",
             WizardPage.Options => "KROK 3 Z 7  •  USTAWIENIA",
             WizardPage.Summary => "KROK 4 Z 7  •  PODSUMOWANIE",
-            WizardPage.Installing => "KROK 5 Z 7  •  INSTALOWANIE",
+            WizardPage.Installing => repairMode ? "KROK 5 Z 7  •  NAPRAWA / AKTUALIZACJA" : "KROK 5 Z 7  •  INSTALOWANIE",
             WizardPage.Verify => "KROK 6 Z 7  •  WERYFIKACJA",
             WizardPage.Complete => "KROK 7 Z 7  •  GOTOWE",
             _ => "BŁĄD INSTALACJI"
         };
         heading.Text = target switch
         {
-            WizardPage.Welcome => "Sentinel AI",
+            WizardPage.Welcome => repairMode ? "Napraw / aktualizuj Sentinel AI" : "Sentinel AI",
             WizardPage.Location => "Wybierz lokalizację",
-            WizardPage.Options => "Dostosuj instalację",
-            WizardPage.Summary => "Sprawdź ustawienia",
-            WizardPage.Installing => "Instaluję Sentinel AI",
+            WizardPage.Options => repairMode ? "Zachowaj ustawienia" : "Dostosuj instalację",
+            WizardPage.Summary => repairMode ? "Sprawdź naprawę / aktualizację" : "Sprawdź ustawienia",
+            WizardPage.Installing => repairMode ? "Naprawiam / aktualizuję Sentinel AI" : "Instaluję Sentinel AI",
             WizardPage.Verify => "Weryfikuję instalację",
-            WizardPage.Complete => "Instalacja zakończona",
+            WizardPage.Complete => repairMode ? "Naprawa / aktualizacja zakończona" : "Instalacja zakończona",
             _ => "Wystąpił problem"
         };
         intro.Text = target switch
         {
-            WizardPage.Welcome => "Własna instalacja Sentinel AI. Program zostanie zainstalowany w profilu użytkownika; nie wymaga uprawnień administratora.",
-            WizardPage.Location => "Wybierz bezpieczny folder w swoim profilu. Istniejąca instalacja zostanie zaktualizowana w tym samym miejscu.",
-            WizardPage.Options => "Wybierz skróty i zachowanie aplikacji. Możesz zmienić te ustawienia później.",
-            WizardPage.Summary => "Instalator sprawdzi pakiet, skopiuje pliki, skonfiguruje wybrane opcje i zweryfikuje wynik.",
+            WizardPage.Welcome => repairMode
+                ? "Wykryto istniejącą instalację. Naprawa lub aktualizacja odtworzy pliki z tego pakietu i zachowa wykryte skróty oraz autostart."
+                : "Własna instalacja Sentinel AI. Program zostanie zainstalowany w profilu użytkownika; nie wymaga uprawnień administratora.",
+            WizardPage.Location => repairMode
+                ? "Wybierz istniejący folder instalacji. Operacja zachowa ustawienia oraz pliki użytkownika spoza pakietu aplikacji."
+                : "Wybierz bezpieczny folder w swoim profilu. Istniejąca instalacja zostanie zaktualizowana w tym samym miejscu.",
+            WizardPage.Options => repairMode
+                ? "Wykryte skróty i autostart są zaznaczone zgodnie z bieżącą konfiguracją. Uruchomienie po naprawie lub aktualizacji jest domyślnie wyłączone."
+                : "Wybierz skróty i zachowanie aplikacji. Możesz zmienić te ustawienia później.",
+            WizardPage.Summary => repairMode
+                ? "Naprawa lub aktualizacja odtworzy pliki aplikacji, zweryfikuje wynik i zastosuje pokazane ustawienia."
+                : "Instalator sprawdzi pakiet, skopiuje pliki, skonfiguruje wybrane opcje i zweryfikuje wynik.",
             WizardPage.Installing => "Rozpakowuję aplikację z pakietu osadzonego w instalatorze; pobieranie nie jest wymagane.",
             WizardPage.Verify => "Sprawdzam pliki programu, ustawienie autostartu, skróty i host przeglądarki.",
-            WizardPage.Complete => "Pliki i konfiguracja instalacji zostały sprawdzone.",
+            WizardPage.Complete => repairMode ? "Pliki i konfiguracja naprawionej instalacji zostały sprawdzone." : "Pliki i konfiguracja instalacji zostały sprawdzone.",
             _ => "Instalator nie zgłosi sukcesu, jeśli konfiguracja lub weryfikacja się nie powiedzie."
         };
         status.Text = target switch
         {
-            WizardPage.Installing => "Przygotowuję instalację…",
+            WizardPage.Installing => repairMode ? "Przygotowuję naprawę / aktualizację…" : "Przygotowuję instalację…",
             WizardPage.Verify => "Weryfikuję pliki i konfigurację…",
-            WizardPage.Complete => "Sentinel AI został zainstalowany i zweryfikowany.",
+            WizardPage.Complete => repairMode ? "Sentinel AI został naprawiony / zaktualizowany i zweryfikowany." : "Sentinel AI został zainstalowany i zweryfikowany.",
             _ => status.Text
         };
         if (showSummary)
         {
             var path = folder.Text.Trim();
-            summary.Text = $"Lokalizacja: {path}\r\n\r\nSkrót menu Start: {(startMenu.Checked ? "tak" : "nie")}\r\nSkrót na pulpicie: {(desktop.Checked ? "tak" : "nie")}\r\nAutostart Windows: {(start.Checked ? "tak" : "nie")}\r\nUruchom po instalacji: {(launchAfter.Checked ? "tak" : "nie")}\r\n\r\n{TryGetSpaceSummary(path)}";
+            summary.Text = $"{(repairMode ? "Folder naprawy / aktualizacji" : "Lokalizacja")}: {path}\r\n\r\nSkrót menu Start: {(startMenu.Checked ? "tak" : "nie")}\r\nSkrót na pulpicie: {(desktop.Checked ? "tak" : "nie")}\r\nAutostart Windows: {(start.Checked ? "tak" : "nie")}\r\n{(repairMode ? "Uruchom po naprawie / aktualizacji" : "Uruchom po instalacji")}: {(launchAfter.Checked ? "tak" : "nie")}\r\n\r\n{TryGetSpaceSummary(path)}";
         }
         if (showError) errorDetails.Text = lastError;
         SetIllustration(target switch
@@ -1226,7 +2494,7 @@ internal sealed class SetupWizard : Form
 
     internal static void ValidateVisualStates()
     {
-        using var wizard = new SetupWizard();
+        using var wizard = new SetupWizard(repairModeOverride: false);
         wizard.ShowInTaskbar = false;
         wizard.StartPosition = FormStartPosition.Manual;
         wizard.Location = new Point(-32_000, -32_000);
@@ -1280,5 +2548,30 @@ internal sealed class SetupWizard : Form
         wizard.ShowPage(WizardPage.Error, retryable: true);
         if (!wizard.errorDetails.Visible || !wizard.openLog.Visible || wizard.next.Text != "Ponów instalację")
             throw new InvalidDataException("Ekran błędu nie udostępnia komunikatu, logu i ponowienia.");
+        wizard.installationRunning = true;
+        wizard.cancel.Enabled = false;
+        wizard.ShowCancellationError();
+        if (wizard.next.Text != "Zakończ" || !wizard.next.Enabled || wizard.installationRunning)
+            throw new InvalidDataException("Po rollbacku anulowana instalacja nie udostępnia aktywnego przycisku Zakończ.");
+
+        using var repairWizard = new SetupWizard(repairModeOverride: true, existingOptionsOverride: (false, true, false));
+        if (repairWizard.heading.Text != "Napraw / aktualizuj Sentinel AI" || repairWizard.next.Text != "Dalej"
+            || !repairWizard.intro.Text.Contains("istniejącą instalację", StringComparison.Ordinal))
+            throw new InvalidDataException("Kreator nie pokazuje jednoznacznej ścieżki naprawy.");
+        repairWizard.ShowPage(WizardPage.Options);
+        if (repairWizard.startMenu.Checked || !repairWizard.desktop.Checked || repairWizard.start.Checked || repairWizard.launchAfter.Checked
+            || !repairWizard.launchAfter.Text.Contains("naprawie / aktualizacji", StringComparison.Ordinal))
+            throw new InvalidDataException("Naprawa nie zachowuje wykrytych ustawień istniejącej instalacji.");
+        repairWizard.ShowPage(WizardPage.Summary);
+        if (!repairWizard.intro.Text.Contains("Naprawa lub aktualizacja odtworzy pliki", StringComparison.Ordinal)
+            || repairWizard.next.Text != "Zastosuj"
+            || !repairWizard.summary.Text.Contains("Uruchom po naprawie / aktualizacji", StringComparison.Ordinal))
+            throw new InvalidDataException("Podsumowanie trybu naprawy jest niejednoznaczne.");
+
+        using var failedRepairWizard = new SetupWizard(repairModeOverride: true,
+            repairOptionsErrorOverride: new IOException("controlled settings read failure"));
+        if (failedRepairWizard.page != WizardPage.Error || failedRepairWizard.next.Text != "Zakończ"
+            || failedRepairWizard.back.Visible || !failedRepairWizard.errorDetails.Text.Contains("Nie rozpoczęto żadnych zmian", StringComparison.Ordinal))
+            throw new InvalidDataException("Błąd odczytu ustawień naprawy nie blokuje bezpiecznie dalszych zmian.");
     }
 }

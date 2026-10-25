@@ -1,3 +1,5 @@
+extern alias UrlHostAssembly;
+
 using System.Buffers.Binary;
 using System.Text;
 using System.Text.Json;
@@ -5,6 +7,8 @@ using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Sentinel.UrlHost;
 using Xunit;
+
+using UrlHostProgram = UrlHostAssembly::Sentinel.UrlHost.Program;
 
 namespace Sentinel.Tests;
 
@@ -46,13 +50,13 @@ public sealed class BrowserIntegrationTests : IDisposable
         input.Position = 0;
         var output = new MemoryStream();
 
-        await Program.ServeAsync(input, output, enableHostSideEffects: false);
+        await UrlHostProgram.ServeAsync(input, output, enableHostSideEffects: false);
         output.Position = 0;
         var response = JsonSerializer.Deserialize<BrowserResponse>(await NativeMessagingProtocol.ReadAsync(output)!);
         Assert.NotNull(response);
         Assert.True(response.Available);
         Assert.True(response.ShouldWarn);
-        Assert.Equal("2026.10.9", response.RulesVersion);
+        Assert.Equal("2026.10.10", response.RulesVersion);
         Assert.Equal("Moderate", response.Risk);
         Assert.Contains(response.Indicators, item => item.Id == "url.auth_structure");
         var serialized = JsonSerializer.Serialize(response);

@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
-import { asyncBufferFromUrl, parquetReadObjects } from 'hyparquet';
-import { compressors } from 'hyparquet-compressors';
+import { assertResearchDatasetMetadata } from './dataset-metadata.mjs';
 
 const DATASET = 'phreshphish/phreshphish';
 const EXPECTED_DATASET_REVISION = 'eca603e0ecd4f698f8d4d226c088659e72681239';
@@ -10,6 +9,11 @@ const EXPECTED_ROWS = 498_255;
 const EXPECTED_BENIGN = 276_729;
 const EXPECTED_PHISH = 221_526;
 const EXPECTED_PARQUET_BYTES = 27_400_613_420;
+if (!process.argv.includes('--allow-network')) {
+  throw new Error('This extractor downloads dataset columns. Pass --allow-network to authorize network access.');
+}
+const { asyncBufferFromUrl, parquetReadObjects } = await import('hyparquet');
+const { compressors } = await import('hyparquet-compressors');
 const outputPath = process.argv[2];
 if (!outputPath) throw new Error('Pass a temporary CSV path.');
 
@@ -44,9 +48,7 @@ globalThis.fetch = async (input, init) => {
 const datasetResponse = await fetchOriginal(`https://huggingface.co/api/datasets/${DATASET}`);
 if (!datasetResponse.ok) throw new Error(`Dataset metadata request failed: HTTP ${datasetResponse.status}`);
 const dataset = await datasetResponse.json();
-if (dataset.sha !== EXPECTED_DATASET_REVISION || dataset.cardData?.license !== 'cc-by-4.0') {
-  throw new Error('Dataset revision or anti-phishing research license changed; refusing extraction.');
-}
+assertResearchDatasetMetadata(dataset, EXPECTED_DATASET_REVISION);
 
 const parquetResponse = await fetchOriginal(`https://datasets-server.huggingface.co/parquet?dataset=${encodeURIComponent(DATASET)}`);
 if (!parquetResponse.ok) throw new Error(`Parquet metadata request failed: HTTP ${parquetResponse.status}`);

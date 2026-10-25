@@ -6,7 +6,9 @@ public sealed record InvitationRequest(string Group, DateTimeOffset ExpiresAt, i
 public sealed record Invitation(string Id, string Group, DateTimeOffset ExpiresAt, int MaximumRegistrations, int RegistrationCount, bool Revoked, bool RequiresApproval = false);
 public sealed record EnrollmentRequest(string InvitationCode, string DeviceName, string ClientVersion, string DeviceToken);
 public sealed record EnrollmentResult(string DeviceId, string DeviceToken, string Group, DateTimeOffset RegisteredAt);
-public sealed record Device(string Id, string Name, string Group, string ClientVersion, DateTimeOffset RegisteredAt, DateTimeOffset? LastSeenAt, bool Revoked, string? LastError, bool Approved = true);
+public sealed record AppliedPolicyRevision(long GlobalVersion, long GroupVersion, long DeviceVersion);
+public sealed record Device(string Id, string Name, string Group, string ClientVersion, DateTimeOffset RegisteredAt, DateTimeOffset? LastSeenAt, bool Revoked, string? LastError, bool Approved = true,
+    AppliedPolicyRevision? AppliedPolicy = null);
 public enum AdminRole { SystemAdministrator, SecurityAdministrator, Operator, ReadOnly }
 public sealed record AdminIdentity(string Id, string Username, AdminRole Role, string SessionId);
 public sealed record AdminCredential(string Id, string Username, string PasswordHash, AdminRole Role, bool Disabled);
@@ -59,7 +61,7 @@ public interface IServerStore
     Task<bool> RevokeDeviceAsync(string id, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> SetDeviceApprovalAsync(string id, bool approved, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);
     Task<bool> StageDeviceCredentialRotationAsync(string id, string currentTokenHash, string candidateTokenHash, CancellationToken cancellationToken = default);
-    Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default);
+    Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default, AppliedPolicyRevision? appliedPolicy = null);
     Task<EnterpriseEventBatchResultV1> IngestEventsAsync(string deviceId, IReadOnlyList<EnterpriseEventV1> events, DateTimeOffset receivedAt, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SecurityEvent>> ListEventsAsync(int limit, string? deviceId = null, CancellationToken cancellationToken = default);
     Task<bool> SetEventStatusAsync(string eventId, string deviceId, string status, string actorUsername, DateTimeOffset now, CancellationToken cancellationToken = default);

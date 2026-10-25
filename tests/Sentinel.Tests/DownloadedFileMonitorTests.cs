@@ -12,6 +12,21 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "sentinel-download-monitor-" + Guid.NewGuid());
 
     [Fact]
+    public void ResolvedPathContainmentRejectsSiblingPrefixesAndParentTraversal()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var inside = Path.Combine(downloads, "subfolder", "sample.bin");
+        var sibling = Path.Combine(root, "Downloads-private", "sample.bin");
+        var escaped = Path.Combine(downloads, "..", "private", "sample.bin");
+
+        Assert.True(DownloadedFileMonitor.IsResolvedPathInside(downloads, inside));
+        Assert.False(DownloadedFileMonitor.IsResolvedPathInside(downloads, sibling));
+        Assert.False(DownloadedFileMonitor.IsResolvedPathInside(downloads, escaped));
+        if (OperatingSystem.IsWindows())
+            Assert.True(DownloadedFileMonitor.IsResolvedPathInside(@"\\?\" + downloads, @"\\?\" + inside));
+    }
+
+    [Fact]
     public async Task QueueOverflowReconcilesNewFilesWithoutScanningPreexistingFiles()
     {
         var downloads = Path.Combine(root, "Downloads");
@@ -200,6 +215,233 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         finally
         {
             if (Directory.Exists(junction)) Directory.Delete(junction);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadsRootReplacedByJunctionBeforeVerifiedOpenIsRejected()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var downloads = Path.Combine(root, "Downloads");
+        var movedDownloads = Path.Combine(root, "Downloads-original");
+        var outside = Path.Combine(root, "outside");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        Directory.CreateDirectory(outside);
+        var payload = "matching file reachable only through a replaced Downloads root";
+        var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        reputation.Import(payloadHash, DateTimeOffset.UtcNow);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+
+        using var monitor = new DownloadedFileMonitor(downloads);
+        await monitor.SetEnabledAsync(store, true);
+        Assert.Contains("działa", monitor.State, StringComparison.OrdinalIgnoreCase);
+        var candidate = Path.Combine(downloads, "race.bin");
+        var outsideFile = Path.Combine(outside, "race.bin");
+        await File.WriteAllTextAsync(candidate, payload);
+        await File.WriteAllTextAsync(outsideFile, payload);
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+
+        var replaced = 0;
+        monitor.BeforeVerifiedReadStreamOpenForTest = path =>
+        {
+            if (!string.Equals(path, candidate, StringComparison.OrdinalIgnoreCase) || Interlocked.Exchange(ref replaced, 1) != 0) return;
+            Directory.Move(downloads, movedDownloads);
+            CreateJunction(downloads, outside);
+        };
+
+        try
+        {
+            Assert.Equal(0, await monitor.CollectAsync(store, reputation));
+            Assert.Equal(1, replaced);
+            Assert.Empty(await store.ReadAsync());
+            Assert.Empty((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
+            Assert.Equal(payload, await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            monitor.BeforeVerifiedReadStreamOpenForTest = null;
+            if (Directory.Exists(downloads)) Directory.Delete(downloads);
+            if (Directory.Exists(movedDownloads)) Directory.Move(movedDownloads, downloads);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadsRootThatStartsAsJunctionDoesNotInitializeBaseline()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var downloads = Path.Combine(root, "Downloads");
+        var outside = Path.Combine(root, "outside");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(outside);
+        await File.WriteAllTextAsync(Path.Combine(outside, "existing.bin"), "outside baseline data");
+        CreateJunction(downloads, outside);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+
+        try
+        {
+            using var monitor = new DownloadedFileMonitor(downloads);
+            await monitor.SetEnabledAsync(store, true);
+
+            Assert.Contains("niedostępny", monitor.State, StringComparison.OrdinalIgnoreCase);
+            var snapshot = await store.ReadDownloadedFileMonitorSnapshotAsync();
+            Assert.False(snapshot.Initialized);
+            Assert.Empty(snapshot.Files);
+            Assert.Empty(await store.ReadAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(downloads)) Directory.Delete(downloads);
+        }
+    }
+
+    [Fact]
+    public async Task RepeatedParentJunctionSwapsBeforeOpenAreRejectedAcrossSampleBatches()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        const int candidateCount = 100;
+        var candidates = Enumerable.Range(0, candidateCount).Select(index =>
+        {
+            var name = $"replaceable-{index}";
+            var parent = Path.Combine(downloads, name);
+            var outside = Path.Combine(root, "outside", name);
+            Directory.CreateDirectory(parent);
+            Directory.CreateDirectory(outside);
+            return (Parent: parent, MovedParent: Path.Combine(downloads, name + "-original"),
+                Outside: outside, Candidate: Path.Combine(parent, "race.bin"),
+                OutsideFile: Path.Combine(outside, "race.bin"));
+        }).ToArray();
+
+        const string payload = "matching file exposed by a parent-junction race";
+        var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        reputation.Import(payloadHash, DateTimeOffset.UtcNow);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+        foreach (var candidate in candidates)
+            await File.WriteAllTextAsync(candidate.OutsideFile, payload);
+
+        using var monitor = new DownloadedFileMonitor(downloads);
+        await monitor.SetEnabledAsync(store, true);
+        var contentReadAttempts = 0;
+        var raceAttempts = 0;
+        var pendingSwaps = candidates.ToDictionary(item => item.Candidate, item => item, StringComparer.OrdinalIgnoreCase);
+        monitor.BeforeFileContentReadForTest = _ => Interlocked.Increment(ref contentReadAttempts);
+        monitor.BeforeVerifiedReadStreamOpenForTest = path =>
+        {
+            if (!pendingSwaps.Remove(path, out var swap)) return;
+            Directory.Move(swap.Parent, swap.MovedParent);
+            CreateJunction(swap.Parent, swap.Outside);
+            Interlocked.Increment(ref raceAttempts);
+        };
+        foreach (var candidate in candidates)
+            await File.WriteAllTextAsync(candidate.Candidate, payload);
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+
+        try
+        {
+            for (var attempt = 0; attempt < 20 && Volatile.Read(ref raceAttempts) < candidateCount; attempt++)
+            {
+                Assert.Equal(0, await monitor.CollectAsync(store, reputation));
+                if (Volatile.Read(ref raceAttempts) < candidateCount)
+                    await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
+            Assert.Equal(candidateCount, raceAttempts);
+            Assert.Empty(await store.ReadAsync());
+            Assert.Empty((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
+            Assert.Equal(0, contentReadAttempts);
+            foreach (var candidate in candidates)
+                Assert.Equal(payload, await File.ReadAllTextAsync(candidate.OutsideFile));
+        }
+        finally
+        {
+            monitor.BeforeVerifiedReadStreamOpenForTest = null;
+            monitor.BeforeFileContentReadForTest = null;
+            foreach (var candidate in candidates)
+            {
+                if (!Directory.Exists(candidate.MovedParent)) continue;
+                if (Directory.Exists(candidate.Parent)) Directory.Delete(candidate.Parent);
+                Directory.Move(candidate.MovedParent, candidate.Parent);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentParentJunctionStressNeverReadsOrAlertsOnOutsideFile()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var downloads = Path.Combine(root, "Downloads");
+        var parent = Path.Combine(downloads, "replaceable");
+        var movedParent = Path.Combine(downloads, "replaceable-original");
+        var outside = Path.Combine(root, "outside");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(parent);
+        Directory.CreateDirectory(outside);
+
+        const string benignPayload = "ordinary local file content";
+        const string knownPayload = "known outside matching data";
+        var candidate = Path.Combine(parent, "race.bin");
+        var outsideFile = Path.Combine(outside, "race.bin");
+        await File.WriteAllTextAsync(candidate, new string('x', benignPayload.Length));
+        await File.WriteAllTextAsync(outsideFile, knownPayload);
+        var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(knownPayload)));
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        reputation.Import(payloadHash, DateTimeOffset.UtcNow);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+
+        using var monitor = new DownloadedFileMonitor(downloads);
+        await monitor.SetEnabledAsync(store, true);
+        await File.WriteAllTextAsync(candidate, benignPayload);
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+
+        var swaps = 0;
+        var toggler = Task.Run(async () =>
+        {
+            for (var index = 0; index < 40; index++)
+            {
+                Directory.Move(parent, movedParent);
+                CreateJunction(parent, outside);
+                Interlocked.Increment(ref swaps);
+                await Task.Delay(TimeSpan.FromMilliseconds(3));
+                Directory.Delete(parent);
+                Directory.Move(movedParent, parent);
+                await Task.Delay(TimeSpan.FromMilliseconds(2));
+            }
+        });
+
+        try
+        {
+            while (!toggler.IsCompleted)
+            {
+                await monitor.CollectAsync(store, reputation);
+                await Task.Delay(TimeSpan.FromMilliseconds(1));
+            }
+            await toggler;
+            for (var attempt = 0; attempt < 5; attempt++)
+                await monitor.CollectAsync(store, reputation);
+
+            Assert.Equal(40, swaps);
+            Assert.Empty(await store.ReadAsync());
+            Assert.DoesNotContain((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files,
+                item => string.Equals(item.Key, outsideFile, StringComparison.OrdinalIgnoreCase));
+            Assert.Equal(knownPayload, await File.ReadAllTextAsync(outsideFile));
+        }
+        finally
+        {
+            await toggler;
+            if (Directory.Exists(parent) && (File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0)
+                Directory.Delete(parent);
+            if (Directory.Exists(movedParent))
+            {
+                if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+                Directory.Move(movedParent, parent);
+            }
         }
     }
 

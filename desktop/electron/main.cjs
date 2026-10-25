@@ -1,10 +1,13 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, Notification } = require('electron');
 const { EngineClient } = require('./engine-client.cjs');
-const { readFailures, recordFailure } = require('./diagnostic-log.cjs');
+const { requestEnterpriseContextConsent } = require('./enterprise-context-consent.cjs');
+const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-log.cjs');
+const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 let win, tray, quitting = false;
+const smokeTest = process.argv.includes('--smoke-test');
 const allowed = new Set(['status', 'history', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -18,7 +21,7 @@ app.whenReady().then(() => {
   const call = (method, data) => engine.call(method, data);
   ipcMain.handle('sentinel', async (event, method, data) => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
-    if (method === 'engineStatus') return engine.diagnostics();
+    if (method === 'engineStatus') return { ...engine.diagnostics(), lastFailure: readLastFailure(lifecycleLogDirectory) };
     if (method === 'autostart') { app.setLoginItemSettings({ openAtLogin: data.enabled === true, args: ['--minimized'], name: 'Sentinel AI' }); return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin; }
     if (method === 'getAutostart') return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin;
     if (method === 'chooseFile') {
@@ -64,10 +67,32 @@ app.whenReady().then(() => {
       return call(method, { path: choice.filePath, hostLifecycle: engine.diagnostics(), hostFailures: readFailures(lifecycleLogDirectory) });
     }
     if (!allowed.has(method) || JSON.stringify(data).length > 23000) throw new Error('Nieprawidłowe żądanie');
+    if (method === 'analyze' && data?.shareWithEnterprise === true) {
+      const confirmed = await requestEnterpriseContextConsent(
+        () => call('enterpriseStatus'),
+        async server => {
+          const consent = await dialog.showMessageBox(win, {
+            type: 'warning',
+            buttons: ['Anuluj', 'Wyślij jednorazowo'],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+            message: 'Przekazać tę treść i adres do serwera Enterprise?',
+            detail: `Dane zostaną wysłane jednorazowo do ${server} przez HTTPS. Serwer przetworzy je w pamięci zgodnie z bieżącą polityką; Sentinel sprawdzi, że API potwierdza brak trwałego zapisu treści. Zwykła synchronizacja nadal wysyła wyłącznie metadane.`
+          });
+          return consent.response === 1;
+        });
+      if (!confirmed) return null;
+    }
     return call(method, data);
   });
-  win = new BrowserWindow({ width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
+  win = new BrowserWindow({ show: !smokeTest, width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  const stopSmokeTestWatch = smokeTest ? watchSmokeTestWindow(win.webContents, message => {
+    console.error(message);
+    quitting = true;
+    app.exit(1);
+  }) : () => {};
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
@@ -98,11 +123,12 @@ app.whenReady().then(() => {
       await new Promise(resolve => setTimeout(resolve, 1500));
       fs.writeFileSync(path.join(process.env.SENTINEL_DATA_ROOT, 'smoke-test.passed'), 'renderer and engine checks passed');
       console.log('PASS: Electron renderer → isolated preload → IPC → .NET → SQLite');
+      stopSmokeTestWatch();
       quitting = true; app.quit();
-    } catch (error) { console.error(error); quitting = true; app.exit(1); }
+    } catch (error) { stopSmokeTestWatch(); console.error(error); quitting = true; app.exit(1); }
   });
   let collecting = false;
-  const collector = setInterval(async () => {
+  const collector = smokeTest ? null : setInterval(async () => {
     if (collecting || quitting) return;
     collecting = true;
     try {
@@ -115,12 +141,14 @@ app.whenReady().then(() => {
   }, 1000);
   app.on('before-quit', () => { clearInterval(collector); engine.dispose(); });
   if (process.argv.includes('--minimized')) win.hide();
-  const icon = nativeImage.createFromPath(path.join(__dirname, "../assets/icon-32.png"));
-  tray = new Tray(icon);
-  tray.setToolTip('Sentinel AI — otwórz, aby sprawdzić status');
-  tray.on('double-click', () => win.show());
-  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Otwórz Sentinel AI', click: () => win.show() },
-    { label: 'Zakończ', click: async () => { const answer = await dialog.showMessageBox({ type: 'question', message: 'Zakończyć Sentinel AI i zatrzymać silnik?', buttons: ['Anuluj', 'Zakończ'], defaultId: 0, cancelId: 0 }); if (answer.response === 1) { quitting = true; app.quit(); } } }]));
+  if (!smokeTest) {
+    const icon = nativeImage.createFromPath(path.join(__dirname, "../assets/icon-32.png"));
+    tray = new Tray(icon);
+    tray.setToolTip('Sentinel AI — otwórz, aby sprawdzić status');
+    tray.on('double-click', () => win.show());
+    tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Otwórz Sentinel AI', click: () => win.show() },
+      { label: 'Zakończ', click: async () => { const answer = await dialog.showMessageBox({ type: 'question', message: 'Zakończyć Sentinel AI i zatrzymać silnik?', buttons: ['Anuluj', 'Zakończ'], defaultId: 0, cancelId: 0 }); if (answer.response === 1) { quitting = true; app.quit(); } } }]));
+  }
 });
 app.on('before-quit', () => { quitting = true; });
 }

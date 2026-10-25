@@ -7,8 +7,13 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
+using UglyToad.PdfPig.Fonts.Standard14Fonts;
+using UglyToad.PdfPig.Writer;
 using Sentinel.Core;
 using Sentinel.Core.Configuration;
 using Sentinel.Core.Enterprise;
@@ -19,6 +24,223 @@ namespace Sentinel.Server.Tests;
 public sealed class EnterpriseAgentLiveTlsTests
 {
     [Fact]
+    public async Task AdminCanImportAndSearchTextFromPdfOverLoopback()
+    {
+        await using var embedding = new OllamaEmbeddingFixture();
+        var repository = FindRepositoryRoot();
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Release";
+        var serverDll = Path.Combine(repository, "server", "src", "Sentinel.Server.Api", "bin", configuration, "net10.0", "Sentinel.Server.Api.dll");
+        Assert.True(File.Exists(serverDll), $"Server API was not built: {serverDll}");
+
+        var temp = Path.Combine(Path.GetTempPath(), "sentinel-pdf-upload-e2e-" + Guid.NewGuid().ToString("N"));
+        var databasePath = Path.Combine(temp, "database");
+        Directory.CreateDirectory(temp);
+        using var portLease = new TcpListener(IPAddress.Loopback, 0);
+        portLease.Start();
+        var port = ((IPEndPoint)portLease.LocalEndpoint).Port;
+        portLease.Stop();
+        var server = $"http://127.0.0.1:{port}";
+        const string adminUsername = "pdf-e2e-admin";
+        const string adminPassword = "Pdf-e2e-admin-password-42!";
+        var stdoutLines = new ConcurrentQueue<string>();
+        var stderrLines = new ConcurrentQueue<string>();
+        Process? process = null;
+
+        try
+        {
+            var startInfo = new ProcessStartInfo("dotnet")
+            {
+                FileName = "dotnet",
+                Arguments = $"\"{serverDll}\"",
+                WorkingDirectory = repository,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            startInfo.Environment["ASPNETCORE_URLS"] = server;
+            startInfo.Environment["Sentinel__DataDirectory"] = databasePath;
+            startInfo.Environment["Sentinel__BootstrapAdminUsername"] = adminUsername;
+            startInfo.Environment["Sentinel__BootstrapAdminPassword"] = adminPassword;
+            startInfo.Environment["Logging__EventLog__LogLevel__Default"] = "None";
+            process = new Process { StartInfo = startInfo };
+            process.OutputDataReceived += (_, args) => { if (args.Data is not null) stdoutLines.Enqueue(args.Data); };
+            process.ErrorDataReceived += (_, args) => { if (args.Data is not null) stderrLines.Enqueue(args.Data); };
+            Assert.True(process.Start());
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            using var http = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(15) };
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+            await WaitForReadyAsync(http, server, process, stdoutLines, stderrLines, timeout.Token);
+            var login = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
+                new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var adminToken = login!["accessToken"]!.GetValue<string>();
+            await SendJsonAsync(http, server, "/api/v1/admin/users", HttpMethod.Post,
+                new { username = "readonly-e2e", password = "Read-only-e2e-password-42!", role = "ReadOnly" },
+                adminToken, HttpStatusCode.Created, timeout.Token);
+            var readOnlyLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
+                new { username = "readonly-e2e", password = "Read-only-e2e-password-42!" }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var readOnlyToken = readOnlyLogin!["accessToken"]!.GetValue<string>();
+
+            var hostDiagnostics = await SendJsonAsync(http, server, "/api/v1/admin/diagnostics/host", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.NotNull(hostDiagnostics!["capturedAtUtc"]);
+            Assert.False(string.IsNullOrWhiteSpace(hostDiagnostics["productVersion"]!.GetValue<string>()));
+            Assert.True(hostDiagnostics["processUptimeSeconds"]!.GetValue<long>() >= 0);
+            Assert.True(hostDiagnostics["processWorkingSetBytes"]!.GetValue<long>() > 0);
+            Assert.Equal("available", hostDiagnostics["database"]!["state"]!.GetValue<string>());
+            Assert.True(hostDiagnostics["database"]!["totalBytes"]!.GetValue<long>() > 0);
+            Assert.Equal(90, hostDiagnostics["deployment"]!["eventRetentionDays"]!.GetValue<int>());
+            Assert.True(hostDiagnostics["deployment"]!["customDataDirectory"]!.GetValue<bool>());
+            Assert.Equal("http", hostDiagnostics["deployment"]!["listeners"]![0]!["scheme"]!.GetValue<string>());
+            Assert.True(hostDiagnostics["deployment"]!["listeners"]![0]!["loopback"]!.GetValue<bool>());
+            Assert.DoesNotContain(databasePath, hostDiagnostics.ToJsonString(), StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(adminUsername, hostDiagnostics.ToJsonString(), StringComparison.OrdinalIgnoreCase);
+            await SendJsonAsync(http, server, "/api/v1/admin/diagnostics/host", HttpMethod.Get,
+                token: readOnlyToken, expected: HttpStatusCode.Forbidden, cancellationToken: timeout.Token);
+
+            var builder = new PdfDocumentBuilder();
+            var page = builder.AddPage(PageSize.A4);
+            var font = builder.AddStandard14Font(Standard14Font.Helvetica);
+            page.AddText("Enterprise payment security, company policy insists checking details", 12, new PdfPoint(25, 700), font);
+            using (var upload = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(server), "/api/v1/admin/knowledge/documents")))
+            {
+                upload.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+                upload.Headers.Add("X-Sentinel-Filename", "enterprise-e2e.pdf");
+                upload.Content = new ByteArrayContent(builder.Build());
+                upload.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                using var response = await http.SendAsync(upload, timeout.Token);
+                Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            }
+
+            var hits = await SendJsonAsync(http, server,
+                "/api/v1/admin/knowledge/search?query=payment&limit=5",
+                HttpMethod.Get, token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.Equal("enterprise-e2e.pdf", hits![0]!["sourceName"]!.GetValue<string>());
+            Assert.Contains("payment", hits.ToJsonString(), StringComparison.OrdinalIgnoreCase);
+
+            var aiConfiguration = await SendJsonAsync(http, server, "/api/v1/admin/ai/configuration", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            await SendJsonAsync(http, server, "/api/v1/admin/ai/configuration", HttpMethod.Put,
+                new { endpoint = embedding.Endpoint, model = "e2e-embedding", enabled = false, timeoutSeconds = 30,
+                    expectedVersion = aiConfiguration!["version"]!.GetValue<long>() },
+                adminToken, HttpStatusCode.OK, timeout.Token);
+            Assert.Null(await SendJsonAsync(http, server,
+                "/api/v1/admin/knowledge/search-semantic?query=payment&limit=5&model=e2e-embedding",
+                HttpMethod.Get, token: readOnlyToken, expected: HttpStatusCode.Forbidden, cancellationToken: timeout.Token));
+            Assert.Equal(0, embedding.RequestCount); // A read-only user cannot trigger indexing or send KB text to Ollama.
+            var semanticHits = await SendJsonAsync(http, server,
+                "/api/v1/admin/knowledge/search-semantic?query=payment&limit=5&model=e2e-embedding",
+                HttpMethod.Get, token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.Equal("enterprise-e2e.pdf", semanticHits![0]!["sourceName"]!.GetValue<string>());
+            Assert.Equal(2, embedding.RequestCount); // document chunk and query; the vector cache avoids a second document request.
+            Assert.Contains(embedding.ReceivedInputs, input => input.Contains("company policy insists", StringComparison.Ordinal));
+
+            var currentAiConfiguration = await SendJsonAsync(http, server, "/api/v1/admin/ai/configuration", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            await SendJsonAsync(http, server, "/api/v1/admin/ai/configuration", HttpMethod.Put,
+                new { endpoint = embedding.Endpoint, model = "e2e-chat", enabled = true, timeoutSeconds = 30,
+                    expectedVersion = currentAiConfiguration!["version"]!.GetValue<long>() },
+                adminToken, HttpStatusCode.OK, timeout.Token);
+
+            var group = await SendJsonAsync(http, server, "/api/v1/admin/groups", HttpMethod.Post,
+                new { name = "Policy E2E" }, adminToken, HttpStatusCode.Created, timeout.Token);
+            var invitation = await SendJsonAsync(http, server, "/api/v1/admin/invitations", HttpMethod.Post,
+                new { group = group!["name"]!.GetValue<string>(), expiresAt = DateTimeOffset.UtcNow.AddMinutes(5), maximumRegistrations = 1 },
+                adminToken, HttpStatusCode.Created, timeout.Token);
+            var enrolled = await SendJsonAsync(http, server, "/api/v1/agents/enroll", HttpMethod.Post,
+                new { invitationCode = invitation!["registrationCode"]!.GetValue<string>(), deviceName = "POLICY-E2E", clientVersion = "1.2.3" },
+                expected: HttpStatusCode.Created, cancellationToken: timeout.Token);
+            var deviceToken = enrolled!["deviceToken"]!.GetValue<string>();
+            var deviceId = enrolled["deviceId"]!.GetValue<string>();
+            await SendJsonAsync(http, server, $"/api/v1/admin/devices/{deviceId}/policy", HttpMethod.Put,
+                new { policy = new { analysisMode = "server", includeContext = true, aiProvider = "ollama", ragEnabled = false }, expectedVersion = 0, confirmedSensitiveChange = true },
+                adminToken, HttpStatusCode.NoContent, timeout.Token);
+            var configurationResponse = await SendJsonAsync(http, server, "/api/v1/agents/configuration", HttpMethod.Get,
+                token: deviceToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.Equal("server", configurationResponse!["effective"]!["analysisMode"]!.GetValue<string>());
+            Assert.True(configurationResponse["effective"]!["includeContext"]!.GetValue<bool>());
+            Assert.False(configurationResponse["effective"]!["ragEnabled"]!.GetValue<bool>());
+            const string remoteContext = "SentinelEnterpriseContextMustNotPersist-9F6A13 Please verify payment details.";
+            var unconfirmedAnalysis = await SendJsonAsync(http, server, "/api/v1/agents/analyze", HttpMethod.Post,
+                new { application = "Synthetic", text = remoteContext, targetUrl = "https://example.test/login", contextSharingConfirmed = false },
+                token: deviceToken, expected: HttpStatusCode.BadRequest, cancellationToken: timeout.Token);
+            Assert.NotNull(unconfirmedAnalysis);
+            var remoteAnalysis = await SendJsonAsync(http, server, "/api/v1/agents/analyze", HttpMethod.Post,
+                new { application = "Synthetic", text = remoteContext, targetUrl = "https://example.test/login", contextSharingConfirmed = true },
+                token: deviceToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.False(remoteAnalysis!["contextPersisted"]!.GetValue<bool>());
+            Assert.True(remoteAnalysis["modelEnabled"]!.GetValue<bool>());
+            Assert.DoesNotContain(embedding.ReceivedChatMessages, prompt => prompt.Contains("company policy insists", StringComparison.Ordinal));
+            Assert.Equal(1, embedding.ChatRequestCount);
+            var urlOnlyAnalysis = await SendJsonAsync(http, server, "/api/v1/agents/analyze", HttpMethod.Post,
+                new { application = "Synthetic", text = "", targetUrl = "https://example.test/login", contextSharingConfirmed = true },
+                token: deviceToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.False(urlOnlyAnalysis!["contextPersisted"]!.GetValue<bool>());
+            Assert.Equal(2, embedding.ChatRequestCount);
+            Assert.DoesNotContain(embedding.ReceivedChatMessages, prompt => prompt.Contains("company policy insists", StringComparison.Ordinal));
+            var databaseText = string.Concat(Directory.GetFiles(databasePath, "sentinel-server.db*")
+                .Select(path => Encoding.UTF8.GetString(File.ReadAllBytes(path))));
+            Assert.DoesNotContain(remoteContext, databaseText, StringComparison.Ordinal);
+            Assert.DoesNotContain("https://example.test/login", databaseText, StringComparison.Ordinal);
+            var globalVersion = configurationResponse!["globalVersion"]!.GetValue<long>();
+            var groupVersion = configurationResponse["groupVersion"]!.GetValue<long>();
+            var deviceVersion = configurationResponse["deviceVersion"]!.GetValue<long>();
+            var heartbeat = new { globalPolicyVersion = globalVersion, groupPolicyVersion = groupVersion, devicePolicyVersion = deviceVersion };
+            Assert.Null(await SendJsonAsync(http, server, "/api/v1/agents/heartbeat", HttpMethod.Post, heartbeat,
+                token: deviceToken, expected: HttpStatusCode.NoContent, cancellationToken: timeout.Token));
+            var devices = await SendJsonAsync(http, server, "/api/v1/admin/devices", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var deviceView = devices!.AsArray().Single(item => item!["id"]!.GetValue<string>() == deviceId);
+            Assert.True(deviceView!["policyCurrent"]!.GetValue<bool>());
+            Assert.Equal(groupVersion, deviceView["appliedPolicy"]!["groupVersion"]!.GetValue<long>());
+            var incompleteHeartbeat = await SendJsonAsync(http, server, "/api/v1/agents/heartbeat", HttpMethod.Post,
+                new { globalPolicyVersion = globalVersion }, token: deviceToken,
+                expected: HttpStatusCode.BadRequest, cancellationToken: timeout.Token);
+            Assert.NotNull(incompleteHeartbeat);
+            var negativeHeartbeat = await SendJsonAsync(http, server, "/api/v1/agents/heartbeat", HttpMethod.Post,
+                new { globalPolicyVersion = -1, groupPolicyVersion = groupVersion, devicePolicyVersion = deviceVersion },
+                token: deviceToken, expected: HttpStatusCode.BadRequest, cancellationToken: timeout.Token);
+            Assert.NotNull(negativeHeartbeat);
+            Assert.Null(await SendJsonAsync(http, server, "/api/v1/agents/heartbeat", HttpMethod.Post,
+                heartbeat with { globalPolicyVersion = globalVersion + 1 }, token: deviceToken,
+                expected: HttpStatusCode.NoContent, cancellationToken: timeout.Token));
+            devices = await SendJsonAsync(http, server, "/api/v1/admin/devices", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            deviceView = devices!.AsArray().Single(item => item!["id"]!.GetValue<string>() == deviceId);
+            Assert.False(deviceView!["policyCurrent"]!.GetValue<bool>());
+
+            await SendJsonAsync(http, server, $"/api/v1/admin/devices/{deviceId}/policy", HttpMethod.Put,
+                new { policy = new { analysisMode = "server", includeContext = true, aiProvider = "ollama", ragEnabled = true },
+                    expectedVersion = deviceVersion, confirmedSensitiveChange = true },
+                adminToken, HttpStatusCode.NoContent, timeout.Token);
+            configurationResponse = await SendJsonAsync(http, server, "/api/v1/agents/configuration", HttpMethod.Get,
+                token: deviceToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.True(configurationResponse!["effective"]!["ragEnabled"]!.GetValue<bool>());
+            var enabledRagAnalysis = await SendJsonAsync(http, server, "/api/v1/agents/analyze", HttpMethod.Post,
+                new { application = "Synthetic", text = "Please verify payment details.", targetUrl = "", contextSharingConfirmed = true },
+                token: deviceToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.True(enabledRagAnalysis!["modelEnabled"]!.GetValue<bool>());
+            Assert.False(enabledRagAnalysis["contextPersisted"]!.GetValue<bool>());
+            Assert.Equal(3, embedding.ChatRequestCount);
+            Assert.True(embedding.ReceivedChatMessages.Any(
+                prompt => prompt.Contains("company policy insists", StringComparison.Ordinal)),
+                string.Join("\n---\n", embedding.ReceivedChatMessages));
+        }
+        finally
+        {
+            if (process is { HasExited: false })
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+            process?.Dispose();
+            try { Directory.Delete(temp, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    [Fact]
     public async Task AgentEnrollsSyncsRotatesAndIsRevokedAgainstLiveTlsServer()
     {
         var repository = FindRepositoryRoot();
@@ -27,6 +249,7 @@ public sealed class EnterpriseAgentLiveTlsTests
         Assert.True(File.Exists(serverDll), $"Server API was not built: {serverDll}");
 
         var temp = Path.Combine(Path.GetTempPath(), "sentinel-agent-tls-e2e-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temp);
         Directory.CreateDirectory(temp);
         var pfxPath = Path.Combine(temp, "loopback.pfx");
         var databasePath = Path.Combine(temp, "database");
@@ -47,7 +270,7 @@ public sealed class EnterpriseAgentLiveTlsTests
 
         Process StartServer()
         {
-            EnsureTestCertificateIsLoadable(pfxPath, pfxPassword);
+            EnsureTemporaryCertificateFileExists(pfxPath);
             var instance = new Process
             {
                 StartInfo = new ProcessStartInfo("dotnet")
@@ -96,6 +319,26 @@ public sealed class EnterpriseAgentLiveTlsTests
             var adminLogin = await SendJsonAsync(http, server, "/api/v1/admin/auth/login", HttpMethod.Post,
                 new { username = adminUsername, password = adminPassword }, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
             var adminToken = adminLogin!["accessToken"]!.GetValue<string>();
+
+            var pdfBuilder = new PdfDocumentBuilder();
+            var pdfPage = pdfBuilder.AddPage(PageSize.A4);
+            var pdfFont = pdfBuilder.AddStandard14Font(Standard14Font.Helvetica);
+            pdfPage.AddText("SentinelEnterprisePdfSearchToken", 12, new PdfPoint(25, 700), pdfFont);
+            using (var upload = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(server), "/api/v1/admin/knowledge/documents")))
+            {
+                upload.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+                upload.Headers.Add("X-Sentinel-Filename", "enterprise-e2e.pdf");
+                upload.Content = new ByteArrayContent(pdfBuilder.Build());
+                upload.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+                using var uploaded = await http.SendAsync(upload, timeout.Token);
+                Assert.Equal(HttpStatusCode.Created, uploaded.StatusCode);
+            }
+            var pdfHits = await SendJsonAsync(http, server,
+                "/api/v1/admin/knowledge/search?query=SentinelEnterprisePdfSearchToken&limit=5",
+                HttpMethod.Get, token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            Assert.Contains("enterprise-e2e.pdf", pdfHits!.ToJsonString(), StringComparison.Ordinal);
+            Assert.Contains("SentinelEnterprisePdfSearchToken", pdfHits.ToJsonString(), StringComparison.Ordinal);
+
             var group = await SendJsonAsync(http, server, "/api/v1/admin/groups", HttpMethod.Post,
                 new { name = "TLS E2E" }, adminToken, HttpStatusCode.Created, timeout.Token);
             var expiresAt = DateTimeOffset.UtcNow.AddMinutes(5);
@@ -111,9 +354,20 @@ public sealed class EnterpriseAgentLiveTlsTests
                 HttpMethod.Put, new { approved = true }, adminToken, HttpStatusCode.NoContent, timeout.Token);
             Assert.Null(approval);
 
+            EnterprisePolicy appliedPolicy;
             using (var configurationResponse = await agent.ReadConfigurationAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, timeout.Token))
+            {
                 Assert.Equal("local", configurationResponse.RootElement.GetProperty("effective").GetProperty("analysisMode").GetString());
-            await agent.SendHeartbeatAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken, cancellationToken: timeout.Token);
+                appliedPolicy = EnterprisePolicy.Parse(configurationResponse);
+            }
+            await agent.SendHeartbeatAsync(EnterpriseAgentClient.ValidateServer(server), enrollment.DeviceToken,
+                cancellationToken: timeout.Token, appliedPolicy: new EnterprisePolicyRevision(appliedPolicy.GlobalVersion,
+                    appliedPolicy.GroupVersion!.Value, appliedPolicy.DeviceVersion!.Value));
+            var devices = await SendJsonAsync(http, server, "/api/v1/admin/devices", HttpMethod.Get,
+                token: adminToken, expected: HttpStatusCode.OK, cancellationToken: timeout.Token);
+            var deviceView = devices!.AsArray().Single(item => item!["id"]!.GetValue<string>() == enrollment.DeviceId);
+            Assert.True(deviceView!["policyCurrent"]!.GetValue<bool>());
+            Assert.Equal(appliedPolicy.Version, deviceView["appliedPolicy"]!["globalVersion"]!.GetValue<long>());
 
             var item = new PendingEnterpriseEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, "url", 3, "url.suspicious_domain",
                 "manual-analysis", "2026.10.1");
@@ -175,6 +429,7 @@ public sealed class EnterpriseAgentLiveTlsTests
 
         var temp = Path.Combine(Path.GetTempPath(), "sentinel-engine-live-retry-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
+        Directory.CreateDirectory(temp);
         var pfxPath = Path.Combine(temp, "loopback.pfx");
         var certificatePath = Path.Combine(temp, "loopback.cer");
         var databasePath = Path.Combine(temp, "server-database");
@@ -199,7 +454,7 @@ public sealed class EnterpriseAgentLiveTlsTests
 
         Process StartServer()
         {
-            EnsureTestCertificateIsLoadable(pfxPath, pfxPassword);
+            EnsureTemporaryCertificateFileExists(pfxPath);
             var instance = new Process
             {
                 StartInfo = new ProcessStartInfo("dotnet")
@@ -339,28 +594,24 @@ public sealed class EnterpriseAgentLiveTlsTests
         return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
     }
 
-    private static void EnsureTestCertificateIsLoadable(string path, string password)
+    private static void EnsureTemporaryCertificateFileExists(string certificatePath)
     {
-        if (!File.Exists(path))
-            throw new InvalidOperationException("The temporary TLS certificate file does not exist; the API child process was not started.");
-
-        try
-        {
-            using var imported = X509CertificateLoader.LoadPkcs12FromFile(path, password, X509KeyStorageFlags.DefaultKeySet);
-            if (!imported.HasPrivateKey)
-                throw new InvalidOperationException("The temporary TLS certificate has no private key; the API child process was not started.");
-        }
-        catch (CryptographicException exception)
-        {
-            throw new InvalidOperationException("The temporary TLS certificate cannot be imported in the test process; the API child process was not started.", exception);
-        }
+        if (!File.Exists(certificatePath) || new FileInfo(certificatePath).Length == 0)
+            throw new InvalidOperationException("The temporary TLS certificate file is missing or empty; the API child process was not started.");
     }
 
     private static async Task WaitForReadyAsync(HttpClient http, string server, Process process,
         ConcurrentQueue<string> stdout, ConcurrentQueue<string> stderr, CancellationToken cancellationToken)
     {
+        string? lastTransportFailure = null;
         while (!cancellationToken.IsCancellationRequested)
         {
+            var startupFailure = stdout.Concat(stderr).FirstOrDefault(line =>
+                line.Contains("Hosting failed to start", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Unhandled exception", StringComparison.OrdinalIgnoreCase));
+            if (startupFailure is not null)
+                throw new InvalidOperationException("Live TLS server failed during startup. stdout: "
+                    + string.Join(Environment.NewLine, stdout) + " stderr: " + string.Join(Environment.NewLine, stderr));
             if (process.HasExited) throw new InvalidOperationException("Live TLS server exited before readiness. stdout: " + string.Join(Environment.NewLine, stdout) + " stderr: " + string.Join(Environment.NewLine, stderr));
             try
             {
@@ -371,11 +622,18 @@ public sealed class EnterpriseAgentLiveTlsTests
             {
                 throw new TimeoutException("Live TLS server did not become ready. stdout: " + string.Join(Environment.NewLine, stdout) + " stderr: " + string.Join(Environment.NewLine, stderr));
             }
-            catch (HttpRequestException) { }
-            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested) { }
-            await Task.Delay(100, cancellationToken);
+            catch (HttpRequestException exception)
+            {
+                var rootCause = exception.GetBaseException();
+                lastTransportFailure = $"{rootCause.GetType().Name}: {rootCause.Message}";
+            }
+            catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            { lastTransportFailure = $"{exception.GetType().Name}: {exception.Message}"; }
+            await Task.Delay(100);
         }
-        throw new TimeoutException("Live TLS server did not become ready.");
+        throw new TimeoutException("Live TLS server did not become ready. Last transport failure: "
+            + (lastTransportFailure ?? "none") + " stdout: " + string.Join(Environment.NewLine, stdout)
+            + " stderr: " + string.Join(Environment.NewLine, stderr));
     }
 
     private static async Task<JsonNode?> SendJsonAsync(HttpClient http, string server, string path, HttpMethod method,
@@ -389,6 +647,121 @@ public sealed class EnterpriseAgentLiveTlsTests
         Assert.True(response.StatusCode == expected,
             $"{method} {path}: expected {(int)expected}, received {(int)response.StatusCode}. {content}");
         return string.IsNullOrWhiteSpace(content) ? null : JsonNode.Parse(content);
+    }
+
+    private sealed class OllamaEmbeddingFixture : IAsyncDisposable
+    {
+        private readonly TcpListener listener;
+        private readonly CancellationTokenSource shutdown = new();
+        private readonly Task worker;
+        private int requestCount;
+        private int chatRequestCount;
+        public string Endpoint { get; }
+        public int RequestCount => Volatile.Read(ref requestCount);
+        public int ChatRequestCount => Volatile.Read(ref chatRequestCount);
+        public ConcurrentBag<string> ReceivedInputs { get; } = new();
+        public ConcurrentBag<string> ReceivedChatMessages { get; } = new();
+
+        public OllamaEmbeddingFixture()
+        {
+            listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Endpoint = $"http://127.0.0.1:{port}";
+            worker = ServeAsync(shutdown.Token);
+        }
+
+        private async Task ServeAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                using var client = await listener.AcceptTcpClientAsync(cancellationToken);
+                var stream = client.GetStream();
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                var requestLine = await reader.ReadLineAsync(cancellationToken)
+                    ?? throw new EndOfStreamException("Missing HTTP request line.");
+                var requestPath = requestLine.Split(' ', 3)[1];
+                var contentLength = 0;
+                var isChunked = false;
+                while (await reader.ReadLineAsync(cancellationToken) is { Length: > 0 } header)
+                {
+                    if (header.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)
+                        && int.TryParse(header.AsSpan("Content-Length:".Length).Trim(), out var parsedLength)) contentLength = parsedLength;
+                    if (header.StartsWith("Transfer-Encoding:", StringComparison.OrdinalIgnoreCase)
+                        && header.Contains("chunked", StringComparison.OrdinalIgnoreCase)) isChunked = true;
+                }
+                string requestJson;
+                if (isChunked)
+                {
+                    var chunkedBody = new StringBuilder();
+                    while (true)
+                    {
+                        var chunkHeader = await reader.ReadLineAsync(cancellationToken) ?? throw new EndOfStreamException("Missing chunk header.");
+                        var chunkLengthText = chunkHeader.Split(';', 2)[0];
+                        if (!int.TryParse(chunkLengthText, System.Globalization.NumberStyles.HexNumber,
+                                System.Globalization.CultureInfo.InvariantCulture, out var chunkLength) || chunkLength < 0 || chunkLength > 1_000_000)
+                            throw new InvalidDataException("Embedding fixture received an invalid chunk size.");
+                        if (chunkLength == 0) { _ = await reader.ReadLineAsync(cancellationToken); break; }
+                        var chunk = new char[chunkLength];
+                        var read = 0;
+                        while (read < chunk.Length)
+                        {
+                            var countRead = await reader.ReadBlockAsync(chunk.AsMemory(read), cancellationToken);
+                            if (countRead == 0) throw new EndOfStreamException("Embedding fixture received an incomplete chunk.");
+                            read += countRead;
+                        }
+                        chunkedBody.Append(chunk);
+                        _ = await reader.ReadLineAsync(cancellationToken); // CRLF after each chunk.
+                    }
+                    requestJson = chunkedBody.ToString();
+                }
+                else
+                {
+                    if (contentLength is < 1 or > 1_000_000) throw new InvalidDataException("Embedding fixture received an invalid request size.");
+                    var requestBody = new char[contentLength];
+                    var read = 0;
+                    while (read < requestBody.Length)
+                    {
+                        var countRead = await reader.ReadBlockAsync(requestBody.AsMemory(read), cancellationToken);
+                        if (countRead == 0) throw new EndOfStreamException("Embedding fixture received an incomplete request.");
+                        read += countRead;
+                    }
+                    requestJson = new string(requestBody);
+                }
+                using var document = JsonDocument.Parse(requestJson);
+                string responseBody;
+                if (requestPath == "/api/chat")
+                {
+                    var messages = document.RootElement.GetProperty("messages");
+                    ReceivedChatMessages.Add(messages[1].GetProperty("content").GetString()!);
+                    Interlocked.Increment(ref chatRequestCount);
+                    responseBody = "{\"message\":{\"content\":\"{\\\"category\\\":\\\"None\\\",\\\"risk\\\":\\\"Low\\\",\\\"indicators\\\":[],\\\"uncertainties\\\":[],\\\"recommendations\\\":[],\\\"explanation\\\":\\\"Synthetic loopback model.\\\"}\"}}";
+                }
+                else if (requestPath == "/api/embed")
+                {
+                    var inputs = document.RootElement.GetProperty("input");
+                    var count = inputs.ValueKind == JsonValueKind.Array ? inputs.GetArrayLength() : 1;
+                    if (inputs.ValueKind == JsonValueKind.Array)
+                        foreach (var item in inputs.EnumerateArray()) if (item.ValueKind == JsonValueKind.String) ReceivedInputs.Add(item.GetString()!);
+                    Interlocked.Increment(ref requestCount);
+                    responseBody = "{\"embeddings\":[" + string.Join(',', Enumerable.Repeat("[1,0]", count)) + "]}";
+                }
+                else throw new InvalidDataException($"Unexpected local AI request path: {requestPath}");
+                var bytes = Encoding.UTF8.GetBytes(responseBody);
+                var headers = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
+                await stream.WriteAsync(headers, cancellationToken);
+                await stream.WriteAsync(bytes, cancellationToken);
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            shutdown.Cancel();
+            listener.Stop();
+            try { await worker.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) { }
+            shutdown.Dispose();
+        }
     }
 
     private sealed class InMemoryCredentialStore(string? value) : IDeviceCredentialStore

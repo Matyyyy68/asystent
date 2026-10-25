@@ -52,7 +52,7 @@ jobs:
         run: ./scripts/audit-nuget.ps1
       - name: Build and test application
         shell: pwsh
-        run: ./scripts/build-user.ps1 -Installer
+        run: ./scripts/build-user.ps1 -Installer -AllowDownloads
       - name: Build and test Enterprise API
         shell: pwsh
         run: |

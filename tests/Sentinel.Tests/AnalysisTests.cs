@@ -122,7 +122,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.9", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.10", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
@@ -132,7 +132,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", url));
         Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
         Assert.True(result.Risk >= RiskLevel.Moderate);
-        Assert.Equal("2026.10.9", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.10", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -153,7 +153,7 @@ public sealed class AnalysisTests
 
         Assert.Contains(result.Indicators, item => item.Id == "url.structure_combination");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.9", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.10", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -197,7 +197,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.9", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.10", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]
@@ -245,6 +245,49 @@ public sealed class AnalysisTests
 
         Assert.Empty(result.Indicators);
         Assert.Contains(result.Uncertainties, item => item.Contains("Adresy HTTP/HTTPS zapisane w treści"));
+    }
+    [Theory]
+    [InlineData("https://paypal[.]com.evil.test/login", "https://paypal.com.evil.test/login")]
+    [InlineData("hxxps[:]//paypal[.]com.evil.test/login", "https://paypal.com.evil.test/login")]
+    [InlineData("hxxp://paypal[dot]com.evil.test/login", "http://paypal.com.evil.test/login")]
+    [InlineData("https://paypal(.)com.evil.test:8443/login", "https://paypal.com.evil.test:8443/login")]
+    public void DefangedEmbeddedUrlsAreNormalizedOnlyForLocalAnalysis(string input, string expected)
+    {
+        var extracted = ThreatAnalysisEngine.ExtractEmbeddedUrls(input);
+        Assert.Equal([expected], extracted.Urls);
+        Assert.True(extracted.ContainsDefanged);
+
+        var result = Engine().Analyze(Input(input));
+        Assert.Contains(result.Indicators, item => item.Id == "url.defanged");
+        Assert.Contains(result.Indicators, item => item.Id == "url.brand");
+        Assert.True(result.Risk >= RiskLevel.Moderate);
+        Assert.Contains(result.Uncertainties, item => item.Contains("został znormalizowany w pamięci"));
+        Assert.DoesNotContain("paypal.com.evil.test", result.Explanation);
+    }
+    [Fact]
+    public void DefangMarkersOutsideTheHostAreNotNormalizedOrFlagged()
+    {
+        var result = Engine().Analyze(Input("Dokumentacja: https://example.com/path[.]txt"));
+
+        Assert.DoesNotContain(result.Indicators, item => item.Id == "url.defanged");
+        Assert.DoesNotContain(result.Indicators, item => item.Id.StartsWith("url.", StringComparison.Ordinal));
+    }
+    [Fact]
+    public void DefangMarkersInUrlUserInfoAreNotTreatedAsHostDefanging()
+    {
+        var extracted = ThreatAnalysisEngine.ExtractEmbeddedUrls("https://user[.]name@example.com/account");
+
+        Assert.False(extracted.ContainsDefanged);
+        Assert.Equal(["https://user[.]name@example.com/account"], extracted.Urls);
+    }
+    [Fact]
+    public void DuplicateNormalizedUrlsRetainDefangedProvenance()
+    {
+        var extracted = ThreatAnalysisEngine.ExtractEmbeddedUrls(
+            "https://paypal.com.evil.test/login hxxps[:]//paypal[.]com.evil.test/login");
+
+        Assert.Equal(["https://paypal.com.evil.test/login"], extracted.Urls);
+        Assert.True(extracted.ContainsDefanged);
     }
     [Fact]
     public void EmbeddedUrlAnalysisIsBoundedAndReportsOmittedLinks()

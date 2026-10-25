@@ -8,10 +8,16 @@ namespace Sentinel.Core.Analysis;
 /// <summary>Deterministic rules; untrusted content cannot invoke tools or alter the rules.</summary>
 public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
 {
-    public const string RulesVersion = "2026.10.9";
+    public const string RulesVersion = "2026.10.10";
     private const int MaximumEmbeddedUrls = 10;
     private static readonly Regex EmbeddedHttpUrl = new(
         @"\bhttps?://[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EmbeddedDefangedHttpUrl = new(
+        @"\bhxxps?(?:\[:\]|:)//[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex DefangedScheme = new(
+        @"^hxxps?(?:\[:\]|:)//", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex DefangedHostSeparator = new(
+        @"(?i)(?:\[\.\]|\(\.\)|\[dot\])", RegexOptions.CultureInvariant);
     private readonly object gate = new();
     private readonly Dictionary<string, (DateTimeOffset Seen, DateTimeOffset? UrgencyAt)> sessions = new(StringComparer.Ordinal);
     public ThreatAssessment Analyze(AnalysisContext context)
@@ -54,6 +60,8 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         var extractedUrls = ExtractEmbeddedUrls(context.Text);
         foreach (var embeddedUrl in extractedUrls.Urls)
             indicators.AddRange(urls.Analyze(embeddedUrl).Indicators);
+        if (extractedUrls.ContainsDefanged)
+            Add("url.defanged", "Zapis defangowany adresu został znormalizowany wyłącznie na potrzeby lokalnej analizy.", 1, ThreatCategory.SuspiciousNavigation);
         bool priorUrgency = false;
         if (context.CorrelationKey is { Length: > 0 and <= 200 } key)
         {
@@ -77,6 +85,8 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         var uncertainty = new List<string> { "Reguły nie potwierdzają intencji nadawcy ani bezpieczeństwa strony. Brak sygnałów nie oznacza bezpieczeństwa." };
         if (extractedUrls.Urls.Count > 0)
             uncertainty.Add("Adresy HTTP/HTTPS zapisane w treści przeanalizowano lokalnie; faktyczny cel kliknięcia nie został potwierdzony.");
+        if (extractedUrls.ContainsDefanged)
+            uncertainty.Add("Zapis hxxp lub [.] został znormalizowany w pamięci; adresu nie otwierano.");
         if (extractedUrls.Truncated)
             uncertainty.Add($"Przeanalizowano najwyżej {MaximumEmbeddedUrls} różnych adresów z treści; pozostałe pominięto.");
         if (context.Navigation is null) uncertainty.Add("Nie ustalono wiarygodnego adresu docelowego ani przekierowań; UI Automation nie potwierdza nawigacji.");
@@ -93,15 +103,65 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         return new(category, risk, indicators, uncertainty, recommendations, explanation);
     }
 
-    public static (IReadOnlyList<string> Urls, bool Truncated) ExtractEmbeddedUrls(string text)
+    public static (IReadOnlyList<string> Urls, bool Truncated, bool ContainsDefanged) ExtractEmbeddedUrls(string text)
     {
-        var matches = EmbeddedHttpUrl.Matches(text)
-            .Select(match => TrimUrlBoundaryPunctuation(match.Value))
-            .Where(candidate => candidate.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        var candidates = new List<(string Value, bool Defanged)>();
+        foreach (var match in EmbeddedHttpUrl.Matches(text).Cast<Match>()
+                     .Concat(EmbeddedDefangedHttpUrl.Matches(text).Cast<Match>()))
+        {
+            if (NormalizeEmbeddedUrl(TrimUrlBoundaryPunctuation(match.Value)) is { } candidate)
+                candidates.Add(candidate);
+        }
+        var matches = candidates
+            .GroupBy(candidate => candidate.Value, StringComparer.OrdinalIgnoreCase)
+            .Select(group => (Value: group.First().Value, Defanged: group.Any(candidate => candidate.Defanged)))
             .Take(MaximumEmbeddedUrls + 1)
             .ToArray();
-        return (matches.Take(MaximumEmbeddedUrls).ToArray(), matches.Length > MaximumEmbeddedUrls);
+        var included = matches.Take(MaximumEmbeddedUrls).ToArray();
+        return (included.Select(candidate => candidate.Value).ToArray(), matches.Length > MaximumEmbeddedUrls,
+            included.Any(candidate => candidate.Defanged));
+    }
+    private static (string Value, bool Defanged)? NormalizeEmbeddedUrl(string candidate)
+    {
+        if (candidate.Length == 0) return null;
+        var defanged = false;
+        var scheme = DefangedScheme.Match(candidate);
+        if (scheme.Success)
+        {
+            var normalizedScheme = candidate.StartsWith("hxxps", StringComparison.OrdinalIgnoreCase) ? "https://" : "http://";
+            candidate = normalizedScheme + candidate[scheme.Length..];
+            defanged = true;
+        }
+
+        var authorityStart = candidate.IndexOf("://", StringComparison.Ordinal);
+        if (authorityStart < 0) return (candidate, defanged);
+        authorityStart += 3;
+        var authorityEnd = candidate.IndexOfAny(['/','?','#'], authorityStart);
+        if (authorityEnd < 0) authorityEnd = candidate.Length;
+        var authority = candidate[authorityStart..authorityEnd];
+        var hostStart = authority.LastIndexOf('@') + 1;
+        var hostPort = authority[hostStart..];
+        // A defang marker only has meaning in a DNS host. Never rewrite userinfo,
+        // ports, or IPv6 literals as though they were domain labels.
+        if (hostPort.StartsWith("[", StringComparison.Ordinal)) return (candidate, false);
+        var portSeparator = hostPort.LastIndexOf(':');
+        var hostLength = portSeparator >= 0 && hostPort[(portSeparator + 1)..].All(char.IsAsciiDigit)
+            ? portSeparator
+            : hostPort.Length;
+        var host = hostPort[..hostLength];
+        var normalizedHost = DefangedHostSeparator.Replace(host, ".");
+        if (!string.Equals(host, normalizedHost, StringComparison.Ordinal))
+        {
+            var absoluteHostStart = authorityStart + hostStart;
+            candidate = candidate[..absoluteHostStart] + normalizedHost + candidate[(absoluteHostStart + hostLength)..];
+            defanged = true;
+        }
+
+        if (!defanged) return (candidate, false);
+        return Uri.TryCreate(candidate, UriKind.Absolute, out var uri) &&
+               uri.Scheme is "http" or "https" && !string.IsNullOrWhiteSpace(uri.Host)
+            ? (candidate, true)
+            : null;
     }
     private static string TrimUrlBoundaryPunctuation(string value)
     {

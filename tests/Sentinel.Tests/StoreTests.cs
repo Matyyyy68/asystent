@@ -77,7 +77,52 @@ public sealed class StoreTests : IDisposable
         Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(34L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact] public async Task VersionThirtyFourDatabaseMigratesProcessBacklogWithoutLosingHistoryOrBaseline()
+    {
+        var store = await Store();
+        await store.AddAsync(Event());
+        await store.CommitProcessMonitorChangesAsync([], [new KeyValuePair<int, string>(77, "existing-process")], []);
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand(); command.CommandText = "DROP TABLE process_change_backlog; ALTER TABLE process_monitor_metadata DROP COLUMN dropped_changes; PRAGMA user_version=34";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        Assert.Single(await store.ReadAsync());
+        Assert.Equal("existing-process", (await store.ReadProcessMonitorSnapshotAsync()).Processes[77]);
+        Assert.Equal(0, (await store.ReadPendingProcessChangesAsync()).Count);
+        await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
+        await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact] public async Task VersionThirtyFiveMigrationAddsDurableDroppedChangeCounterWithoutLosingData()
+    {
+        var store = await Store();
+        await store.AddAsync(Event());
+        await store.CommitProcessMonitorChangesAsync([], [new KeyValuePair<int, string>(88, "existing-process")], [],
+            backlogToAdd: [new ProcessChangeQueueItem(0, Guid.NewGuid(), DateTimeOffset.UtcNow,
+                "Proces zaobserwowany", 89, "pending-process", Guid.NewGuid())]);
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand(); command.CommandText = "ALTER TABLE process_monitor_metadata DROP COLUMN dropped_changes; PRAGMA user_version=35";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        Assert.Single(await store.ReadAsync());
+        Assert.Equal("existing-process", (await store.ReadProcessMonitorSnapshotAsync()).Processes[88]);
+        Assert.Equal(1, (await store.ReadPendingProcessChangesAsync()).Count);
+        Assert.Equal(0L, (await store.ReadProcessMonitorSnapshotAsync()).DroppedChanges);
+        await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
+        await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTwentyTwoMigrationAddsProcessingTimesWithoutInventingLegacyValuesAndPreservesNewValues()
     {
@@ -459,7 +504,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(34L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -1098,7 +1143,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(34L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -1117,7 +1162,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(34L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {

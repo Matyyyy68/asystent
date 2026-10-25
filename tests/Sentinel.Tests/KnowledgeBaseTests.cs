@@ -1,5 +1,8 @@
 using System.IO.Compression;
+using System.Diagnostics;
 using System.Text;
+using Microsoft.Data.Sqlite;
+using Sentinel.Core.Analysis;
 using Sentinel.Core.Knowledge;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Core;
@@ -97,6 +100,245 @@ public sealed class KnowledgeBaseTests : IDisposable
     }
 
     [Fact]
+    public async Task SemanticSearchFindsLexicallyUnmatchedChunkAcrossTheWholeIndexAndCachesVectors()
+    {
+        var store = await CreateAsync();
+        var relevantPath = Path.Combine(directory, "compensation.md");
+        var unrelatedPath = Path.Combine(directory, "dns.md");
+        await File.WriteAllTextAsync(relevantPath, "Annual salary changes require approval by human resources. password: kb-secret-value");
+        await File.WriteAllTextAsync(unrelatedPath, "DNS records resolve domain names to network addresses.");
+        var relevant = await store.ImportAsync(relevantPath);
+        await store.ImportAsync(unrelatedPath);
+        var embeddings = new SyntheticEmbeddingProvider();
+
+        Assert.Empty(await store.SearchAsync("compensation policy"));
+        var semantic = await store.SearchSemanticAsync("compensation policy", "http://127.0.0.1:11434", "synthetic-embed", embeddings);
+
+        Assert.NotEmpty(semantic);
+        Assert.Equal(relevant.Id, semantic[0].DocumentId);
+        Assert.Contains("salary", semantic[0].Excerpt, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(3, embeddings.InputCount); // Two indexed chunks and the query vector.
+
+        var reopened = new LocalKnowledgeBase(directory);
+        await reopened.InitializeAsync();
+        var cached = await reopened.SearchSemanticAsync("compensation policy", "http://127.0.0.1:11434", "synthetic-embed", embeddings);
+        Assert.NotEmpty(cached);
+        Assert.Equal(relevant.Id, cached[0].DocumentId);
+        Assert.Equal(4, embeddings.InputCount); // Reopening reuses both persisted vectors; only the query is embedded.
+
+        var backupPath = Path.Combine(directory, "semantic-backup.db");
+        await reopened.BackupAsync(backupPath);
+
+        Assert.True(await reopened.DeleteAsync(relevant.Id));
+        Assert.DoesNotContain(relevant.Id, (await reopened.SearchSemanticAsync("compensation policy", "http://127.0.0.1:11434", "synthetic-embed", embeddings)).Select(hit => hit.DocumentId));
+        Assert.Equal(5, embeddings.InputCount); // Deleted document vector was removed; only the query was embedded.
+
+        Assert.Equal(2, await reopened.RestoreAsync(backupPath));
+        var restored = await reopened.SearchSemanticAsync("compensation policy", "http://127.0.0.1:11434", "synthetic-embed", embeddings);
+        Assert.Equal(relevant.Id, restored[0].DocumentId);
+        Assert.Equal(8, embeddings.InputCount); // Restore clears derived vectors and rebuilds from restored source chunks.
+        Assert.Contains(embeddings.Inputs, input => input.Contains("[dane poufne]", StringComparison.Ordinal));
+        Assert.DoesNotContain(embeddings.Inputs, input => input.Contains("kb-secret-value", StringComparison.Ordinal));
+
+        var changedModel = await reopened.SearchSemanticAsync("compensation policy", "http://127.0.0.1:11434", "synthetic-embed-v2", embeddings);
+        Assert.Equal(relevant.Id, changedModel[0].DocumentId);
+        Assert.Equal(11, embeddings.InputCount); // A model change invalidates and rebuilds all cached document vectors.
+
+        var changedEndpoint = await reopened.SearchSemanticAsync("compensation policy", "http://localhost:11434", "synthetic-embed-v2", embeddings);
+        Assert.Equal(relevant.Id, changedEndpoint[0].DocumentId);
+        Assert.Equal(14, embeddings.InputCount); // Endpoint changes invalidate the cache too.
+    }
+
+    [Fact]
+    public async Task ConcurrentSemanticSearchesAcrossInstancesSerializeCacheRebuildsAcrossModels()
+    {
+        var store = await CreateAsync();
+        var secondStore = new LocalKnowledgeBase(directory);
+        await secondStore.InitializeAsync();
+        var path = Path.Combine(directory, "policy.md");
+        await File.WriteAllTextAsync(path, "Annual salary changes require approval by human resources.");
+        await store.ImportAsync(path);
+
+        var embeddings = new ConcurrentEmbeddingProvider();
+        var first = store.SearchSemanticAsync("salary policy", "http://127.0.0.1:11434", "model-a", embeddings);
+        await embeddings.FirstCallEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var secondStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = Task.Run(async () =>
+        {
+            secondStarted.SetResult();
+            return await secondStore.SearchSemanticAsync("salary policy", "http://localhost:11434", "model-b", embeddings);
+        });
+        await secondStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        var concurrencyBeforeRelease = embeddings.MaximumConcurrentCalls;
+
+        embeddings.ReleaseFirstCall.TrySetResult();
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(1, concurrencyBeforeRelease);
+        Assert.Equal(1, embeddings.MaximumConcurrentCalls);
+        Assert.Single(await store.SearchSemanticAsync("salary policy", "http://localhost:11434", "model-b", embeddings));
+    }
+
+    [Fact]
+    public async Task ImportWaitsForExclusiveDatabaseOperationLockFile()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var store = await CreateAsync();
+        var lockPath = store.DatabasePath + ".operation.lock";
+        var helperPath = Path.Combine(directory, "hold-operation-lock.ps1");
+        await File.WriteAllTextAsync(helperPath, """
+            param([string]$LockPath)
+            $lock = [System.IO.File]::Open($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            try {
+                [Console]::Out.WriteLine('READY')
+                [Console]::Out.Flush()
+                [Console]::In.ReadLine() | Out-Null
+            } finally { $lock.Dispose() }
+            """);
+        var powershell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "powershell.exe");
+        Assert.True(File.Exists(powershell), "Windows PowerShell is required for the cross-process lock test.");
+        var start = new ProcessStartInfo(powershell)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        start.ArgumentList.Add("-NoLogo");
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-NonInteractive");
+        start.ArgumentList.Add("-ExecutionPolicy");
+        start.ArgumentList.Add("Bypass");
+        start.ArgumentList.Add("-File");
+        start.ArgumentList.Add(helperPath);
+        start.ArgumentList.Add(lockPath);
+        using var lockProcess = Process.Start(start) ?? throw new IOException("Could not start the cross-process lock helper.");
+        var stderrTask = lockProcess.StandardError.ReadToEndAsync();
+        try
+        {
+            Assert.Equal("READY", await lockProcess.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+            var sourcePath = Path.Combine(directory, "locked-import.md");
+            await File.WriteAllTextAsync(sourcePath, "This import must wait for the database operation lock.");
+
+            var import = store.ImportAsync(sourcePath);
+            await Task.Delay(TimeSpan.FromMilliseconds(150));
+            var waitedForOtherProcess = !import.IsCompleted;
+            await lockProcess.StandardInput.WriteLineAsync("release");
+            await lockProcess.StandardInput.FlushAsync();
+            await lockProcess.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            var result = await import.WaitAsync(TimeSpan.FromSeconds(5));
+            var lockProcessError = await stderrTask;
+            Assert.True(lockProcess.ExitCode == 0, lockProcessError);
+            Assert.True(waitedForOtherProcess, "Import should wait while a separate process holds the exclusive lock file.");
+            Assert.Equal("locked-import.md", result.Name);
+        }
+        finally
+        {
+            if (!lockProcess.HasExited)
+            {
+                try { await lockProcess.StandardInput.WriteLineAsync("release"); } catch (IOException) { }
+                try { lockProcess.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+                try { await lockProcess.WaitForExitAsync(); } catch (InvalidOperationException) { }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DeleteWaitsForSemanticIndexingAndRemovesItsVectors()
+    {
+        var store = await CreateAsync();
+        var secondStore = new LocalKnowledgeBase(directory);
+        await secondStore.InitializeAsync();
+        var path = Path.Combine(directory, "policy.md");
+        await File.WriteAllTextAsync(path, "Annual salary changes require approval by human resources.");
+        var document = await store.ImportAsync(path);
+        var embeddings = new ConcurrentEmbeddingProvider();
+
+        var search = store.SearchSemanticAsync("salary policy", "http://127.0.0.1:11434", "model-a", embeddings);
+        await embeddings.FirstCallEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var deletion = secondStore.DeleteAsync(document.Id);
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+        var deletionWaited = !deletion.IsCompleted;
+
+        embeddings.ReleaseFirstCall.TrySetResult();
+        await search;
+        Assert.True(await deletion);
+
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = store.DatabasePath, Pooling = false }.ToString());
+        await connection.OpenAsync();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM semantic_embeddings";
+
+        Assert.True(deletionWaited);
+        Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
+        Assert.Empty(await store.SearchSemanticAsync("salary policy", "http://127.0.0.1:11434", "model-a", embeddings));
+    }
+
+    private sealed class ConcurrentEmbeddingProvider : ITextEmbeddingProvider
+    {
+        private int activeCalls;
+        private int maximumConcurrentCalls;
+        private int firstCall = 1;
+
+        public TaskCompletionSource FirstCallEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseFirstCall { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int MaximumConcurrentCalls => Volatile.Read(ref maximumConcurrentCalls);
+
+        public async Task<IReadOnlyList<float[]>> EmbedAsync(string endpoint, string model, IReadOnlyList<string> inputs,
+            CancellationToken cancellationToken = default)
+        {
+            var active = Interlocked.Increment(ref activeCalls);
+            UpdateMaximum(active);
+            try
+            {
+                if (Interlocked.Exchange(ref firstCall, 0) == 1)
+                {
+                    FirstCallEntered.TrySetResult();
+                    await ReleaseFirstCall.Task.WaitAsync(cancellationToken);
+                }
+
+                IReadOnlyList<float[]> vectors = inputs.Select(_ => model == "model-a" ? new[] { 1f, 0f } : new[] { 0f, 1f }).ToArray();
+                return vectors;
+            }
+            finally { Interlocked.Decrement(ref activeCalls); }
+        }
+
+        private void UpdateMaximum(int value)
+        {
+            var current = Volatile.Read(ref maximumConcurrentCalls);
+            while (value > current)
+            {
+                var observed = Interlocked.CompareExchange(ref maximumConcurrentCalls, value, current);
+                if (observed == current) return;
+                current = observed;
+            }
+        }
+    }
+
+    private sealed class SyntheticEmbeddingProvider : ITextEmbeddingProvider
+    {
+        public int InputCount { get; private set; }
+        public List<string> Inputs { get; } = [];
+
+        public Task<IReadOnlyList<float[]>> EmbedAsync(string endpoint, string model, IReadOnlyList<string> inputs,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            InputCount += inputs.Count;
+            Inputs.AddRange(inputs);
+            IReadOnlyList<float[]> vectors = inputs.Select(text =>
+                text.Contains("compensation", StringComparison.OrdinalIgnoreCase) || text.Contains("salary", StringComparison.OrdinalIgnoreCase)
+                    ? new[] { 1f, 0f }
+                    : new[] { 0f, 1f }).ToArray();
+            return Task.FromResult(vectors);
+        }
+    }
+
+    [Fact]
     public async Task StorageMetricsReportKnowledgeDocumentsAndIndexSize()
     {
         var store = await CreateAsync();
@@ -111,6 +353,40 @@ public sealed class KnowledgeBaseTests : IDisposable
         Assert.True(metrics.TotalBytes >= metrics.DatabaseBytes);
         Assert.True(metrics.PageCount > 0);
         Assert.InRange(metrics.FreePages, 0, metrics.PageCount);
+    }
+
+    [Fact]
+    public async Task ExistingVersionOneKnowledgeDatabaseMigratesAndKeepsFtsContent()
+    {
+        Directory.CreateDirectory(directory);
+        var databasePath = Path.Combine(directory, "knowledge.db");
+        var documentId = Guid.NewGuid().ToString("N");
+        var importedAt = DateTimeOffset.UtcNow.ToString("O");
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE documents(id TEXT PRIMARY KEY,name TEXT NOT NULL,sha256 TEXT NOT NULL UNIQUE,imported_at TEXT NOT NULL,chunk_count INTEGER NOT NULL CHECK(chunk_count>=0));
+                CREATE VIRTUAL TABLE chunks USING fts5(source UNINDEXED,content,tokenize='unicode61 remove_diacritics 2');
+                INSERT INTO documents(id,name,sha256,imported_at,chunk_count) VALUES($id,'legacy.txt',lower(hex(randomblob(32))),$time,1);
+                INSERT INTO chunks(source,content) VALUES($source,'Legacy knowledge remains searchable.');
+                PRAGMA user_version=1;
+                """;
+            command.Parameters.AddWithValue("$id", documentId);
+            command.Parameters.AddWithValue("$time", importedAt);
+            command.Parameters.AddWithValue("$source", documentId + "#0");
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var store = new LocalKnowledgeBase(directory);
+        await store.InitializeAsync();
+
+        Assert.Equal("legacy.txt", Assert.Single(await store.SearchAsync("Legacy searchable")).SourceName);
+        await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Pooling = false }.ToString());
+        await verify.OpenAsync();
+        using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(2L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]

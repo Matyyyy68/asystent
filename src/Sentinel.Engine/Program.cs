@@ -13,6 +13,8 @@ using Sentinel.Core.Enterprise;
 using Sentinel.Core.Knowledge;
 using Sentinel.Engine;
 
+try
+{
 // Versioned JSON-lines protocol on inherited stdio only; no listening TCP port.
 var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
 json.Converters.Add(new JsonStringEnumConverter());
@@ -68,6 +70,22 @@ DateTimeOffset? lastEnterpriseSyncAttempt = null;
 DateTimeOffset? lastEnterpriseSync = null;
 string? enterpriseError = null;
 var enterpriseSyncIntervalSeconds = 60;
+var enterpriseAnalysisMode = "local";
+var enterpriseContextSharingAllowed = false;
+ThreatAssessment CombineEnterpriseAssessments(ThreatAssessment local, ThreatAssessment remote)
+{
+    var category = (int)remote.Risk > (int)local.Risk ? remote.Category : local.Category;
+    var indicators = local.Indicators.Concat(remote.Indicators)
+        .DistinctBy(indicator => (indicator.Id, indicator.Category)).Take(128).ToArray();
+    var uncertainties = local.Uncertainties.Concat(remote.Uncertainties)
+        .Append("Kontekst został wysłany do serwera Enterprise po jednorazowym potwierdzeniu; API nie zapisuje surowej treści.")
+        .Distinct(StringComparer.Ordinal).Take(64).ToArray();
+    var recommendations = local.Recommendations.Concat(remote.Recommendations)
+        .Distinct(StringComparer.Ordinal).Take(32).ToArray();
+    return new ThreatAssessment(category, (int)remote.Risk > (int)local.Risk ? remote.Risk : local.Risk,
+        indicators, uncertainties, recommendations,
+        $"Ocena lokalna: {local.Explanation}\n\nOcena Enterprise: {remote.Explanation}");
+}
 HttpClient CreateEnterpriseHttpClient()
 {
     var handler = new HttpClientHandler { AllowAutoRedirect = false };
@@ -109,6 +127,7 @@ async Task<object> EnterpriseStatusAsync()
     catch { enterpriseError = "credential_unavailable"; }
     return new { variant = installationProfile.Variant.ToString(), server = installationProfile.EnterpriseServerUri,
         paired = !string.IsNullOrEmpty(token), sharingMetadata = installationProfile.ShareSecurityMetadata,
+        analysisMode = enterpriseAnalysisMode, serverContextSharingAllowed = installationProfile.ShareSecurityMetadata && enterpriseContextSharingAllowed,
         queuedEvents = installationProfile.Variant == ProductVariant.EnterpriseClient ? await store.CountPendingEnterpriseEventsAsync() : 0,
         lastSync = lastEnterpriseSync, credentialRotationDueAtUtc = credentialRotationDueAt, error = enterpriseError };
 }
@@ -133,8 +152,8 @@ async Task<object> SyncEnterpriseAsync(bool force)
         await enterpriseAgent.SendHeartbeatAsync(server, token);
         using var configuration = await enterpriseAgent.ReadConfigurationAsync(server, token);
         var policy = EnterprisePolicy.Parse(configuration);
-        if (policy.AnalysisMode != "local" || policy.AnalysisIntervalSeconds is < 10 or > 300)
-            throw new InvalidDataException("Polityka wymaga trybu lokalnego i odstępu 10–300 sekund obsługiwanego przez ten klient.");
+        if (policy.AnalysisIntervalSeconds is < 10 or > 300)
+            throw new InvalidDataException("Odstęp analizy polityki Enterprise musi wynosić 10–300 sekund w tym kliencie.");
         var combinedExclusions = defaultExcludedApplications.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Concat(policy.ExcludedApplications).Distinct(StringComparer.OrdinalIgnoreCase);
         var excludedApplications = string.Join(';', combinedExclusions);
@@ -146,6 +165,11 @@ async Task<object> SyncEnterpriseAsync(bool force)
         await store.SaveSettingsAsync(settings);
         await store.ApplyRetentionAsync(settings.RetentionDays);
         enterpriseSyncIntervalSeconds = policy.SyncIntervalSeconds;
+        enterpriseAnalysisMode = policy.AnalysisMode;
+        enterpriseContextSharingAllowed = policy.IncludeContext && policy.AnalysisMode is "server" or "hybrid";
+        if (policy.GroupVersion is { } appliedGroupVersion && policy.DeviceVersion is { } appliedDeviceVersion)
+            await enterpriseAgent.SendHeartbeatAsync(server, token,
+                appliedPolicy: new EnterprisePolicyRevision(policy.GlobalVersion, appliedGroupVersion, appliedDeviceVersion));
         var pending = installationProfile.ShareSecurityMetadata
             ? await store.ReadPendingEnterpriseEventsAsync() : Array.Empty<PendingEnterpriseEvent>();
         var accepted = 0;
@@ -416,7 +440,16 @@ while (await Console.In.ReadLineAsync() is { } line)
                 break;
             case "knowledgeSearch":
                 var query = request.GetProperty("query").GetString() ?? "";
-                result = await knowledge.SearchAsync(query);
+                var semanticSearch = request.TryGetProperty("semantic", out var semanticElement) && semanticElement.ValueKind == JsonValueKind.True;
+                if (semanticSearch)
+                {
+                    if (string.IsNullOrWhiteSpace(settings.LocalAIEmbeddingModel))
+                        throw new InvalidOperationException("Wybierz i zapisz lokalny model embeddingów w ustawieniach AI przed wyszukiwaniem semantycznym.");
+                    using (var semanticTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(10)))
+                        result = await knowledge.SearchSemanticAsync(query, settings.LocalAIEndpoint, settings.LocalAIEmbeddingModel, aiProvider,
+                            cancellationToken: semanticTimeout.Token);
+                }
+                else result = await knowledge.SearchAsync(query);
                 break;
             case "knowledgeDelete":
                 var documentId = request.GetProperty("documentId").GetString() ?? "";
@@ -603,8 +636,41 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var urlAnalysis = string.IsNullOrWhiteSpace(url) ? null : urlAnalyzer.Analyze(url);
                 var context = new AnalysisContext("Ręczna analiza", text, observedAt,
                     string.IsNullOrWhiteSpace(url) ? null : new NavigationSignal(url));
-                var assessment = await orchestrator.AnalyzeAsync(context, settings.UseLocalAI, settings.LocalAIEndpoint,
+                var shareWithEnterprise = request.TryGetProperty("shareWithEnterprise", out var shareContext) && shareContext.ValueKind == JsonValueKind.True;
+                EnterprisePolicy? remotePolicy = null;
+                string? enterpriseToken = null;
+                Uri? analysisServer = null;
+                if (shareWithEnterprise)
+                {
+                    if (installationProfile.Variant != ProductVariant.EnterpriseClient || !installationProfile.ShareSecurityMetadata ||
+                        string.IsNullOrWhiteSpace(installationProfile.EnterpriseServerUri))
+                        throw new InvalidOperationException("Najpierw włącz synchronizację Enterprise za zgodą użytkownika.");
+                    enterpriseToken = await deviceCredentials.ReadAsync();
+                    if (string.IsNullOrWhiteSpace(enterpriseToken)) throw new InvalidOperationException("Brak poświadczenia Enterprise.");
+                    analysisServer = EnterpriseAgentClient.ValidateServer(installationProfile.EnterpriseServerUri);
+                    using var livePolicy = await enterpriseAgent.ReadConfigurationAsync(analysisServer, enterpriseToken);
+                    remotePolicy = EnterprisePolicy.Parse(livePolicy);
+                    if (!remotePolicy.IncludeContext || remotePolicy.AnalysisMode is not ("server" or "hybrid"))
+                        throw new InvalidOperationException("Bieżąca polityka nie zezwala na analizę kontekstu przez serwer.");
+                }
+                var assessment = await orchestrator.AnalyzeAsync(context,
+                    settings.UseLocalAI && remotePolicy?.AnalysisMode != "server", settings.LocalAIEndpoint,
                     settings.LocalAIModel, settings.LocalAIEmbeddingModel, settings.LocalAITimeoutSeconds);
+                if (remotePolicy is not null && enterpriseToken is not null && analysisServer is not null)
+                {
+                    try
+                    {
+                        var remoteAssessment = await enterpriseAgent.AnalyzeWithServerAsync(analysisServer, enterpriseToken,
+                            context.Application, text, url, userConfirmedContextSharing: true);
+                        assessment = CombineEnterpriseAssessments(assessment, remoteAssessment);
+                    }
+                    catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or InvalidDataException or JsonException)
+                    {
+                        enterpriseError = "sync_failed";
+                        assessment = assessment with { Uncertainties = assessment.Uncertainties
+                            .Append("Analiza Enterprise nie powiodła się; pokazano wynik lokalny.").Distinct(StringComparer.Ordinal).ToArray() };
+                    }
+                }
                 assessment = ManualUrlReputationMatcher.Apply(assessment, url, text, reputation, urlReputation,
                     observedAt, out var reputationMatchHost, out var reputationMatchUrlHash, out var reputationMatchUrl);
                 if (assessment.Indicators.Count > 0)
@@ -714,4 +780,15 @@ while (await Console.In.ReadLineAsync() is { } line)
         };
         Console.WriteLine(JsonSerializer.Serialize(new { id, ok = false, error }, json));
     }
+}
+}
+catch (Exception exception)
+{
+    var exceptionType = exception.GetType().FullName ?? "System.Exception";
+    if (exceptionType.Length > 160 || exceptionType.Any(character =>
+            !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '+' or '`')))
+        exceptionType = "System.Exception";
+    try { Console.Error.WriteLine($"SENTINEL_ENGINE_FATAL type={exceptionType}"); }
+    catch { }
+    Environment.ExitCode = 1;
 }

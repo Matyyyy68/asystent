@@ -41,6 +41,163 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task InaccessibleIfeoSourcePreservesOtherSourcesAndInitializesSilentlyWhenAccessReturns()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["run"] = Entry("registry.user.run", "run-v1", false)
+        };
+        var capture = new PersistenceBaseSnapshotCapture(true, entries, false, true,
+            "registry.machine64.ifeo:SecurityException");
+        var noTasks = new ScheduledTaskSnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var noServices = new PersistenceRegistrySnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => capture,
+            _ => Task.FromResult(noTasks), _ => Task.FromResult(noServices), TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var baseline = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(baseline.Initialized);
+        Assert.False(baseline.IfeoMachine64Initialized);
+        Assert.Contains(baseline.Entries.Values, item => item.Source == "registry.user.run");
+        Assert.Contains("niedostępny", monitor.State, StringComparison.OrdinalIgnoreCase);
+
+        entries["registry.machine64.ifeo:existing"] = Entry("registry.machine64.ifeo", "ifeo-existing", false);
+        capture = new PersistenceBaseSnapshotCapture(true, entries, true, true, "");
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        baseline = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(baseline.IfeoMachine64Initialized, monitor.State);
+        Assert.Empty(await store.ReadAsync());
+
+        capture = new PersistenceBaseSnapshotCapture(true,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+            {
+                ["run"] = Entry("registry.user.run", "run-v1", false)
+            }, false, true, "registry.machine64.ifeo:SecurityException");
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        baseline = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Contains(baseline.Entries.Values, item => item.Source == "registry.machine64.ifeo");
+        Assert.Empty(await store.ReadAsync());
+
+        capture = new PersistenceBaseSnapshotCapture(true,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+            {
+                ["run"] = Entry("registry.user.run", "run-v1", false),
+                ["registry.machine64.ifeo:existing"] = Entry("registry.machine64.ifeo", "ifeo-changed", false)
+            }, true, true, "");
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Contains(await store.ReadAsync(), item => item.Explanation.Contains("IFEO", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InaccessibleBaseSourceDoesNotBlockOtherChangesAndPreservesItsBaseline()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["run"] = Entry("registry.user.run", "run-v1", false),
+            ["startup"] = Entry("startup.user", "startup-v1", false)
+        };
+        var unavailable = Array.Empty<PersistenceSourceFailure>();
+        PersistenceBaseSnapshotCapture Capture() => new(true, entries, true, true, "test", unavailable);
+        var noTasks = new ScheduledTaskSnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var noServices = new PersistenceRegistrySnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(Capture,
+            _ => Task.FromResult(noTasks), _ => Task.FromResult(noServices), TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        entries.Remove("run");
+        entries["startup"] = Entry("startup.user", "startup-v2", false);
+        unavailable = [new("registry.user.run", "UnauthorizedAccessException")];
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var baseline = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Equal(Entry("registry.user.run", "run-v1", false).Fingerprint, baseline.Entries["run"].Fingerprint);
+        Assert.Equal(Entry("startup.user", "startup-v2", false).Fingerprint, baseline.Entries["startup"].Fingerprint);
+        Assert.Single(await store.ReadAsync());
+        Assert.Contains("registry.user.run", monitor.State, StringComparison.Ordinal);
+
+        entries["run"] = Entry("registry.user.run", "run-v2", false);
+        unavailable = [];
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        baseline = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Equal(Entry("registry.user.run", "run-v2", false).Fingerprint, baseline.Entries["run"].Fingerprint);
+        Assert.Equal(2, (await store.ReadAsync()).Count);
+    }
+
+    [Fact]
+    public async Task FirstBaselineWaitsForAllBaseSourcesToBeReadable()
+    {
+        var store = await CreateStore();
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            ["available"] = Entry("registry.user.runonce", "runonce-v1", false)
+        };
+        var unavailable = (IReadOnlyList<PersistenceSourceFailure>)[new("startup.user", "IOException")];
+        PersistenceBaseSnapshotCapture Capture() => new(true, entries, true, true, "test", unavailable);
+        var noTasks = new ScheduledTaskSnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var noServices = new PersistenceRegistrySnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        using var monitor = new WindowsPersistenceSnapshotMonitor(Capture,
+            _ => Task.FromResult(noTasks), _ => Task.FromResult(noServices), TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.False((await store.ReadWindowsPersistenceMonitorSnapshotAsync()).Initialized);
+        Assert.Contains("Nie ustawiono baseline'u", monitor.State, StringComparison.Ordinal);
+
+        entries["startup"] = Entry("startup.user", "startup-v1", false);
+        unavailable = Array.Empty<PersistenceSourceFailure>();
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.True((await store.ReadWindowsPersistenceMonitorSnapshotAsync()).Initialized);
+        Assert.Empty(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task Schema36MigrationPreservesBaselineAndMarksPreviouslyInitializedIfeoSources()
+    {
+        var store = await CreateStore();
+        var ifeo = Entry("registry.machine64.ifeo", "existing-ifEO", false);
+        var run = Entry("registry.user.run", "existing-run", false);
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new("registry.machine64.ifeo:existing", ifeo.Source, ifeo.Fingerprint, ifeo.WritableLocation),
+            new("registry.user.run:existing", run.Source, run.Fingerprint, run.WritableLocation)
+        ]);
+        await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE windows_persistence_monitor_metadata DROP COLUMN ifeo_machine64_initialized; ALTER TABLE windows_persistence_monitor_metadata DROP COLUMN ifeo_machine32_initialized; PRAGMA user_version=36;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+        var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(migrated.IfeoMachine64Initialized);
+        Assert.True(migrated.IfeoMachine32Initialized);
+        Assert.Equal(2, migrated.Entries.Count);
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.machine64.ifeo" && entry.Fingerprint == ifeo.Fingerprint);
+        Assert.Contains(migrated.Entries.Values, entry => entry.Source == "registry.user.run" && entry.Fingerprint == run.Fingerprint);
+    }
+
+    [Fact]
+    public async Task Schema38AcceptsFullLengthStartupApprovedSourceKey()
+    {
+        var store = await CreateStore();
+        const string source = "registry.machine64.startup.approved.startupfolder";
+        var key = source + ":" + new string('A', 64);
+        Assert.InRange(key.Length, 101, 160);
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new(key, source, new string('B', 64), false)
+        ]);
+        var stored = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Equal(key, Assert.Single(stored.Entries.Keys));
+    }
+
+    [Fact]
     public async Task DetectsChangeAndRemovalAndDoesNotDuplicateUnchangedEntries()
     {
         var store = await CreateStore();
@@ -801,7 +958,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync();
         using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(34L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]

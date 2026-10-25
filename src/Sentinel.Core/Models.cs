@@ -40,12 +40,13 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     bool AutoUpdateCertFeed = false);
 public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys,
     bool TcpTruncated = false, bool UdpTruncated = false);
-public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false);
+public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false, long DroppedChanges = 0);
 public sealed record DownloadFileFingerprint(string Path, long Length, long LastWriteTicks);
 public sealed record DownloadMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, DownloadFileFingerprint> Files);
 public sealed record WindowsPersistenceFingerprint(string Key, string Source, string Fingerprint, bool WritableLocation);
 public sealed record WindowsPersistenceMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, WindowsPersistenceFingerprint> Entries,
-    bool ScheduledTasksInitialized = false, bool ServicesInitialized = false);
+    bool ScheduledTasksInitialized = false, bool ServicesInitialized = false,
+    bool IfeoMachine64Initialized = false, bool IfeoMachine32Initialized = false);
 public interface IEventRepository
 {
     Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);

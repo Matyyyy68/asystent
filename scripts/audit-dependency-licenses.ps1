@@ -31,44 +31,41 @@ $nugetRows = @($existing | Where-Object Ecosystem -eq 'NuGet' | ForEach-Object {
         Package = $_.Package
         Version = $_.Version
         LicenseDeclaration = $_.LicenseDeclaration
+        DevelopmentDependency = 'n/a'
         InLockfile = 'n/a'
         InstalledLocally = 'True'
     }
 })
 
 $npmByPackageVersion = @{}
+$lockParserPath = Join-Path $PSScriptRoot 'audit-npm-license-lock.mjs'
 foreach ($lockPath in $lockFiles) {
     $lockRoot = Split-Path $lockPath -Parent
-    $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json -AsHashtable
-    foreach ($entry in $lock.packages.GetEnumerator()) {
-        $packagePath = [string]$entry.Key
-        $metadata = $entry.Value
-        if (-not $packagePath.StartsWith('node_modules/', [StringComparison]::Ordinal) -or -not $metadata.version) {
-            continue
-        }
+    $lockLines = @(& node $lockParserPath $lockPath)
+    if ($LASTEXITCODE -ne 0) { throw "Node could not parse npm lockfile: $lockPath" }
+    foreach ($lockLine in $lockLines) {
+        $entry = ConvertFrom-Json -InputObject $lockLine
+        $packagePath = [string]$entry.PackagePath
 
         $name = $packagePath -replace '^.*node_modules/', ''
-        $license = $metadata.license
-        if ($license -is [hashtable]) {
-            $license = ConvertTo-Json -InputObject $license -Compress
-        } elseif ($license -is [array]) {
-            $license = $license -join ' OR '
-        }
-        $license = [string]$license
+        $license = [string]$entry.LicenseDeclaration
         if ([string]::IsNullOrWhiteSpace($license)) {
-            throw "No license declaration in lockfile for $name@$($metadata.version) ($lockPath)"
+            throw "No license declaration in lockfile for $name@$($entry.Version) ($lockPath)"
         }
 
-        $key = "$name`n$($metadata.version)"
+        $key = "$name`n$($entry.Version)"
         $installedPath = Join-Path $lockRoot "$packagePath/package.json"
         $installed = Test-Path -LiteralPath $installedPath -PathType Leaf
         if ($npmByPackageVersion.ContainsKey($key)) {
             $row = $npmByPackageVersion[$key]
             if ($row.LicenseDeclaration -cne $license) {
-                throw "Conflicting lockfile license declarations for $name@$($metadata.version): '$($row.LicenseDeclaration)' and '$license'"
+                throw "Conflicting lockfile license declarations for $name@$($entry.Version): '$($row.LicenseDeclaration)' and '$license'"
             }
             if ($installed) {
                 $row.InstalledLocally = 'True'
+            }
+            if ($entry.DevelopmentDependency -eq 'False') {
+                $row.DevelopmentDependency = 'False'
             }
             continue
         }
@@ -76,8 +73,9 @@ foreach ($lockPath in $lockFiles) {
         $npmByPackageVersion[$key] = [pscustomobject]@{
             Ecosystem = 'npm'
             Package = $name
-            Version = [string]$metadata.version
+            Version = [string]$entry.Version
             LicenseDeclaration = $license
+            DevelopmentDependency = [string]$entry.DevelopmentDependency
             InLockfile = 'true'
             InstalledLocally = [string]$installed
         }
@@ -94,4 +92,4 @@ if ($missing.Count -gt 0) {
     throw "Generated inventory contains $($missing.Count) npm entries without license declarations"
 }
 
-Write-Output "Wrote $($rows.Count) dependency records ($($nugetRows.Count) NuGet, $($npmRows.Count) npm; $(@($npmRows | Where-Object InstalledLocally -eq 'True').Count) npm present in node_modules)."
+Write-Output "Wrote $($rows.Count) dependency records ($($nugetRows.Count) NuGet, $($npmRows.Count) npm; $(@($npmRows | Where-Object InstalledLocally -eq 'True').Count) npm manifests locally present and matched to lockfile version/license)."

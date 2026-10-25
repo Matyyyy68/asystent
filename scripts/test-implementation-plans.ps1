@@ -18,7 +18,7 @@ $expectedTitlePatterns = @(
     'Ryzyka',
     'Status'
 )
-$headingPattern = '^\s*(?<number>1[0-2]|[1-9])\.\s+\*\*(?<title>[^*]+)\*\*'
+$headingPattern = '^\s*(?<number>\d+)\.\s+\*\*(?<title>[^*]+)\*\*'
 function Remove-TitleDiacritics([string]$text) {
     $decomposed = $text.Normalize([Text.NormalizationForm]::FormD)
     return [regex]::Replace($decomposed, '\p{Mn}', '')
@@ -27,6 +27,12 @@ foreach ($plan in $planFiles) {
     $headings = @(Select-String -LiteralPath $plan.FullName -Pattern $headingPattern | ForEach-Object {
         [pscustomobject]@{ Number = [int]$_.Matches[0].Groups['number'].Value; Title = $_.Matches[0].Groups['title'].Value }
     })
+    for ($index = 0; $index -lt $headings.Count; $index++) {
+        $expectedNumber = $index + 1
+        if ($headings[$index].Number -ne $expectedNumber) {
+            throw "$($plan.Name) numbered headings must be unique and sequential; expected $expectedNumber, found $($headings[$index].Number)."
+        }
+    }
     foreach ($number in 1..12) {
         $matchesForSection = @($headings | Where-Object Number -eq $number)
         if ($matchesForSection.Count -ne 1) {

@@ -204,9 +204,19 @@ try:
     }, system_session, 204)
     remote_analysis = request("/api/v1/agents/analyze", "POST", {
         "application": "Synthetic", "text": "Pilnie: blokada konta. Zaloguj się.",
+        "targetUrl": "https://example.test/login",
         "contextSharingConfirmed": True,
     }, device["deviceToken"])
     assert remote_analysis["modelEnabled"] is False and remote_analysis["contextPersisted"] is False
+    request("/api/v1/agents/analyze", "POST", {
+        "application": "Synthetic", "text": "Pilnie: blokada konta.",
+        "contextSharingConfirmed": False,
+    }, device["deviceToken"], 400)
+    url_only_analysis = request("/api/v1/agents/analyze", "POST", {
+        "application": "Synthetic", "text": "", "targetUrl": "https://example.test/login",
+        "contextSharingConfirmed": True,
+    }, device["deviceToken"])
+    assert url_only_analysis["contextPersisted"] is False
     request(f"/api/v1/admin/devices/{device['deviceId']}/group", "PUT", {"groupId": group["id"]}, system_session, 204)
     request(f"/api/v1/admin/devices/{device['deviceId']}/group", "PUT", {"groupId": "missing"}, system_session, 404)
     request(f"/api/v1/admin/devices/{device['deviceId']}/policy", "PUT", {

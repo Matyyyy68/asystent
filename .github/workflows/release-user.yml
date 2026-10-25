@@ -20,7 +20,7 @@ jobs:
           node-version: 24
       - name: Build, test and package
         shell: pwsh
-        run: ./scripts/build-user.ps1 -Installer
+        run: ./scripts/build-user.ps1 -Installer -AllowDownloads
       - name: Verify the installer payload
         shell: pwsh
         run: |

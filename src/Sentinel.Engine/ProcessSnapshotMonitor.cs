@@ -7,6 +7,7 @@ public sealed class ProcessSnapshotMonitor
 {
     private const int MaximumProcesses = 10_000;
     private const int MaximumEventsPerSample = 100;
+    private const int MaximumPendingChanges = 20_000;
     private Dictionary<int, string> knownProcesses;
     private Dictionary<int, string> persistedProcesses = [];
     private bool storeBaselineLoaded;
@@ -84,6 +85,7 @@ public sealed class ProcessSnapshotMonitor
             var saved = await store.ReadProcessMonitorSnapshotAsync(cancellationToken);
             storeBaselineInitialized = saved.Initialized;
             storeBaselineTruncated = saved.Truncated;
+            droppedEvents = saved.DroppedChanges;
             if (storeBaselineInitialized)
             {
                 persistedProcesses = new(saved.Processes);
@@ -100,12 +102,18 @@ public sealed class ProcessSnapshotMonitor
             storeBaselineLoaded = true;
         }
 
+        var pendingChanges = await store.ReadPendingProcessChangesAsync(MaximumPendingChanges, cancellationToken);
         if (!recentStartsLoaded)
         {
             if (!paused)
+            {
                 foreach (var start in await store.ReadRecentProcessStartsAsync(DateTimeOffset.UtcNow, cancellationToken))
                     if (!recentlyObservedStarts.TryGetValue(start.ProcessId, out var existing) || existing.Timestamp < start.Timestamp)
                         recentlyObservedStarts[start.ProcessId] = (start.Timestamp, start.CorrelationId, start.ProcessName);
+                foreach (var start in pendingChanges.Items.Where(item => item.Action == "Proces zaobserwowany" && item.CorrelationId.HasValue))
+                    if (!recentlyObservedStarts.TryGetValue(start.ProcessId, out var existing) || existing.Timestamp < start.ObservedAt)
+                        recentlyObservedStarts[start.ProcessId] = (start.ObservedAt, start.CorrelationId!.Value, start.ProcessName);
+            }
             recentStartsLoaded = true;
         }
 
@@ -118,8 +126,9 @@ public sealed class ProcessSnapshotMonitor
             recentlyObservedStarts.Clear();
             try
             {
-                if (!storeBaselineInitialized || storeBaselineTruncated != currentTruncated || upserts.Length > 0 || removed.Length > 0)
-                    await store.CommitProcessMonitorChangesAsync([], upserts, removed, cancellationToken, currentTruncated);
+                if (!storeBaselineInitialized || storeBaselineTruncated != currentTruncated || upserts.Length > 0 || removed.Length > 0 || pendingChanges.Count > 0)
+                    await store.CommitProcessMonitorChangesAsync([], upserts, removed, cancellationToken, currentTruncated,
+                        clearBacklog: true);
             }
             catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
             {
@@ -135,48 +144,60 @@ public sealed class ProcessSnapshotMonitor
             return 0;
         }
 
-        var toStore = changes.Take(MaximumEventsPerSample).ToArray();
-        var newlyDroppedEvents = Math.Max(0, changes.Count - toStore.Length);
         var now = DateTimeOffset.UtcNow;
         foreach (var processId in recentlyObservedStarts.Where(entry => entry.Value.Timestamp < now.AddSeconds(-60)).Select(entry => entry.Key).ToArray())
             recentlyObservedStarts.Remove(processId);
-        var correlationIds = toStore.Where(change => change.Action == "Proces zaobserwowany")
-            .ToDictionary(change => change.ProcessId, _ => Guid.NewGuid());
+        var discovered = changes.Select(change => new ProcessChangeQueueItem(0, Guid.NewGuid(), now, change.Action,
+            change.ProcessId, change.ProcessName,
+            change.Action == "Proces zaobserwowany" ? Guid.NewGuid() : WasRecentlyObservedStart(change.ProcessId, change.ProcessName, now))).ToArray();
+        var changesDrainedThisSample = Math.Min(Math.Min(pendingChanges.Count, pendingChanges.Items.Count), MaximumEventsPerSample);
+        var available = Math.Max(0, MaximumPendingChanges - Math.Max(0, pendingChanges.Count - changesDrainedThisSample));
+        var backlogToAdd = discovered.Take(available).ToArray();
+        var newlyDroppedEvents = Math.Max(0, discovered.Length - backlogToAdd.Length);
+        foreach (var start in backlogToAdd.Where(item => item.Action == "Proces zaobserwowany" && item.CorrelationId.HasValue))
+            recentlyObservedStarts[start.ProcessId] = (start.ObservedAt, start.CorrelationId!.Value, start.ProcessName);
+        var toStore = pendingChanges.Items.Concat(backlogToAdd).Take(MaximumEventsPerSample).ToArray();
+        var backlogToRemove = toStore.Select(item => item.EventId).ToArray();
         var imageInspections = new List<(Guid EventId, string Path)>();
         var events = toStore.Select(change =>
         {
-            var correlationId = correlationIds.TryGetValue(change.ProcessId, out var newCorrelationId)
-                ? newCorrelationId : WasRecentlyObservedStart(change.ProcessId, now);
-            var eventId = change.Action == "Proces zaobserwowany" ? Guid.NewGuid() : (Guid?)null;
+            var eventId = change.EventId;
             string? imagePath = null;
-            if (eventId is not null && resolveExecutablePath is not null)
+            if (change.Action == "Proces zaobserwowany" && change.QueueId == 0 && resolveExecutablePath is not null &&
+                current.TryGetValue(change.ProcessId, out var currentName) && string.Equals(currentName, change.ProcessName, StringComparison.OrdinalIgnoreCase))
             {
                 try { imagePath = resolveExecutablePath(change.ProcessId, change.ProcessName); }
                 catch { imagePath = null; }
                 if (imagePath is { } candidate && (candidate.Length is 0 or > 4096 || !Path.IsPathFullyQualified(candidate) || candidate.StartsWith(@"\\", StringComparison.Ordinal) || candidate.Any(char.IsControl)))
                     imagePath = null;
-                if (imagePath is not null && enqueueImageInspection is not null) imageInspections.Add((eventId.Value, imagePath));
+                if (imagePath is not null && enqueueImageInspection is not null) imageInspections.Add((eventId, imagePath));
             }
+            var delayed = now - change.ObservedAt > TimeSpan.FromSeconds(2);
             var explanation = change.Action == "Proces zaobserwowany"
-                ? $"Windows pokazał nowy PID {change.ProcessId} o nazwie {change.ProcessName} od poprzedniej próbki. Krótkie procesy mogą zostać pominięte."
-                : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
+                ? delayed
+                    ? $"Windows zaobserwował nowy PID {change.ProcessId} ({change.ProcessName}) wcześniej; zapis zdarzenia opóźniło oczekiwanie w kolejce. Krótkie procesy mogą zostać pominięte."
+                    : $"Windows pokazał nowy PID {change.ProcessId} o nazwie {change.ProcessName} od poprzedniej próbki. Krótkie procesy mogą zostać pominięte."
+                : delayed
+                    ? $"Windows zaobserwował zniknięcie PID {change.ProcessId} ({change.ProcessName}) wcześniej; zapis zdarzenia opóźniło oczekiwanie w kolejce."
+                    : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
             var evidenceCodes = new List<string> { change.Action == "Proces zaobserwowany" ? "process.snapshot.new-pid" : "process.snapshot.pid-absent" };
             if (change.Action == "Proces zaobserwowany") evidenceCodes.Add(imagePath is null ? "process.image.path-unavailable" : "process.image.path-available");
-            return new SecurityEvent(0, now, RiskLevel.Information,
+            return new SecurityEvent(0, change.ObservedAt, RiskLevel.Information,
                 change.Action, change.ProcessName, explanation,
                 "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
                 EventId: eventId,
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: change.ProcessId, ProcessName: change.ProcessName,
-                CorrelationId: correlationId,
+                CorrelationId: change.CorrelationId,
                 EvidenceCodes: evidenceCodes,
                 ProcessImagePath: imagePath,
                 ProcessImageSignatureStatus: imagePath is not null ? "Pending" : null);
         }).ToArray();
         try
         {
-            if (!storeBaselineInitialized || storeBaselineTruncated != currentTruncated || events.Length > 0 || upserts.Length > 0 || removed.Length > 0)
-                await store.CommitProcessMonitorChangesAsync(events, upserts, removed, cancellationToken, currentTruncated);
+            if (!storeBaselineInitialized || storeBaselineTruncated != currentTruncated || events.Length > 0 || upserts.Length > 0 || removed.Length > 0 || backlogToAdd.Length > 0)
+                await store.CommitProcessMonitorChangesAsync(events, upserts, removed, cancellationToken, currentTruncated,
+                    backlogToAdd, backlogToRemove, droppedChanges: newlyDroppedEvents);
         }
         catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
         {
@@ -189,18 +210,17 @@ public sealed class ProcessSnapshotMonitor
         knownSnapshotTruncated = currentTruncated;
         storeBaselineInitialized = true;
         storeBaselineTruncated = currentTruncated;
-        droppedEvents += newlyDroppedEvents;
         foreach (var inspection in imageInspections)
         {
             if (enqueueImageInspection!(inspection.EventId, inspection.Path)) continue;
             try { await store.UpdateProcessImageInspectionAsync(inspection.EventId, null, "QueueFull", null, cancellationToken); }
             catch { /* The process event remains stored even if diagnostic metadata cannot be updated. */ }
         }
-        foreach (var change in toStore.Where(change => change.Action == "Proces zaobserwowany"))
-            recentlyObservedStarts[change.ProcessId] = (now, correlationIds[change.ProcessId], change.ProcessName);
         var capped = currentTruncated ? " Limit snapshotu osiągnięty; zdarzenia zakończenia pominięto dla niepełnej próbki." :
             previousSnapshotTruncated ? " Poprzednia próbka była obcięta; zdarzenia nowych procesów pominięto w tym kroku." : "";
-        State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, pominięto łącznie {droppedEvents}.{capped}";
+        droppedEvents += newlyDroppedEvents;
+        var backlogState = pendingChanges.Count + backlogToAdd.Length - backlogToRemove.Length;
+        State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, kolejka {backlogState}, odrzucono ponad limit łącznie {droppedEvents}.{capped}";
         return toStore.Length;
     }
 

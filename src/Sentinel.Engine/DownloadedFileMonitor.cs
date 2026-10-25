@@ -1,6 +1,9 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
@@ -12,6 +15,17 @@ public sealed class DownloadedFileMonitor : IDisposable
     private const int MaximumFilesPerSample = 10;
     private const long MaximumFileBytes = 256L * 1024 * 1024;
     private const long MaximumBytesPerSample = 512L * 1024 * 1024;
+    private const uint FileReadAttributes = 0x00000080;
+    private const uint GenericRead = 0x80000000;
+    private const uint FileShareRead = 0x00000001;
+    private const uint FileShareWrite = 0x00000002;
+    private const uint FileShareDelete = 0x00000004;
+    private const uint OpenExisting = 3;
+    private const uint FileFlagOpenReparsePoint = 0x00200000;
+    private const uint FileFlagSequentialScan = 0x08000000;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private const int FileAttributeTagInfoClass = 9;
+    private const uint FinalPathNameCapacity = 32768;
     private static readonly TimeSpan SettleTime = TimeSpan.FromMilliseconds(750);
     private readonly string directory;
     private readonly int maximumPendingFiles;
@@ -21,6 +35,8 @@ public sealed class DownloadedFileMonitor : IDisposable
     private readonly ConcurrentDictionary<string, byte> processedFingerprints = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileFingerprint> baseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly object pendingGate = new();
+    internal Action<string>? BeforeVerifiedReadStreamOpenForTest { get; set; }
+    internal Action<string>? BeforeFileContentReadForTest { get; set; }
     private long droppedPendingFiles;
     private long rescanRequestedVersion;
     private long rescanCompletedVersion;
@@ -28,7 +44,26 @@ public sealed class DownloadedFileMonitor : IDisposable
     private FileSystemWatcher? watcher;
     private bool enabledRequested;
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo
+    {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "CreateFileW", SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode,
+        IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int fileInformationClass,
+        out FileAttributeTagInfo information, uint bufferSize);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle file, StringBuilder filePath, uint filePathSize, uint flags);
+
     private readonly record struct FileFingerprint(long Length, long LastWriteTicks);
+    private sealed record VerifiedFileReadStream(FileStream Stream, string DownloadsFinalPath);
 
     public string State { get; private set; } = "Monitoring pobranych plików wyłączony.";
 
@@ -200,25 +235,58 @@ public sealed class DownloadedFileMonitor : IDisposable
                     StopAtBaselineLimit();
                     break;
                 }
-                if (info.Length > MaximumFileBytes)
-                {
-                    if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
-                    continue;
-                }
-                if (info.Length > MaximumBytesPerSample - bytesScanned)
-                {
-                    pending[item.Key] = DateTimeOffset.UtcNow;
-                    break;
-                }
                 var fingerprint = ToProcessedFingerprint(info.FullName, fileFingerprint);
                 if (processedFingerprints.ContainsKey(fingerprint)) continue;
 
-                string hash;
-                await using (var stream = new FileStream(info.FullName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                var verifiedStream = OpenVerifiedReadStream(info.FullName);
+                if (verifiedStream is null)
                 {
-                    if (stream.Length > MaximumFileBytes) continue;
+                    await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
+                    baseline.TryRemove(info.FullName, out _);
+                    continue;
+                }
+
+                string hash;
+                await using (var stream = verifiedStream.Stream)
+                {
+                    var openedLength = stream.Length;
+                    if (openedLength != info.Length)
+                    {
+                        pending[item.Key] = DateTimeOffset.UtcNow;
+                        continue;
+                    }
+                    if (openedLength > MaximumFileBytes)
+                    {
+                        if (!IsFileHandleInsideDownloads(verifiedStream.DownloadsFinalPath, stream.SafeFileHandle))
+                        {
+                            await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
+                            baseline.TryRemove(info.FullName, out _);
+                            continue;
+                        }
+                        var oversizedAfter = new FileInfo(info.FullName);
+                        if (!oversizedAfter.Exists || oversizedAfter.Length != info.Length || oversizedAfter.LastWriteTimeUtc != info.LastWriteTimeUtc)
+                        {
+                            if (oversizedAfter.Exists) pending[item.Key] = DateTimeOffset.UtcNow;
+                            continue;
+                        }
+                        if (!await CommitBaselineAsync(store, info.FullName, Fingerprint(oversizedAfter), cancellationToken)) break;
+                        continue;
+                    }
+                    if (openedLength > MaximumBytesPerSample - bytesScanned)
+                    {
+                        pending[item.Key] = DateTimeOffset.UtcNow;
+                        break;
+                    }
+
+                    BeforeFileContentReadForTest?.Invoke(info.FullName);
                     hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
-                    bytesScanned += stream.Length;
+                    bytesScanned += openedLength;
+                    if (!IsFileHandleInsideDownloads(verifiedStream.DownloadsFinalPath, stream.SafeFileHandle))
+                    {
+                        await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
+                        baseline.TryRemove(info.FullName, out _);
+                        continue;
+                    }
                 }
                 var after = new FileInfo(info.FullName);
                 if (!after.Exists || after.Length != info.Length || after.LastWriteTimeUtc != info.LastWriteTimeUtc)
@@ -262,6 +330,10 @@ public sealed class DownloadedFileMonitor : IDisposable
             {
                 if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
             }
+            catch (Win32Exception)
+            {
+                if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
+            }
             catch (UnauthorizedAccessException) { }
         }
         return detections;
@@ -269,6 +341,7 @@ public sealed class DownloadedFileMonitor : IDisposable
 
     private bool IsInsideDownloadsTreeWithoutReparsePoints(string path)
     {
+        if (!IsDownloadsDirectoryWithoutReparsePoint()) return false;
         var fullPath = Path.GetFullPath(path);
         var relativePath = Path.GetRelativePath(directory, fullPath);
         var separator = Path.DirectorySeparatorChar;
@@ -296,6 +369,92 @@ public sealed class DownloadedFileMonitor : IDisposable
         return true;
     }
 
+    private VerifiedFileReadStream? OpenVerifiedReadStream(string path)
+    {
+        if (!IsInsideDownloadsTreeWithoutReparsePoints(path)) return null;
+        BeforeVerifiedReadStreamOpenForTest?.Invoke(path);
+        if (!OperatingSystem.IsWindows())
+            return new VerifiedFileReadStream(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read), Path.GetFullPath(directory));
+
+        using var rootHandle = CreateFile(directory, FileReadAttributes,
+            FileShareRead | FileShareWrite | FileShareDelete, IntPtr.Zero, OpenExisting,
+            FileFlagBackupSemantics | FileFlagOpenReparsePoint, IntPtr.Zero);
+        if (rootHandle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (!GetFileInformationByHandleEx(rootHandle, FileAttributeTagInfoClass, out var rootInformation,
+                (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (((FileAttributes)rootInformation.FileAttributes & FileAttributes.Directory) == 0 ||
+            ((FileAttributes)rootInformation.FileAttributes & FileAttributes.ReparsePoint) != 0)
+            return null;
+        var downloadsFinalPath = GetFinalPath(rootHandle);
+
+        SafeFileHandle? fileHandle = CreateFile(path, GenericRead, FileShareRead, IntPtr.Zero,
+            OpenExisting, FileFlagOpenReparsePoint | FileFlagSequentialScan, IntPtr.Zero);
+        try
+        {
+            if (fileHandle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (!GetFileInformationByHandleEx(fileHandle, FileAttributeTagInfoClass, out var information,
+                    (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (((FileAttributes)information.FileAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                return null;
+
+            if (!IsResolvedPathInside(downloadsFinalPath, GetFinalPath(fileHandle))) return null;
+            var stream = new FileStream(fileHandle, FileAccess.Read, 65_536, isAsync: false);
+            fileHandle = null;
+            return new VerifiedFileReadStream(stream, downloadsFinalPath);
+        }
+        finally { fileHandle?.Dispose(); }
+    }
+
+    private static bool IsFileHandleInsideDownloads(string downloadsFinalPath, SafeFileHandle fileHandle)
+    {
+        if (!GetFileInformationByHandleEx(fileHandle, FileAttributeTagInfoClass, out var information,
+                (uint)Marshal.SizeOf<FileAttributeTagInfo>()))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (((FileAttributes)information.FileAttributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+            return false;
+        return IsResolvedPathInside(downloadsFinalPath, GetFinalPath(fileHandle));
+    }
+
+    public static bool IsResolvedPathInside(string rootPath, string candidatePath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) || string.IsNullOrWhiteSpace(candidatePath)) return false;
+        var root = NormalizeFinalPath(rootPath);
+        var candidate = NormalizeFinalPath(candidatePath);
+        try
+        {
+            root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            candidate = Path.GetFullPath(candidate);
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var prefix = root.EndsWith(Path.DirectorySeparatorChar) || root.EndsWith(Path.AltDirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(prefix, comparison);
+    }
+
+    private static string NormalizeFinalPath(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) return @"\\" + path[8..];
+        if (path.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase)) return path[4..];
+        return path;
+    }
+
+    private static string GetFinalPath(SafeFileHandle handle)
+    {
+        var buffer = new StringBuilder(checked((int)FinalPathNameCapacity));
+        var length = GetFinalPathNameByHandle(handle, buffer, FinalPathNameCapacity, 0);
+        if (length == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (length >= FinalPathNameCapacity) throw new PathTooLongException("Ścieżka finalna uchwytu przekracza limit Windows.");
+        return NormalizeFinalPath(buffer.ToString());
+    }
+
     private bool TryEnumerateFilesWithoutFollowingReparsePoints(out string[] paths)
     {
         var files = new List<string>();
@@ -309,6 +468,12 @@ public sealed class DownloadedFileMonitor : IDisposable
                 var current = Path.GetFullPath(directories.Pop());
                 if (!visitedDirectories.Add(current)) continue;
                 if (visitedDirectories.Count > maximumBaselineFiles)
+                {
+                    paths = [];
+                    return false;
+                }
+                var currentAttributes = File.GetAttributes(current);
+                if ((currentAttributes & FileAttributes.Directory) == 0 || (currentAttributes & FileAttributes.ReparsePoint) != 0)
                 {
                     paths = [];
                     return false;
@@ -338,6 +503,19 @@ public sealed class DownloadedFileMonitor : IDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             paths = [];
+            return false;
+        }
+    }
+
+    private bool IsDownloadsDirectoryWithoutReparsePoint()
+    {
+        try
+        {
+            var attributes = File.GetAttributes(directory);
+            return (attributes & FileAttributes.Directory) != 0 && (attributes & FileAttributes.ReparsePoint) == 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
             return false;
         }
     }

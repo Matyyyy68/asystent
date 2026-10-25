@@ -8,13 +8,16 @@ using Sentinel.Core.Analysis;
 
 public sealed record PersistenceSnapshotEntry(string Source, string Fingerprint, bool WritableLocation);
 public sealed record PersistenceRegistrySnapshotCapture(bool Available, IReadOnlyDictionary<string, PersistenceSnapshotEntry> Entries, string Status);
+public sealed record PersistenceSourceFailure(string Source, string Reason);
+public sealed record PersistenceBaseSnapshotCapture(bool Available, IReadOnlyDictionary<string, PersistenceSnapshotEntry> Entries,
+    bool IfeoMachine64Available, bool IfeoMachine32Available, string Status, IReadOnlyList<PersistenceSourceFailure>? UnavailableSources = null);
 
 /// <summary>Observes selected Windows persistence sources. Raw registry commands and file paths stay in memory and are never persisted.</summary>
 public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 {
     private const int MaximumEntries = 1024;
     private const int MaximumEventsPerSample = 32;
-    private readonly Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture;
+    private readonly Func<PersistenceBaseSnapshotCapture> capture;
     private readonly Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks;
     private readonly Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices;
     private readonly TimeSpan minimumInterval;
@@ -45,6 +48,14 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
     public WindowsPersistenceSnapshotMonitor(
         Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
+        Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
+        Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
+        TimeSpan? minimumInterval = null)
+        : this(() => new PersistenceBaseSnapshotCapture(true, capture(), true, true, "dostępne"),
+            captureScheduledTasks, captureServices, minimumInterval) { }
+
+    public WindowsPersistenceSnapshotMonitor(
+        Func<PersistenceBaseSnapshotCapture> capture,
         Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
         Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
         TimeSpan? minimumInterval = null)
@@ -87,13 +98,19 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         wasEnabled = true;
         lastAttemptTimestamp = Stopwatch.GetTimestamp();
 
-        IReadOnlyDictionary<string, PersistenceSnapshotEntry> baseSnapshot;
-        try { baseSnapshot = capture(); }
+        PersistenceBaseSnapshotCapture baseCapture;
+        try { baseCapture = capture(); }
         catch (Exception exception)
         {
             State = "Źródła autostartu Windows niedostępne: " + exception.GetType().Name;
             return 0;
         }
+        if (!baseCapture.Available)
+        {
+            State = "Źródła autostartu Windows niedostępne: " + baseCapture.Status;
+            return 0;
+        }
+        var baseSnapshot = baseCapture.Entries;
 
         if (baseSnapshot.Count > MaximumEntries)
         {
@@ -109,6 +126,14 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             return 0;
         }
 
+        var unavailableBaseSources = baseCapture.UnavailableSources ?? Array.Empty<PersistenceSourceFailure>();
+        if (unavailableBaseSources.Count > 0 && !stored.Initialized)
+        {
+            State = "Nie ustawiono baseline'u autostartu, bo część źródeł jest niedostępna: " +
+                FormatSourceFailures(unavailableBaseSources);
+            return 0;
+        }
+
         ScheduledTaskSnapshotCapture scheduledTasks;
         try { scheduledTasks = await captureScheduledTasks(cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -118,6 +143,73 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "źródło niedostępne (" + exception.GetType().Name + ")");
         }
         var currentSnapshot = baseSnapshot.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        var ifeoStatuses = new List<string>();
+        var ifeoMachine64Available = baseCapture.IfeoMachine64Available;
+        var ifeoMachine32Available = baseCapture.IfeoMachine32Available;
+        foreach (var (source, capturedAvailable, initialized) in new[]
+        {
+            ("registry.machine64.ifeo", ifeoMachine64Available, stored.IfeoMachine64Initialized),
+            ("registry.machine32.ifeo", ifeoMachine32Available, stored.IfeoMachine32Initialized)
+        })
+        {
+            var available = capturedAvailable;
+            if (available)
+            {
+                var entries = baseSnapshot.Where(pair => pair.Value.Source == source).ToArray();
+                var invalid = entries.Any(pair => !pair.Key.StartsWith(source + ":", StringComparison.Ordinal));
+                var otherEntryCount = currentSnapshot.Count(pair => pair.Value.Source != source);
+                if (invalid || otherEntryCount > MaximumEntries - entries.Length)
+                {
+                    available = false;
+                    ifeoStatuses.Add(source + " (nieprawidłowy lub zbyt duży snapshot)");
+                }
+                else if (!initialized && stored.Initialized)
+                {
+                    try
+                    {
+                        await store.InitializeWindowsIfeoSnapshotAsync(entries.Select(pair => new WindowsPersistenceFingerprint(
+                            pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation)).ToArray(), source, cancellationToken).ConfigureAwait(false);
+                        stored = await store.ReadWindowsPersistenceMonitorSnapshotAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        available = false;
+                        ifeoStatuses.Add(source + " (baseline niedostępny: " + exception.GetType().Name + ")");
+                    }
+                }
+                if (available)
+                {
+                    ifeoStatuses.Add(source + " (dostępny)");
+                    continue;
+                }
+            }
+            else
+            {
+                ifeoStatuses.Add(source + " (niedostępny)");
+            }
+
+            foreach (var key in currentSnapshot.Where(pair => pair.Value.Source == source).Select(pair => pair.Key).ToArray())
+                currentSnapshot.Remove(key);
+            foreach (var pair in stored.Entries.Where(pair => pair.Value.Source == source))
+                currentSnapshot[pair.Key] = new(pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation);
+            if (source == "registry.machine64.ifeo") ifeoMachine64Available = available;
+            else ifeoMachine32Available = available;
+        }
+        foreach (var failure in unavailableBaseSources)
+        {
+            if (!IsSupportedBaseSource(failure.Source))
+            {
+                State = "Odrzucono nieprawidłowy identyfikator niedostępnego źródła autostartu.";
+                return 0;
+            }
+            foreach (var key in currentSnapshot.Where(pair => MatchesSource(pair.Value.Source, failure.Source)).Select(pair => pair.Key).ToArray())
+                currentSnapshot.Remove(key);
+            foreach (var pair in stored.Entries.Where(pair => MatchesSource(pair.Value.Source, failure.Source)))
+                currentSnapshot[pair.Key] = new(pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation);
+        }
+        var baseSourceFailureStatus = unavailableBaseSources.Count == 0
+            ? string.Empty
+            : " Niedostępne źródła: " + FormatSourceFailures(unavailableBaseSources) + ".";
         var scheduledTaskStatus = scheduledTasks.Status;
         if (scheduledTasks.Available)
         {
@@ -214,13 +306,14 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             pair => new WindowsPersistenceFingerprint(pair.Key, pair.Value.Source, pair.Value.Fingerprint, pair.Value.WritableLocation), StringComparer.Ordinal);
         if (!stored.Initialized)
         {
-            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), scheduledTasks.Available, services.Available, cancellationToken); }
+            try { await store.InitializeWindowsPersistenceMonitorSnapshotAsync(current.Values.ToArray(), scheduledTasks.Available, services.Available,
+                ifeoMachine64Available, ifeoMachine32Available, cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 State = "Nie można ustawić lokalnego baseline'u autostartu: " + exception.GetType().Name;
                 return 0;
             }
-            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}.";
+            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
             return 0;
         }
         var baseline = stored.Entries.ToDictionary(pair => pair.Key,
@@ -372,8 +465,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
         var pending = GetChanges(baseline, snapshot).Count;
         State = pending > 0
-            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}."
-            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}.";
+            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd()
+            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
         return recorded;
     }
 
@@ -399,10 +492,31 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         else baseline[change.Key] = change.Current;
     }
 
+    private static bool IsSupportedBaseSource(string source) => source is
+        "registry.user.run" or "registry.user.runonce" or "registry.user.runonceex" or "registry.user.policy.run" or
+        "registry.user.winlogon" or "registry.user.startup.approved" or "startup.user" or "startup.common" or
+        "registry.machine64.run" or "registry.machine64.runonce" or "registry.machine64.runonceex" or
+        "registry.machine64.policy.run" or "registry.machine64.winlogon" or "registry.machine64.appinit" or
+        "registry.machine64.startup.approved" or "registry.machine64.silent.exit" or "registry.machine64.shell.delay" or
+        "registry.machine32.run" or "registry.machine32.runonce" or "registry.machine32.runonceex" or
+        "registry.machine32.policy.run" or "registry.machine32.winlogon" or "registry.machine32.appinit" or
+        "registry.machine32.startup.approved" or "registry.machine32.silent.exit" or "registry.machine32.shell.delay";
+
+    private static bool MatchesSource(string entrySource, string requestedSource) =>
+        string.Equals(entrySource, requestedSource, StringComparison.Ordinal) ||
+        entrySource.StartsWith(requestedSource + ".", StringComparison.Ordinal);
+
+    private static string FormatSourceFailures(IEnumerable<PersistenceSourceFailure> failures) => string.Join(", ",
+        failures.Select(failure => failure.Source + " (" + failure.Reason + ")"));
+
     [SupportedOSPlatform("windows")]
-    private static IReadOnlyDictionary<string, PersistenceSnapshotEntry> CaptureUserPersistence()
+    private static PersistenceBaseSnapshotCapture CaptureUserPersistence()
     {
         var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
+        var ifeoMachine64Available = true;
+        var ifeoMachine32Available = true;
+        var unavailable = new List<string>();
+        var unavailableSources = new List<PersistenceSourceFailure>();
         var runPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
         var runOncePath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce";
         var runOnceExPath = "Software\\Microsoft\\Windows\\CurrentVersion\\RunOnceEx";
@@ -411,36 +525,63 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         var appInitPath = "Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows";
         var shellDelayPath = "Software\\Microsoft\\Windows\\CurrentVersion\\ShellServiceObjectDelayLoad";
         var startupApprovedPath = "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved";
-        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries);
-        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries);
-        CaptureRunOnceEx(RegistryHive.CurrentUser, RegistryView.Default, runOnceExPath, "registry.user.runonceex", entries);
-        CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries);
-        CaptureRegistryValues(RegistryHive.CurrentUser, RegistryView.Default, winlogonPath, "registry.user.winlogon", ["Shell", "Userinit"], entries);
-        CaptureStartupApproved(RegistryHive.CurrentUser, RegistryView.Default, startupApprovedPath, "user", entries);
+        CaptureSource("registry.user.run", () => CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runPath, "registry.user.run", entries), entries, unavailableSources);
+        CaptureSource("registry.user.runonce", () => CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, runOncePath, "registry.user.runonce", entries), entries, unavailableSources);
+        CaptureSource("registry.user.runonceex", () => CaptureRunOnceEx(RegistryHive.CurrentUser, RegistryView.Default, runOnceExPath, "registry.user.runonceex", entries), entries, unavailableSources);
+        CaptureSource("registry.user.policy.run", () => CaptureRunKey(RegistryHive.CurrentUser, RegistryView.Default, policyRunPath, "registry.user.policy.run", entries), entries, unavailableSources);
+        CaptureSource("registry.user.winlogon", () => CaptureRegistryValues(RegistryHive.CurrentUser, RegistryView.Default, winlogonPath, "registry.user.winlogon", ["Shell", "Userinit"], entries), entries, unavailableSources);
+        CaptureSource("registry.user.startup.approved", () => CaptureStartupApproved(RegistryHive.CurrentUser, RegistryView.Default, startupApprovedPath, "user", entries), entries, unavailableSources);
         var views = Environment.Is64BitOperatingSystem
             ? new[] { (RegistryView.Registry64, "machine64"), (RegistryView.Registry32, "machine32") }
             : new[] { (RegistryView.Default, "machine32") };
         foreach (var (view, sourcePrefix) in views)
         {
-            CaptureRunKey(RegistryHive.LocalMachine, view, runPath, $"registry.{sourcePrefix}.run", entries);
-            CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries);
-            CaptureRunOnceEx(RegistryHive.LocalMachine, view, runOnceExPath, $"registry.{sourcePrefix}.runonceex", entries);
-            CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries);
-            CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries);
-            CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries);
-            CaptureStartupApproved(RegistryHive.LocalMachine, view, startupApprovedPath, sourcePrefix, entries);
-            CaptureImageFileExecutionOptions(RegistryHive.LocalMachine, view, sourcePrefix, entries);
-            CaptureSilentProcessExit(RegistryHive.LocalMachine, view, sourcePrefix, entries);
-            CaptureRunKey(RegistryHive.LocalMachine, view, shellDelayPath, $"registry.{sourcePrefix}.shell.delay", entries);
+            CaptureSource($"registry.{sourcePrefix}.run", () => CaptureRunKey(RegistryHive.LocalMachine, view, runPath, $"registry.{sourcePrefix}.run", entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.runonce", () => CaptureRunKey(RegistryHive.LocalMachine, view, runOncePath, $"registry.{sourcePrefix}.runonce", entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.runonceex", () => CaptureRunOnceEx(RegistryHive.LocalMachine, view, runOnceExPath, $"registry.{sourcePrefix}.runonceex", entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.policy.run", () => CaptureRunKey(RegistryHive.LocalMachine, view, policyRunPath, $"registry.{sourcePrefix}.policy.run", entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.winlogon", () => CaptureRegistryValues(RegistryHive.LocalMachine, view, winlogonPath, $"registry.{sourcePrefix}.winlogon", ["Shell", "Userinit"], entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.appinit", () => CaptureRegistryValues(RegistryHive.LocalMachine, view, appInitPath, $"registry.{sourcePrefix}.appinit", ["AppInit_DLLs", "LoadAppInit_DLLs", "RequireSignedAppInit_DLLs"], entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.startup.approved", () => CaptureStartupApproved(RegistryHive.LocalMachine, view, startupApprovedPath, sourcePrefix, entries), entries, unavailableSources);
+            try { CaptureImageFileExecutionOptions(RegistryHive.LocalMachine, view, sourcePrefix, entries); }
+            catch (Exception exception) when (exception is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+            {
+                var source = $"registry.{sourcePrefix}.ifeo";
+                foreach (var key in entries.Where(pair => pair.Value.Source == source).Select(pair => pair.Key).ToArray()) entries.Remove(key);
+                unavailable.Add(source + ":" + exception.GetType().Name);
+                if (sourcePrefix == "machine64") ifeoMachine64Available = false;
+                else ifeoMachine32Available = false;
+            }
+            CaptureSource($"registry.{sourcePrefix}.silent.exit", () => CaptureSilentProcessExit(RegistryHive.LocalMachine, view, sourcePrefix, entries), entries, unavailableSources);
+            CaptureSource($"registry.{sourcePrefix}.shell.delay", () => CaptureRunKey(RegistryHive.LocalMachine, view, shellDelayPath, $"registry.{sourcePrefix}.shell.delay", entries), entries, unavailableSources);
         }
-        CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries);
-        CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries);
-        return entries;
+        CaptureSource("startup.user", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries), entries, unavailableSources);
+        CaptureSource("startup.common", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries), entries, unavailableSources);
+        return new(true, entries, ifeoMachine64Available, ifeoMachine32Available, string.Join(", ", unavailable), unavailableSources);
+    }
+
+    private static void CaptureSource(string source, Action capture, IDictionary<string, PersistenceSnapshotEntry> entries,
+        ICollection<PersistenceSourceFailure> unavailableSources)
+    {
+        try { capture(); }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            foreach (var key in entries.Where(pair => MatchesSource(pair.Value.Source, source)).Select(pair => pair.Key).ToArray())
+                entries.Remove(key);
+            unavailableSources.Add(new(source, exception.GetType().Name));
+        }
     }
 
     private static void CaptureStartupFolder(string startup, string source, IDictionary<string, PersistenceSnapshotEntry> entries)
     {
-        if (string.IsNullOrWhiteSpace(startup) || !Directory.Exists(startup)) return;
+        if (string.IsNullOrWhiteSpace(startup)) return;
+        FileAttributes rootAttributes;
+        try { rootAttributes = File.GetAttributes(startup); }
+        catch (DirectoryNotFoundException) { return; }
+        catch (FileNotFoundException) { return; }
+        if ((rootAttributes & FileAttributes.Directory) == 0) return;
+        if ((rootAttributes & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Katalog Startup jest dowiązaniem systemu plików.");
         var inspected = 0;
         foreach (var path in Directory.EnumerateFileSystemEntries(startup).OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
@@ -463,8 +604,10 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         }
     }
 
-    private static IReadOnlyDictionary<string, PersistenceSnapshotEntry> CaptureSupportedPlatform()
-        => OperatingSystem.IsWindows() ? CaptureUserPersistence() : new Dictionary<string, PersistenceSnapshotEntry>();
+    private static PersistenceBaseSnapshotCapture CaptureSupportedPlatform()
+        => OperatingSystem.IsWindows()
+            ? CaptureUserPersistence()
+            : new(false, new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), false, false, "wymaga Windows");
 
     private static PersistenceRegistrySnapshotCapture CaptureServiceRegistry()
     {

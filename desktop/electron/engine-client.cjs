@@ -4,6 +4,7 @@ const { createInterface } = require('node:readline');
 const INITIAL_RESTART_DELAY_MS = 1000;
 const MAX_RESTART_DELAY_MS = 30000;
 const REQUEST_TIMEOUT_MS = 45000;
+const STABLE_RUNTIME_MS = 60000;
 
 class EngineClient {
   constructor(executable, options = {}) {
@@ -14,7 +15,9 @@ class EngineClient {
     this.onState = options.onState ?? (() => {});
     this.onDiagnostic = options.onDiagnostic ?? (() => {});
     this.now = options.now ?? (() => new Date());
+    this.monotonicNow = options.monotonicNow ?? (() => performance.now());
     this.engine = null;
+    this.engineStartedAtMs = null;
     this.pending = new Map();
     this.sequence = 0;
     this.restartTimer = null;
@@ -53,6 +56,10 @@ class EngineClient {
     if (this.disposed || this.engine) return;
     this.restartTimer = null;
     this.state(this.restartAttempt ? 'restarting' : 'starting');
+    this.stderrObserved = false;
+    this.stderrExceptionCaptured = false;
+    this.currentExceptionType = null;
+    this.stderrPrefix = '';
     let child;
     try {
       child = this.spawnProcess(this.executable, [], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -62,10 +69,7 @@ class EngineClient {
       return;
     }
     this.engine = child;
-    this.stderrObserved = false;
-    this.stderrExceptionCaptured = false;
-    this.currentExceptionType = null;
-    this.stderrPrefix = '';
+    this.engineStartedAtMs = this.monotonicNow();
     child.on('error', error => this.failed(child, error?.code ?? 'spawn-error'));
     child.on('exit', (code, signal) => this.failed(child, code ?? signal ?? 'unknown'));
     child.stdin?.on('error', error => this.failed(child, error?.code ?? 'stdin-error'));
@@ -75,16 +79,11 @@ class EngineClient {
       const text = this.stderrPrefix + chunk.toString('utf8');
       const lines = text.split(/\r?\n/);
       this.stderrPrefix = lines.pop().slice(0, 256);
-      for (const line of [...lines, this.stderrPrefix]) {
-        const match = /^Unhandled exception\.\s+([A-Za-z_][A-Za-z0-9_.+`]{0,159})(?::|$)/.exec(line);
-        if (match) {
-          this.stderrExceptionType = match[1];
-          this.currentExceptionType = match[1];
-          this.stderrExceptionCaptured = true;
-          this.stderrPrefix = '';
-          break;
-        }
-      }
+      for (const line of lines) this.captureStderrExceptionType(line.slice(0, 256));
+    });
+    child.stderr?.on('end', () => {
+      if (!this.stderrExceptionCaptured && this.stderrPrefix) this.captureStderrExceptionType(this.stderrPrefix);
+      this.stderrPrefix = '';
     });
     createInterface({ input: child.stdout }).on('line', line => {
       let response;
@@ -95,7 +94,7 @@ class EngineClient {
       this.pending.delete(response.id);
       this.clearTimer(request.timer);
       if (response.ok) {
-        this.restartAttempt = 0;
+        this.resetRestartBackoffIfStable();
         this.state('ready');
         request.resolve(response.result);
       } else request.reject(new Error(response.error));
@@ -104,10 +103,28 @@ class EngineClient {
 
   failed(child, reason) {
     if (this.engine !== child) return;
+    this.resetRestartBackoffIfStable();
     this.engine = null;
+    this.engineStartedAtMs = null;
     this.lastExitCode = reason;
     this.rejectPending(new Error('Silnik jest niedostępny. Trwa ponawianie uruchomienia.'));
     this.scheduleRestart(reason);
+  }
+
+  captureStderrExceptionType(line) {
+    if (this.stderrExceptionCaptured) return;
+    const match = /^(?:Unhandled exception\.\s+|SENTINEL_ENGINE_FATAL type=)([A-Za-z_][A-Za-z0-9_.+`]{0,159})(?::|$)/.exec(line);
+    if (!match) return;
+    this.stderrExceptionType = match[1];
+    this.currentExceptionType = match[1];
+    this.stderrExceptionCaptured = true;
+    this.stderrPrefix = '';
+  }
+
+  resetRestartBackoffIfStable() {
+    if (this.engineStartedAtMs !== null && this.monotonicNow() - this.engineStartedAtMs >= STABLE_RUNTIME_MS) {
+      this.restartAttempt = 0;
+    }
   }
 
   scheduleRestart(reason) {

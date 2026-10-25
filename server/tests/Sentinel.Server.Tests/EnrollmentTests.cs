@@ -40,10 +40,14 @@ public sealed class EnrollmentTests : IDisposable
         Assert.Null(await _store.AuthenticateDeviceAsync(Hash("invalid-secret"), now));
 
         var later = now.AddMinutes(1);
-        Assert.True(await _store.HeartbeatAsync(enrolled.DeviceId, later, null));
+        var appliedPolicy = new AppliedPolicyRevision(4, 2, 1);
+        Assert.True(await _store.HeartbeatAsync(enrolled.DeviceId, later, null, appliedPolicy: appliedPolicy));
         var device = Assert.Single(await _store.ListDevicesAsync());
         Assert.Equal(later, device.LastSeenAt);
         Assert.Equal("1.2.3", device.ClientVersion);
+        Assert.Equal(appliedPolicy, device.AppliedPolicy);
+        Assert.True(await _store.HeartbeatAsync(enrolled.DeviceId, later.AddMinutes(1), "sync_failed"));
+        Assert.Equal(appliedPolicy, Assert.Single(await _store.ListDevicesAsync()).AppliedPolicy);
     }
 
     [Fact]

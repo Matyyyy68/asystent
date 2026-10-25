@@ -1,6 +1,9 @@
-param()
+param([switch]$AllowNetwork)
 
 $ErrorActionPreference = 'Stop'
+if (-not $AllowNetwork) {
+    throw 'This research evaluation fetches PhreshPhish data from Hugging Face. Pass -AllowNetwork to authorize dataset downloads.'
+}
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $temporaryRoot = [IO.Path]::GetFullPath($env:TEMP)
 $temporaryDirectory = [IO.Path]::GetFullPath((Join-Path $temporaryRoot ('sentinel-phreshphish-' + [Guid]::NewGuid().ToString('N'))))
@@ -13,7 +16,7 @@ $node = (Get-Command node.exe -ErrorAction Stop).Source
 $extractor = Join-Path $PSScriptRoot 'extract-test-columns.mjs'
 
 try {
-    $extractorOutput = @(& $node $extractor $csvPath)
+    $extractorOutput = @(& $node $extractor $csvPath --allow-network)
     if ($LASTEXITCODE -ne 0) { throw 'PhreshPhish column extraction failed.' }
     $extraction = $extractorOutput[-1] | ConvertFrom-Json
     if (-not (Test-Path -LiteralPath $csvPath -PathType Leaf)) { throw 'The extractor did not create its temporary CSV.' }

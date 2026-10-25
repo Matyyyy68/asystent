@@ -19,14 +19,22 @@ try {
     if ($source -notmatch 'test split is not accepted' -or $source -notmatch 'URLsOpened = 0' -or $source -match 'Invoke-WebRequest|Invoke-RestMethod|Resolve-DnsName|HttpClient') {
         throw 'Evaluator must reject test data, report that URLs are not opened, and avoid URL/DNS requests.'
     }
-
-    $failedAsExpected = $false
-    try { $null = @(& $evaluator -TrainCsvPath $testFixture -ValidationCsvPath $validationFixture) } catch { $failedAsExpected = $true }
-    if (-not $failedAsExpected) { throw 'Evaluator accepted a test split.' }
+    if ($source.IndexOf("if (-not `$AllowNetwork)", [StringComparison]::Ordinal) -lt 0 -or
+        $source.IndexOf("if (-not `$AllowNetwork)", [StringComparison]::Ordinal) -gt $source.IndexOf('$temporaryDirectory', [StringComparison]::Ordinal)) {
+        throw 'CERT evaluation must require explicit network opt-in before creating temporary files.'
+    }
 
     $failedAsExpected = $false
     try { $null = @(& $evaluator -TrainCsvPath $trainFixture -ValidationCsvPath $validationFixture) } catch { $failedAsExpected = $true }
+    if (-not $failedAsExpected) { throw 'Evaluator allowed a live CERT feed request without explicit network opt-in.' }
+
+    $failedAsExpected = $false
+    try { $null = @(& $evaluator -TrainCsvPath $testFixture -ValidationCsvPath $validationFixture -AllowNetwork) } catch { $failedAsExpected = $true }
+    if (-not $failedAsExpected) { throw 'Evaluator accepted a test split.' }
+
+    $failedAsExpected = $false
+    try { $null = @(& $evaluator -TrainCsvPath $trainFixture -ValidationCsvPath $validationFixture -AllowNetwork) } catch { $failedAsExpected = $true }
     if (-not $failedAsExpected) { throw 'Evaluator accepted files without the official train/validation checksums.' }
-    Write-Output 'PASS: only checksum-pinned PhishVN train/validation can reach the CERT fetch; test split is rejected.'
+    Write-Output 'PASS: CERT feed access requires explicit opt-in; test split and non-official checksums are rejected before network access.'
 }
 finally { Remove-Item -LiteralPath $fixtureDirectory -Recurse -Force -ErrorAction SilentlyContinue }

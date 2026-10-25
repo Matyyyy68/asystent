@@ -82,7 +82,7 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
-    public async Task TenThousandProcessChangesAreCappedAndRecordedWithoutLosingStatus()
+    public async Task TenThousandProcessChangesAreCappedAndPersistedInBoundedBacklog()
     {
         var snapshot = new Dictionary<int, string>();
         var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string>(snapshot));
@@ -96,15 +96,107 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
 
         Assert.Equal(100, added);
         Assert.Equal(100, (await store.ReadAsync()).Count);
-        Assert.Contains("10000 PID, 100 zmian, pominięto łącznie 9900", monitor.State);
+        Assert.Contains("10000 PID, 100 zmian, kolejka 9900, odrzucono ponad limit łącznie 0", monitor.State);
+        Assert.Equal(9_900, (await store.ReadPendingProcessChangesAsync()).Count);
         Assert.Contains("Limit snapshotu osiągnięty", monitor.State);
 
         snapshot.Clear();
         var removed = await monitor.CollectAsync(store, paused: false, excludedApplications: "");
         Assert.Equal(100, removed);
         Assert.Equal(200, (await store.ReadAsync()).Count);
-        Assert.Contains("100 zmian, pominięto łącznie 19800", monitor.State);
+        Assert.Contains("kolejka 19800, odrzucono ponad limit łącznie 0", monitor.State);
         Assert.True(started.Elapsed < TimeSpan.FromSeconds(30), $"10k process delta exceeded 30s: {started.Elapsed}");
+    }
+
+    [Fact]
+    public async Task ProcessChangeBacklogDrainsAfterRestartWithoutDuplicateOrLostEvents()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        for (var id = 1; id <= 250; id++) snapshot.Add(id, "synthetic-process");
+
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(150, (await store.ReadPendingProcessChangesAsync()).Count);
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(50, (await store.ReadPendingProcessChangesAsync()).Count);
+
+        var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(50, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(0, (await store.ReadPendingProcessChangesAsync()).Count);
+        var events = await store.ReadAsync();
+        Assert.Equal(250, events.Count);
+        Assert.Equal(250, events.Select(item => item.EventId).Distinct().Count());
+        Assert.Equal(Enumerable.Range(1, 250), events.Select(item => item.ProcessId!.Value).Order());
+    }
+
+    [Fact]
+    public async Task DelayedBacklogStartDoesNotResolveImagePathAgainstPossiblyReusedPid()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var resolvedPaths = 0;
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot), (_, _) =>
+        {
+            resolvedPaths++;
+            return Path.Combine(directory, "synthetic.exe");
+        }, null);
+        for (var id = 1; id <= 101; id++) snapshot.Add(id, "synthetic-process");
+
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(100, resolvedPaths);
+        Assert.Equal(1, (await store.ReadPendingProcessChangesAsync()).Count);
+
+        Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(100, resolvedPaths);
+        var delayed = Assert.Single(await store.ReadAsync(), item => item.ProcessId == 101);
+        Assert.Null(delayed.ProcessImagePath);
+        Assert.Contains("process.image.path-unavailable", delayed.EvidenceCodes!);
+    }
+
+    [Fact]
+    public async Task PausingProcessMonitoringClearsBacklogAndAdvancesBaselineWithoutAlerts()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        for (var id = 1; id <= 250; id++) snapshot.Add(id, "synthetic-process");
+
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(150, (await store.ReadPendingProcessChangesAsync()).Count);
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: true, excludedApplications: ""));
+        Assert.Equal(0, (await store.ReadPendingProcessChangesAsync()).Count);
+
+        var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(0, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(100, (await store.ReadAsync()).Count);
+    }
+
+    [Fact]
+    public async Task ProcessChangeBacklogHasHardLimitAndReportsOverflow()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        for (var id = 1; id <= 9_000; id++) snapshot.Add(id, "first-name");
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(8_900, (await store.ReadPendingProcessChangesAsync()).Count);
+
+        for (var id = 1; id <= 9_000; id++) snapshot[id] = "second-name";
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        var pending = await store.ReadPendingProcessChangesAsync();
+        Assert.Equal(20_000, pending.Count);
+        Assert.Contains("kolejka 20000, odrzucono ponad limit łącznie 6800", monitor.State);
+
+        for (var id = 1; id <= 9_000; id++) snapshot[id] = "third-name";
+        Assert.Equal(100, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(20_000, (await store.ReadPendingProcessChangesAsync()).Count);
+        Assert.Contains("kolejka 20000, odrzucono ponad limit łącznie 24700", monitor.State);
+        Assert.Equal(24_700L, (await store.ReadProcessMonitorSnapshotAsync()).DroppedChanges);
+
+        var restarted = new ProcessSnapshotMonitor(() => new(snapshot));
+        Assert.Equal(100, await restarted.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Contains("odrzucono ponad limit łącznie 24700", restarted.State);
     }
 
     [Fact]

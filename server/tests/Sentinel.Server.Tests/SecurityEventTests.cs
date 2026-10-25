@@ -105,7 +105,7 @@ public sealed class SecurityEventTests : IDisposable
         {
             await verify.OpenAsync();
             await using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-            Assert.Equal(8L, (long)(await version.ExecuteScalarAsync())!);
+            Assert.Equal(9L, (long)(await version.ExecuteScalarAsync())!);
         }
     }
 

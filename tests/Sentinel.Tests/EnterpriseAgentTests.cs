@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text;
+using Sentinel.Core;
+using Sentinel.Core.Analysis;
 using Sentinel.Core.Enterprise;
 using Xunit;
 
@@ -11,17 +13,41 @@ public sealed class EnterpriseAgentTests
     [Fact]
     public void EnterprisePolicyParsesValidatedEffectiveSettings()
     {
-        using var json = System.Text.Json.JsonDocument.Parse("""{"globalVersion":4,"effective":{"analysisMode":"local","analysisIntervalSeconds":45,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":["browser.exe"],"syncIntervalSeconds":600}}""");
+        using var json = System.Text.Json.JsonDocument.Parse("""{"globalVersion":4,"groupVersion":2,"deviceVersion":1,"effective":{"analysisMode":"local","includeContext":false,"analysisIntervalSeconds":45,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":["browser.exe"],"syncIntervalSeconds":600}}""");
         var policy = EnterprisePolicy.Parse(json);
         Assert.Equal(4, policy.Version);
+        Assert.Equal(2, policy.GroupVersion);
+        Assert.Equal(1, policy.DeviceVersion);
         Assert.Equal(45, policy.AnalysisIntervalSeconds);
         Assert.Equal(600, policy.SyncIntervalSeconds);
+        Assert.False(policy.IncludeContext);
         Assert.Equal("browser.exe", Assert.Single(policy.ExcludedApplications));
     }
 
+    [Fact]
+    public void EnterprisePolicyAcceptsLegacyServerWithoutLayerVersionsButDoesNotInventThem()
+    {
+        using var json = System.Text.Json.JsonDocument.Parse("""{"globalVersion":4,"effective":{"analysisMode":"local","includeContext":false,"analysisIntervalSeconds":45,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":[],"syncIntervalSeconds":600}}""");
+        var policy = EnterprisePolicy.Parse(json);
+        Assert.Equal(4, policy.GlobalVersion);
+        Assert.Null(policy.GroupVersion);
+        Assert.Null(policy.DeviceVersion);
+    }
+
+    [Fact]
+    public void EnterprisePolicyCapturesContextSharingAndServerAnalysisMode()
+    {
+        using var json = System.Text.Json.JsonDocument.Parse("""{"globalVersion":1,"effective":{"analysisMode":"server","includeContext":true,"analysisIntervalSeconds":30,"aiProvider":"ollama","notificationLevel":"important","excludedApplications":[],"syncIntervalSeconds":300}}""");
+        var policy = EnterprisePolicy.Parse(json);
+        Assert.Equal("server", policy.AnalysisMode);
+        Assert.True(policy.IncludeContext);
+        Assert.Equal("ollama", policy.AiProvider);
+    }
+
     [Theory]
-    [InlineData("""{"globalVersion":1,"effective":{"analysisMode":"local","analysisIntervalSeconds":1,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":[],"syncIntervalSeconds":300}}""")]
-    [InlineData("""{"globalVersion":1,"effective":{"analysisMode":"hybrid","analysisIntervalSeconds":5,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":["bad;name"],"syncIntervalSeconds":300}}""")]
+    [InlineData("""{"globalVersion":1,"groupVersion":0,"deviceVersion":0,"effective":{"analysisMode":"local","includeContext":false,"analysisIntervalSeconds":1,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":[],"syncIntervalSeconds":300}}""")]
+    [InlineData("""{"globalVersion":1,"groupVersion":0,"deviceVersion":0,"effective":{"analysisMode":"hybrid","includeContext":false,"analysisIntervalSeconds":5,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":["bad;name"],"syncIntervalSeconds":300}}""")]
+    [InlineData("""{"globalVersion":1,"groupVersion":-1,"deviceVersion":0,"effective":{"analysisMode":"local","includeContext":false,"analysisIntervalSeconds":45,"aiProvider":"disabled","notificationLevel":"important","excludedApplications":[],"syncIntervalSeconds":300}}""")]
     public void EnterprisePolicyRejectsUnsafeOrOutOfRangeValues(string source)
     {
         using var json = System.Text.Json.JsonDocument.Parse(source);
@@ -78,6 +104,96 @@ public sealed class EnterpriseAgentTests
         Assert.Contains("\"ruleVersion\":\"2026.10.1\"", body);
         Assert.DoesNotContain("explanation", body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("https://", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task HeartbeatReportsAppliedPolicyRevisionWithoutSendingPolicyContents()
+    {
+        string? body = null;
+        var handler = new DelegateHandler(async request =>
+        {
+            Assert.Equal("https://sentinel.example/api/v1/agents/heartbeat", request.RequestUri!.AbsoluteUri);
+            body = await request.Content!.ReadAsStringAsync();
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        await client.SendHeartbeatAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "012345678901234567890123456789012345678901234567890123456789",
+            appliedPolicy: new EnterprisePolicyRevision(4, 2, 1));
+        using var json = System.Text.Json.JsonDocument.Parse(body!);
+        Assert.Equal(4, json.RootElement.GetProperty("globalPolicyVersion").GetInt64());
+        Assert.Equal(2, json.RootElement.GetProperty("groupPolicyVersion").GetInt64());
+        Assert.Equal(1, json.RootElement.GetProperty("devicePolicyVersion").GetInt64());
+        Assert.False(json.RootElement.TryGetProperty("effective", out _));
+        Assert.DoesNotContain("policy contents", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ServerAnalysisSendsContextOnlyAfterExplicitSingleRequestConsent()
+    {
+        HttpRequestMessage? observed = null;
+        string? observedBody = null;
+        var handler = new DelegateHandler(async request =>
+        {
+            observed = request;
+            observedBody = await request.Content!.ReadAsStringAsync();
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("https://sentinel.example/api/v1/agents/analyze", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("Bearer 01234567890123456789012345678901234567890123456789", request.Headers.Authorization!.ToString());
+            return Json(HttpStatusCode.OK, """{"category":3,"risk":3,"indicators":[],"uncertainties":[],"recommendations":["Sprawdź nadawcę"],"explanation":"Ocena regułowa","modelEnabled":false,"contextPersisted":false}""");
+        });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        var server = EnterpriseAgentClient.ValidateServer("https://sentinel.example");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.AnalyzeWithServerAsync(server,
+            "01234567890123456789012345678901234567890123456789", "Ręczna analiza", "Poufna wiadomość",
+            null, userConfirmedContextSharing: false));
+        Assert.Null(observed);
+
+        var result = await client.AnalyzeWithServerAsync(server,
+            "01234567890123456789012345678901234567890123456789", "Ręczna analiza", "Poufna wiadomość",
+            "https://example.test/login", userConfirmedContextSharing: true);
+        var body = observedBody!;
+        using var requestJson = System.Text.Json.JsonDocument.Parse(body);
+        Assert.Equal("Poufna wiadomość", requestJson.RootElement.GetProperty("text").GetString());
+        Assert.Equal("https://example.test/login", requestJson.RootElement.GetProperty("targetUrl").GetString());
+        Assert.True(requestJson.RootElement.GetProperty("contextSharingConfirmed").GetBoolean());
+        Assert.Equal(ThreatCategory.PaymentFraud, result.Category);
+        Assert.Equal(RiskLevel.High, result.Risk);
+    }
+
+    [Fact]
+    public async Task ServerAnalysisRejectsResponseThatDoesNotConfirmContextWasNotPersisted()
+    {
+        var handler = new DelegateHandler(_ => Task.FromResult(Json(HttpStatusCode.OK,
+            """{"category":0,"risk":0,"indicators":[],"uncertainties":[],"recommendations":[],"explanation":"ok","contextPersisted":true}""")));
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.AnalyzeWithServerAsync(
+            EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "01234567890123456789012345678901234567890123456789", "Ręczna analiza", "tekst", null,
+            userConfirmedContextSharing: true));
+    }
+
+    [Fact]
+    public async Task ServerAnalysisAllowsUrlOnlyInputAfterExplicitConsent()
+    {
+        string? body = null;
+        var handler = new DelegateHandler(async request =>
+        {
+            body = await request.Content!.ReadAsStringAsync();
+            return Json(HttpStatusCode.OK,
+                """{"category":1,"risk":1,"indicators":[],"uncertainties":[],"recommendations":[],"explanation":"Ocena lokalna","modelEnabled":false,"contextPersisted":false}""");
+        });
+        using var http = new HttpClient(handler);
+        var client = new EnterpriseAgentClient(http);
+        await client.AnalyzeWithServerAsync(EnterpriseAgentClient.ValidateServer("https://sentinel.example"),
+            "01234567890123456789012345678901234567890123456789", "Ręczna analiza", "",
+            "https://example.test/login", userConfirmedContextSharing: true);
+        using var requestJson = System.Text.Json.JsonDocument.Parse(body!);
+        Assert.Equal("", requestJson.RootElement.GetProperty("text").GetString());
+        Assert.Equal("https://example.test/login", requestJson.RootElement.GetProperty("targetUrl").GetString());
     }
 
     [Fact]

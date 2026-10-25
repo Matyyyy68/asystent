@@ -4,10 +4,14 @@ param(
     [string]$TrainCsvPath,
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
-    [string]$ValidationCsvPath
+    [string]$ValidationCsvPath,
+    [switch]$AllowNetwork
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $AllowNetwork) {
+    throw 'This evaluation refreshes the CERT domain feed from the network. Pass -AllowNetwork to authorize the feed request.'
+}
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $coreAssembly = Join-Path $repositoryRoot 'src\Sentinel.Core\bin\Release\net10.0\Sentinel.Core.dll'
 if (-not (Test-Path -LiteralPath $coreAssembly -PathType Leaf)) {

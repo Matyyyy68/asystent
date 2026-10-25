@@ -9,6 +9,10 @@ using Sentinel.Core.Analysis;
 using Sentinel.Core.Configuration;
 using Sentinel.Core.Enterprise;
 namespace Sentinel.Core;
+public sealed record ProcessChangeQueueItem(long QueueId, Guid EventId, DateTimeOffset ObservedAt, string Action,
+    int ProcessId, string ProcessName, Guid? CorrelationId);
+public sealed record ProcessChangeQueueSnapshot(int Count, IReadOnlyList<ProcessChangeQueueItem> Items);
+
 public sealed class LocalStore : IEventRepository, ISettingsRepository
 {
     public const long DefaultMaximumDatabaseBytes = 512L * 1024 * 1024;
@@ -96,7 +100,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 34) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 38) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -392,6 +396,39 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
+        if (v < 35)
+        {
+            await Execute(c, "BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS process_change_backlog(queue_id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE CHECK(length(event_id)=36), observed_at TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('Proces zaobserwowany','Proces zniknął z migawki')), process_id INTEGER NOT NULL CHECK(process_id BETWEEN 0 AND 2147483647), process_name TEXT NOT NULL CHECK(length(process_name) BETWEEN 1 AND 260), correlation_id TEXT NULL CHECK(correlation_id IS NULL OR length(correlation_id)=36)); PRAGMA user_version=35; COMMIT;", ct);
+        }
+        if (v < 36)
+        {
+            if (await HasColumnAsync(c, "process_monitor_metadata", "dropped_changes", ct))
+                await Execute(c, "PRAGMA user_version=36", ct);
+            else
+                await Execute(c, "BEGIN IMMEDIATE; ALTER TABLE process_monitor_metadata ADD COLUMN dropped_changes INTEGER NOT NULL DEFAULT 0 CHECK(dropped_changes>=0); PRAGMA user_version=36; COMMIT;", ct);
+        }
+        if (v < 37)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "windows_persistence_monitor_metadata", "ifeo_machine64_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(ifeo_machine64_initialized IN (0,1))", ct);
+                await EnsureColumnAsync(c, "windows_persistence_monitor_metadata", "ifeo_machine32_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(ifeo_machine32_initialized IN (0,1))", ct);
+                if (v >= 30)
+                    await Execute(c, "UPDATE windows_persistence_monitor_metadata SET ifeo_machine64_initialized=initialized,ifeo_machine32_initialized=initialized WHERE id=1", ct);
+                await Execute(c, "PRAGMA user_version=37; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 38)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v38(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 160), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.runonceex','registry.machine64.runonceex','registry.machine32.runonceex','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','registry.machine64.shell.delay','registry.machine32.shell.delay','registry.machine64.silent.exit','registry.machine32.silent.exit','registry.user.startup.approved.run','registry.user.startup.approved.run32','registry.user.startup.approved.startupfolder','registry.machine64.startup.approved.run','registry.machine64.startup.approved.run32','registry.machine64.startup.approved.startupfolder','registry.machine32.startup.approved.run','registry.machine32.startup.approved.run32','registry.machine32.startup.approved.startupfolder','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v38(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v38 RENAME TO windows_persistence_snapshot; PRAGMA user_version=38; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
         await Execute(c, "CREATE INDEX IF NOT EXISTS ix_event_observations_source_time ON event_observations(source,observed_at,event_row_id)", ct);
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
@@ -646,16 +683,18 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<ProcessMonitorSnapshot> ReadProcessMonitorSnapshotAsync(CancellationToken ct = default)
     {
         await using var c = await Open(ct);
-        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,truncated FROM process_monitor_metadata WHERE id=1";
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,truncated,dropped_changes FROM process_monitor_metadata WHERE id=1";
         await using var metadataReader = await metadata.ExecuteReaderAsync(ct);
         if (!await metadataReader.ReadAsync(ct)) throw new InvalidDataException("Brak metadanych migawki procesów.");
         var initialized = metadataReader.GetInt32(0) == 1;
         var truncated = metadataReader.GetInt32(1) == 1;
+        var droppedChanges = metadataReader.GetInt64(2);
+        if (droppedChanges < 0) throw new InvalidDataException("Nieprawidłowy licznik pominiętych zmian procesu.");
         await metadataReader.DisposeAsync();
         using var query = c.CreateCommand(); query.CommandText = "SELECT process_id,process_name FROM process_snapshot ORDER BY process_id LIMIT 10000";
         using var reader = await query.ExecuteReaderAsync(ct); var processes = new Dictionary<int, string>();
         while (await reader.ReadAsync(ct)) processes.Add(reader.GetInt32(0), reader.GetString(1));
-        return new(initialized, processes, truncated);
+        return new(initialized, processes, truncated, droppedChanges);
     }
     public async Task<IReadOnlyList<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>> ReadRecentProcessStartsAsync(
         DateTimeOffset now, CancellationToken ct = default)
@@ -673,14 +712,51 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 results.Add((reader.GetInt32(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), correlationId));
         return results;
     }
+    public async Task<ProcessChangeQueueSnapshot> ReadPendingProcessChangesAsync(int maximumItems = 20_000,
+        CancellationToken ct = default)
+    {
+        if (maximumItems is < 1 or > 20_000) throw new ArgumentOutOfRangeException(nameof(maximumItems));
+        await using var c = await Open(ct);
+        using var countCommand = c.CreateCommand(); countCommand.CommandText = "SELECT COUNT(*) FROM process_change_backlog";
+        var count = Convert.ToInt32(await countCommand.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        using var query = c.CreateCommand(); query.CommandText = "SELECT queue_id,event_id,observed_at,action,process_id,process_name,correlation_id FROM process_change_backlog ORDER BY queue_id LIMIT $limit";
+        query.Parameters.AddWithValue("$limit", maximumItems);
+        var items = new List<ProcessChangeQueueItem>(Math.Min(count, maximumItems));
+        await using var reader = await query.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var eventId = Guid.Parse(reader.GetString(1));
+            var observedAt = DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            var action = reader.GetString(3);
+            var processId = reader.GetInt32(4);
+            var processName = reader.GetString(5);
+            Guid? correlationId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6));
+            if (eventId == Guid.Empty || action is not ("Proces zaobserwowany" or "Proces zniknął z migawki") || processId < 0 ||
+                processName.Length is < 1 or > 260 || processName.Any(char.IsControl) ||
+                (action == "Proces zaobserwowany" && !correlationId.HasValue))
+                throw new InvalidDataException("Nieprawidłowa zmiana oczekująca w kolejce monitora procesów.");
+            items.Add(new(reader.GetInt64(0), eventId, observedAt, action, processId, processName, correlationId));
+        }
+        return new(count, items);
+    }
     /// <summary>Atomically records process events and advances the persisted process baseline.</summary>
     public async Task CommitProcessMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
         IReadOnlyCollection<KeyValuePair<int, string>> upserts, IReadOnlyCollection<int> removedProcessIds,
-        CancellationToken ct = default, bool truncated = false)
+        CancellationToken ct = default, bool truncated = false,
+        IReadOnlyCollection<ProcessChangeQueueItem>? backlogToAdd = null,
+        IReadOnlyCollection<Guid>? backlogToRemove = null, bool clearBacklog = false, long droppedChanges = 0)
     {
         ArgumentNullException.ThrowIfNull(events); ArgumentNullException.ThrowIfNull(upserts); ArgumentNullException.ThrowIfNull(removedProcessIds);
-        if (events.Count > 100 || upserts.Count > 10_000 || removedProcessIds.Count > 10_000)
+        backlogToAdd ??= []; backlogToRemove ??= [];
+        if (events.Count > 100 || upserts.Count > 10_000 || removedProcessIds.Count > 10_000 || droppedChanges < 0)
             throw new ArgumentOutOfRangeException(nameof(events), "Przekroczono limit zmian migawki procesów.");
+        if (backlogToAdd.Count > 20_000 || backlogToRemove.Count > 20_000 || backlogToAdd.Select(item => item.EventId).Distinct().Count() != backlogToAdd.Count)
+            throw new ArgumentOutOfRangeException(nameof(backlogToAdd), "Przekroczono limit kolejki zmian procesów.");
+        foreach (var item in backlogToAdd)
+            if (item.EventId == Guid.Empty || item.Action is not ("Proces zaobserwowany" or "Proces zniknął z migawki") ||
+                item.ProcessId < 0 || string.IsNullOrWhiteSpace(item.ProcessName) || item.ProcessName.Length > 260 || item.ProcessName.Any(char.IsControl) ||
+                (item.Action == "Proces zaobserwowany" && !item.CorrelationId.HasValue))
+                throw new ArgumentException("Nieprawidłowa zmiana oczekująca monitora procesów.", nameof(backlogToAdd));
         foreach (var (processId, processName) in upserts)
             if (processId < 0 || string.IsNullOrWhiteSpace(processName) || processName.Length > 260 || processName.Any(char.IsControl))
                 throw new ArgumentException("Nieprawidłowy wpis migawki procesu.", nameof(upserts));
@@ -688,6 +764,34 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             throw new ArgumentException("Nieprawidłowy PID w migawce procesów.", nameof(removedProcessIds));
         var validated = events.Select(item => (Item: item, Metadata: ValidateEvent(item))).ToArray();
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        if (clearBacklog)
+        {
+            using var clear = c.CreateCommand(); clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM process_change_backlog"; await clear.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var item in backlogToAdd)
+        {
+            using var insertPending = c.CreateCommand(); insertPending.Transaction = transaction;
+            insertPending.CommandText = "INSERT INTO process_change_backlog(event_id,observed_at,action,process_id,process_name,correlation_id) VALUES($eventId,$observedAt,$action,$processId,$processName,$correlationId)";
+            insertPending.Parameters.AddWithValue("$eventId", item.EventId.ToString("D"));
+            insertPending.Parameters.AddWithValue("$observedAt", item.ObservedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            insertPending.Parameters.AddWithValue("$action", item.Action); insertPending.Parameters.AddWithValue("$processId", item.ProcessId);
+            insertPending.Parameters.AddWithValue("$processName", item.ProcessName);
+            insertPending.Parameters.AddWithValue("$correlationId", (object?)item.CorrelationId?.ToString("D") ?? DBNull.Value);
+            await insertPending.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var eventId in backlogToRemove)
+        {
+            using var removePending = c.CreateCommand(); removePending.Transaction = transaction;
+            removePending.CommandText = "DELETE FROM process_change_backlog WHERE event_id=$eventId";
+            removePending.Parameters.AddWithValue("$eventId", eventId.ToString("D")); await removePending.ExecuteNonQueryAsync(ct);
+        }
+        using (var count = c.CreateCommand())
+        {
+            count.Transaction = transaction; count.CommandText = "SELECT COUNT(*) FROM process_change_backlog";
+            if (Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 20_000)
+                throw new InvalidOperationException("Kolejka zmian procesów osiągnęła bezpieczny limit.");
+        }
         foreach (var (item, (eventId, source)) in validated)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
@@ -708,8 +812,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         using (var initialized = c.CreateCommand())
         {
-            initialized.Transaction = transaction; initialized.CommandText = "UPDATE process_monitor_metadata SET initialized=1,truncated=$truncated WHERE id=1";
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE process_monitor_metadata SET initialized=1,truncated=$truncated,dropped_changes=dropped_changes+$droppedChanges WHERE id=1";
             initialized.Parameters.AddWithValue("$truncated", truncated ? 1 : 0);
+            initialized.Parameters.AddWithValue("$droppedChanges", droppedChanges);
             await initialized.ExecuteNonQueryAsync(ct);
         }
         await transaction.CommitAsync(ct);
@@ -793,14 +898,16 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<WindowsPersistenceMonitorSnapshot> ReadWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
     {
         await using var c = await Open(ct);
-        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,scheduled_tasks_initialized,services_initialized FROM windows_persistence_monitor_metadata WHERE id=1";
-        bool initialized; bool scheduledTasksInitialized; bool servicesInitialized;
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,scheduled_tasks_initialized,services_initialized,ifeo_machine64_initialized,ifeo_machine32_initialized FROM windows_persistence_monitor_metadata WHERE id=1";
+        bool initialized; bool scheduledTasksInitialized; bool servicesInitialized; bool ifeoMachine64Initialized; bool ifeoMachine32Initialized;
         using (var metadataReader = await metadata.ExecuteReaderAsync(ct))
         {
             if (!await metadataReader.ReadAsync(ct)) return new(false, new Dictionary<string, WindowsPersistenceFingerprint>(StringComparer.Ordinal));
             initialized = metadataReader.GetInt32(0) == 1;
             scheduledTasksInitialized = metadataReader.GetInt32(1) == 1;
             servicesInitialized = metadataReader.GetInt32(2) == 1;
+            ifeoMachine64Initialized = metadataReader.GetInt32(3) == 1;
+            ifeoMachine32Initialized = metadataReader.GetInt32(4) == 1;
         }
         using var query = c.CreateCommand(); query.CommandText = "SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot ORDER BY entry_key LIMIT 1024";
         using var reader = await query.ExecuteReaderAsync(ct);
@@ -811,17 +918,30 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             ValidateWindowsPersistenceFingerprint(entry);
             entries.Add(entry.Key, entry);
         }
-        return new(initialized, entries, scheduledTasksInitialized, servicesInitialized);
+        return new(initialized, entries, scheduledTasksInitialized, servicesInitialized, ifeoMachine64Initialized, ifeoMachine32Initialized);
     }
     public async Task InitializeWindowsPersistenceMonitorSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries,
-        bool scheduledTasksInitialized = false, bool servicesInitialized = false, CancellationToken ct = default)
+        bool scheduledTasksInitialized = false, bool servicesInitialized = false,
+        bool ifeoMachine64Initialized = true, bool ifeoMachine32Initialized = true, CancellationToken ct = default)
     {
         ValidateWindowsPersistenceFingerprints(entries);
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using (var clear = c.CreateCommand()) { clear.Transaction = transaction; clear.CommandText = "DELETE FROM windows_persistence_snapshot"; await clear.ExecuteNonQueryAsync(ct); }
         foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
-        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1,scheduled_tasks_initialized=$tasks,services_initialized=$services WHERE id=1"; initialized.Parameters.AddWithValue("$tasks", scheduledTasksInitialized ? 1 : 0); initialized.Parameters.AddWithValue("$services", servicesInitialized ? 1 : 0); await initialized.ExecuteNonQueryAsync(ct); }
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1,scheduled_tasks_initialized=$tasks,services_initialized=$services,ifeo_machine64_initialized=$ifeo64,ifeo_machine32_initialized=$ifeo32 WHERE id=1"; initialized.Parameters.AddWithValue("$tasks", scheduledTasksInitialized ? 1 : 0); initialized.Parameters.AddWithValue("$services", servicesInitialized ? 1 : 0); initialized.Parameters.AddWithValue("$ifeo64", ifeoMachine64Initialized ? 1 : 0); initialized.Parameters.AddWithValue("$ifeo32", ifeoMachine32Initialized ? 1 : 0); await initialized.ExecuteNonQueryAsync(ct); }
         await transaction.CommitAsync(ct);
+    }
+    public async Task InitializeWindowsIfeoSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, string source, CancellationToken ct = default)
+    {
+        if (source is not ("registry.machine64.ifeo" or "registry.machine32.ifeo") || entries.Any(entry => entry.Source != source))
+            throw new ArgumentException("Migawka IFEO zawiera nieprawidłowe źródło.", nameof(source));
+        ValidateWindowsPersistenceFingerprints(entries);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using var initialized = c.CreateCommand(); initialized.Transaction = transaction;
+        var column = source == "registry.machine64.ifeo" ? "ifeo_machine64_initialized" : "ifeo_machine32_initialized";
+        initialized.CommandText = $"UPDATE windows_persistence_monitor_metadata SET {column}=1 WHERE id=1";
+        await initialized.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
     }
     public async Task InitializeWindowsScheduledTaskSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, CancellationToken ct = default)
     {
@@ -846,7 +966,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         if (current is not null && !string.Equals(current.Key, key, StringComparison.Ordinal)) throw new ArgumentException("Niezgodny klucz wpisu autostartu.", nameof(current));
         if (current is not null) ValidateWindowsPersistenceFingerprint(current);
-        if (string.IsNullOrWhiteSpace(key) || key.Length > 100) throw new ArgumentException("Nieprawidłowy klucz wpisu autostartu.", nameof(key));
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 160) throw new ArgumentException("Nieprawidłowy klucz wpisu autostartu.", nameof(key));
         var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using (var insert = c.CreateCommand())
@@ -868,7 +988,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using var command = c.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "DELETE FROM windows_persistence_snapshot; UPDATE windows_persistence_monitor_metadata SET initialized=0,scheduled_tasks_initialized=0,services_initialized=0 WHERE id=1";
+        command.CommandText = "DELETE FROM windows_persistence_snapshot; UPDATE windows_persistence_monitor_metadata SET initialized=0,scheduled_tasks_initialized=0,services_initialized=0,ifeo_machine64_initialized=0,ifeo_machine32_initialized=0 WHERE id=1";
         await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
     }
     private static void ValidateWindowsPersistenceFingerprints(IReadOnlyCollection<WindowsPersistenceFingerprint> entries)
@@ -881,7 +1001,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     }
     private static void ValidateWindowsPersistenceFingerprint(WindowsPersistenceFingerprint entry)
     {
-        if (string.IsNullOrWhiteSpace(entry.Key) || entry.Key.Length > 100 ||
+        if (string.IsNullOrWhiteSpace(entry.Key) || entry.Key.Length > 160 ||
             entry.Source is not ("registry.user.run" or "registry.user.runonce" or "registry.machine64.run" or "registry.machine64.runonce" or
                 "registry.machine32.run" or "registry.machine32.runonce" or "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" or
                 "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" or
@@ -1483,7 +1603,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores the local event/settings queue from a verified v6-v34 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores local events and settings from a verified v6-v38 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -1501,7 +1621,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is < 6 or > 34)
+            if (backupVersion is < 6 or > 38)
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -1521,9 +1641,13 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata')";
             if (backupVersion >= 22)
                 required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata','dns_operational_monitor_metadata')";
-            var expectedTables = backupVersion >= 22 ? 16 : backupVersion is 19 or 20 or 21 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
+            if (backupVersion >= 35)
+                required.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('events','settings','enterprise_event_queue','installation_profile','network_endpoint_snapshot','network_monitor_metadata','process_snapshot','process_monitor_metadata','downloaded_file_snapshot','downloaded_file_monitor_metadata','domain_correlation','event_observations','enterprise_event_deferred','windows_persistence_snapshot','windows_persistence_monitor_metadata','dns_operational_monitor_metadata','process_change_backlog')";
+            var expectedTables = backupVersion >= 35 ? 17 : backupVersion >= 22 ? 16 : backupVersion is 19 or 20 or 21 ? 15 : backupVersion >= 17 ? 13 : backupVersion == 16 ? 12 : backupVersion is 13 or 14 or 15 ? 11 : backupVersion is 9 or 10 or 11 or 12 ? 10 : backupVersion == 8 ? 8 : backupVersion == 7 ? 6 : 4;
             if (Convert.ToInt32(await required.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) != expectedTables)
                 throw new InvalidDataException("Kopia nie zawiera wymaganych tabel Sentinel AI.");
+            if (backupVersion >= 36 && !await HasColumnAsync(source, "process_monitor_metadata", "dropped_changes", ct))
+                throw new InvalidDataException("Kopia nie zawiera licznika pominiętych zmian procesu.");
             using var savedSettings = source.CreateCommand(); savedSettings.CommandText = "SELECT json FROM settings WHERE id=1";
             if (await savedSettings.ExecuteScalarAsync(ct) is string json)
             {

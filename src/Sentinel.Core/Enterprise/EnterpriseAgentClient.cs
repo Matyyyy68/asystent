@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Sentinel.Contracts;
+using Sentinel.Core.Analysis;
 
 namespace Sentinel.Core.Enterprise;
 
@@ -77,13 +78,15 @@ public sealed class EnterpriseAgentClient(HttpClient httpClient)
         return await JsonDocument.ParseAsync(bounded, new JsonDocumentOptions { MaxDepth = 24 }, cancellationToken);
     }
 
-    public async Task SendHeartbeatAsync(Uri server, string credential, string? lastError = null, CancellationToken cancellationToken = default)
+    public async Task SendHeartbeatAsync(Uri server, string credential, string? lastError = null, CancellationToken cancellationToken = default,
+        EnterprisePolicyRevision? appliedPolicy = null)
     {
         if (lastError is not (null or "local_store" or "sync_failed" or "configuration_invalid" or "client_update"))
             throw new ArgumentException("Nieobsługiwany kod błędu.", nameof(lastError));
         using var request = CreateRequest(server, "api/v1/agents/heartbeat", credential);
         request.Method = HttpMethod.Post;
-        request.Content = JsonContent.Create(new { lastError }, options: JsonOptions);
+        request.Content = JsonContent.Create(new { lastError, globalPolicyVersion = appliedPolicy?.GlobalVersion,
+            groupPolicyVersion = appliedPolicy?.GroupVersion, devicePolicyVersion = appliedPolicy?.DeviceVersion }, options: JsonOptions);
         using var response = await httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccess(response, cancellationToken);
     }
@@ -117,6 +120,49 @@ public sealed class EnterpriseAgentClient(HttpClient httpClient)
             ?? throw new InvalidDataException("Serwer zwrócił pusty wynik synchronizacji.");
         if (result.Accepted < 0 || result.Duplicates < 0 || result.Accepted + result.Duplicates != events.Count)
             throw new InvalidDataException("Serwer zwrócił niezgodny wynik synchronizacji zdarzeń.");
+        return result;
+    }
+
+    public async Task<ThreatAssessment> AnalyzeWithServerAsync(Uri server, string credential, string application,
+        string text, string? targetUrl, bool userConfirmedContextSharing, CancellationToken cancellationToken = default)
+    {
+        EnsureServer(server);
+        if (!userConfirmedContextSharing)
+            throw new InvalidOperationException("Przed wysłaniem kontekstu wymagana jest jednorazowa zgoda użytkownika.");
+        if (string.IsNullOrWhiteSpace(application) || application.Length > 100 || application.Any(char.IsControl))
+            throw new ArgumentException("Nieprawidłowa nazwa aplikacji.", nameof(application));
+        if (text.Length > Sentinel.Core.Context.PrivacyFilter.MaximumTextLength ||
+            text.Length == 0 && string.IsNullOrWhiteSpace(targetUrl))
+            throw new ArgumentException("Analiza wymaga tekstu lub adresu celu i nie może przekraczać limitu.", nameof(text));
+        if (targetUrl?.Length > 4096 || targetUrl?.Any(char.IsControl) == true)
+            throw new ArgumentException("Adres celu ma nieprawidłową długość lub zawiera znaki sterujące.", nameof(targetUrl));
+
+        using var request = CreateRequest(server, "api/v1/agents/analyze", credential);
+        request.Method = HttpMethod.Post;
+        request.Content = JsonContent.Create(new { application, text, targetUrl, contextSharingConfirmed = true }, options: JsonOptions);
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        await EnsureSuccess(response, cancellationToken);
+        if (response.Content.Headers.ContentLength is > 256 * 1024)
+            throw new InvalidDataException("Wynik analizy Enterprise przekracza limit rozmiaru.");
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var bounded = new MemoryStream();
+        var buffer = new byte[4096];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken);
+            if (read == 0) break;
+            if (bounded.Length + read > 256 * 1024) throw new InvalidDataException("Wynik analizy Enterprise przekracza limit rozmiaru.");
+            await bounded.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        bounded.Position = 0;
+        using var json = await JsonDocument.ParseAsync(bounded, new JsonDocumentOptions { MaxDepth = 24 }, cancellationToken);
+        if (!json.RootElement.TryGetProperty("contextPersisted", out var persisted) || persisted.ValueKind != JsonValueKind.False)
+            throw new InvalidDataException("Serwer nie potwierdził, że kontekst nie został zapisany.");
+        var result = json.RootElement.Deserialize<ThreatAssessment>(JsonOptions);
+        if (result is null || !Enum.IsDefined(result.Category) || !Enum.IsDefined(result.Risk) ||
+            result.Indicators is null || result.Indicators.Count > 128 || result.Uncertainties is null ||
+            result.Recommendations is null || result.Explanation is null)
+            throw new InvalidDataException("Serwer zwrócił nieprawidłowy wynik analizy.");
         return result;
     }
 

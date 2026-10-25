@@ -82,12 +82,13 @@ function request(type, url = null) {
   });
 }
 
-async function presentWarning(tabId, url, result, kind = 'navigation') {
+async function presentWarning(tabId, url, result, kind = 'navigation', downloadId = null) {
   const token = crypto.randomUUID();
   const target = {
     tabId,
     url,
     kind,
+    downloadId: Number.isInteger(downloadId) && downloadId >= 0 ? downloadId : null,
     risk: result.risk,
     indicators: result.indicators ?? [],
     rulesVersion: result.rulesVersion,
@@ -138,7 +139,7 @@ function inspectDownload(item) {
     if (!integrationEnabled || !result?.available || !result.shouldWarn) return;
     try {
       const warningTab = await chrome.tabs.create({ url: 'about:blank', active: true });
-      await presentWarning(warningTab.id, url, result, 'download');
+      await presentWarning(warningTab.id, url, result, 'download', item.id);
     } catch {
       // A failed warning tab must not interrupt the browser's download.
     }
@@ -175,8 +176,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "details" && typeof message.token === "string") {
     getWarningTarget(message.token).then((target) =>
-      sendResponse(target ? { kind: target.kind ?? 'navigation', risk: target.risk, indicators: target.indicators, rulesVersion: target.rulesVersion } : null)
+      sendResponse(target ? {
+        kind: target.kind ?? 'navigation', risk: target.risk, indicators: target.indicators,
+        rulesVersion: target.rulesVersion, canStopDownload: target.kind === 'download' && Number.isInteger(target.downloadId)
+      } : null)
     ).catch(() => sendResponse(null));
+    return true;
+  }
+  if (message?.type === "stop-download" && typeof message.token === "string") {
+    getWarningTarget(message.token).then(async (target) => {
+      if (!target || target.kind !== 'download' || !Number.isInteger(target.downloadId)) {
+        sendResponse({ ok: false });
+        return;
+      }
+      try {
+        await chrome.downloads.cancel(target.downloadId);
+        sendResponse({ ok: true });
+      } catch {
+        sendResponse({ ok: false });
+      }
+    }).catch(() => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "status") {
@@ -189,7 +208,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "continue" && typeof message.token === "string") {
     getWarningTarget(message.token).then(async (target) => {
-      if (!target) { sendResponse({ ok: false }); return; }
+      if (!target || target.kind === 'download') { sendResponse({ ok: false }); return; }
       await removeWarningTarget(message.token);
       oneTimeAllow.set(target.tabId, { url: target.url, expiresAt: Date.now() + 5000 });
       await chrome.tabs.update(target.tabId, { url: target.url });

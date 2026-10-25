@@ -9,6 +9,8 @@ const { createServer } = require('node:http');
 
 const hostName = 'com.sentinelai.urlcheck';
 const browserName = process.argv[2] ?? 'chrome';
+const allowVisibleBrowser = process.argv.includes('--allow-visible-browser');
+const allowLocalDownloadFixtures = process.argv.includes('--allow-local-download-fixtures');
 const browsers = {
   chrome: {
     displayName: 'Chrome',
@@ -32,6 +34,11 @@ if (!browserConfig) throw new Error('Choose chrome or edge as the browser argume
 const registryKey = 'HKCU\\' + browserConfig.registryPath + hostName;
 const expectedExtensionId = 'nakmencmekkefmcddpihiiohjgabfemg';
 const timeoutMs = 30_000;
+
+if (!allowVisibleBrowser) {
+  console.error('This E2E opens a visible browser and writes a temporary Native Messaging registration under HKCU. Re-run with --allow-visible-browser only when that is intended.');
+  process.exit(2);
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, ...options });
@@ -172,6 +179,7 @@ async function main() {
   let redirectPage;
   let iframePage;
   let spaPage;
+  let linkBrowser;
   let lifecyclePages = [];
   try {
     fs.cpSync(path.dirname(manifestSource), extensionPath, { recursive: true });
@@ -245,7 +253,9 @@ async function main() {
     browser = connectCdp(browserInfo.webSocketDebuggerUrl);
     await browser.opened;
     fs.mkdirSync(downloadPath, { recursive: true });
-    await browser.command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath });
+    if (allowLocalDownloadFixtures) {
+      await browser.command('Browser.setDownloadBehavior', { behavior: 'allow', downloadPath });
+    }
 
     const loaded = await browser.command('Extensions.loadUnpacked', { path: extensionPath, enableInIncognito: false });
     if (loaded.id !== extensionId) throw new Error(`${browserConfig.displayName} loaded unexpected extension ID ${loaded.id}.`);
@@ -294,7 +304,7 @@ async function main() {
       try { observed = JSON.parse(value); } catch {}
       if (observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) &&
           observed.text.includes('Domena przypomina znaną markę') &&
-          observed.text.includes('reguły 2026.10.9')) break;
+          observed.text.includes('reguły 2026.10.10')) break;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     if (!observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) {
@@ -304,7 +314,7 @@ async function main() {
     }
     if (!observed.text.includes('Sprawdź ten adres przed kontynuowaniem') ||
         !observed.text.includes('Domena przypomina znaną markę') ||
-        !observed.text.includes('reguły 2026.10.9')) {
+        !observed.text.includes('reguły 2026.10.10')) {
       throw new Error(`The warning page did not render the expected production rule and indicator. Page text: ${observed.text}`);
     }
     if (observed.text.includes('paypal-login.test') || observed.text.includes(fixtureUrl)) {
@@ -413,6 +423,11 @@ async function main() {
     }
     if (analyzeCount() <= beforeHistoryChangeCount) throw new Error(`${browserConfig.displayName} SPA history change did not reach the Native Messaging host.`);
 
+    let suspiciousDownloadAnalyzed = false;
+    let suspiciousDownloadSavedInTemporaryProfile = false;
+    let linkInitiatedDownloadWarned = false;
+    let linkDownloadNoticeExplainsTransferStarted = false;
+    if (allowLocalDownloadFixtures) {
     const beforeDownloadCount = analyzeCount();
     const downloadTarget = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/download` });
     const downloadDeadline = Date.now() + timeoutMs;
@@ -448,10 +463,19 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (!linkPage) throw new Error(`${browserConfig.displayName} download-link fixture did not open.`);
-    const linkBrowser = connectCdp(linkPage.webSocketDebuggerUrl);
+    linkBrowser = connectCdp(linkPage.webSocketDebuggerUrl);
     await linkBrowser.opened;
+    const pageReadyDeadline = Date.now() + timeoutMs;
+    let linkReady = false;
+    while (Date.now() < pageReadyDeadline) {
+      linkReady = await evaluatePage(linkBrowser, "document.readyState === 'complete' && !!document.getElementById('download')");
+      if (linkReady) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    if (!linkReady) throw new Error(`${browserConfig.displayName} download-link fixture did not finish loading.`);
     const beforeLinkDownloadCount = analyzeCount();
-    await evaluatePage(linkBrowser, "document.getElementById('download').click()");
+    const clickResult = await evaluatePage(linkBrowser, "document.getElementById('download').click(); 'clicked'");
+    if (clickResult !== 'clicked') throw new Error(`${browserConfig.displayName} did not activate the download fixture link.`);
     const linkDownloadDeadline = Date.now() + timeoutMs;
     let linkFileSaved = false;
     let linkWarningTab;
@@ -476,13 +500,27 @@ async function main() {
     if (!linkWarningTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not open a warning tab for the link-initiated download.`);
     const warningPage = connectCdp(linkWarningTab.webSocketDebuggerUrl);
     await warningPage.opened;
-    const downloadNotice = await evaluatePage(warningPage, "({ title: document.querySelector('h1')?.textContent, continueHidden: document.getElementById('continue')?.hidden, text: document.body.innerText })");
+    let downloadNotice;
+    const noticeDeadline = Date.now() + timeoutMs;
+    while (Date.now() < noticeDeadline) {
+      downloadNotice = await evaluatePage(warningPage, "({ title: document.querySelector('h1')?.textContent, continueHidden: document.getElementById('continue')?.hidden, text: document.body.innerText })");
+      if (downloadNotice?.title?.includes('pobierania') && downloadNotice.continueHidden
+          && downloadNotice.text.includes('Pobieranie mogło już się rozpocząć')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     if (!downloadNotice?.title?.includes('pobierania') || !downloadNotice.continueHidden || !downloadNotice.text.includes('Pobieranie mogło już się rozpocząć')) {
-      throw new Error(`${browserConfig.displayName} link-download warning did not explain that the transfer may already have started.`);
+      throw new Error(`${browserConfig.displayName} link-download warning had unexpected content: ${JSON.stringify(downloadNotice)}`);
     }
     await browser.command('Target.closeTarget', { targetId: linkWarningTab.id });
     await warningPage.socket.close();
-    await linkBrowser.socket.close();
+    suspiciousDownloadAnalyzed = true;
+    suspiciousDownloadSavedInTemporaryProfile = true;
+    linkInitiatedDownloadWarned = true;
+    linkDownloadNoticeExplainsTransferStarted = true;
+    } else {
+      console.log('SKIP download fixtures: pass --allow-local-download-fixtures only when local test files in the isolated browser profile are intended.');
+    }
+    try { linkBrowser?.socket.close(); } catch {}
 
     const lifecycleTargetA = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-a` });
     const lifecycleTargetB = await browser.command('Target.createTarget', { url: `http://paypal-login.test:${fixturePort}/multi-tab-b` });
@@ -547,10 +585,10 @@ async function main() {
       redirectWarningRedacted: true,
       iframeNavigationAnalyzed: false,
       spaHistoryChangeAnalyzed: true,
-      suspiciousDownloadAnalyzed: true,
-      suspiciousDownloadSavedInTemporaryProfile: true,
-      linkInitiatedDownloadWarned: true,
-      linkDownloadNoticeExplainsTransferStarted: true,
+      suspiciousDownloadAnalyzed,
+      suspiciousDownloadSavedInTemporaryProfile,
+      linkInitiatedDownloadWarned,
+      linkDownloadNoticeExplainsTransferStarted,
       simultaneousTabWarningsIsolated: true,
       closingOneTabKeepsOtherWarning: true,
       externalDns: `blocked by ${browserConfig.displayName} host resolver rules`

@@ -2,10 +2,14 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })]
     [string]$PythonPath,
-    [string]$ReportOutputPath
+    [string]$ReportOutputPath,
+    [switch]$AllowNetwork
 )
 
 $ErrorActionPreference = 'Stop'
+if (-not $AllowNetwork) {
+    throw 'This research experiment downloads PhreshPhish data and installs temporary packages. Pass -AllowNetwork to authorize network access.'
+}
 $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $reportPath = if ([string]::IsNullOrWhiteSpace($ReportOutputPath)) {
     Join-Path $repositoryRoot 'docs\PHRESHPHISH-OFFICIAL-BENCHMARKS.json'
@@ -44,7 +48,7 @@ $previousPythonPath = $env:PYTHONPATH
 
 try {
     [void](New-Item -ItemType Directory -Path $nodeTools)
-    foreach ($name in @('package.json', 'package-lock.json', 'extract-train-columns.mjs', 'extract-test-columns.mjs', 'extract-official-benchmarks.mjs')) {
+    foreach ($name in @('package.json', 'package-lock.json', 'dataset-metadata.mjs', 'extract-train-columns.mjs', 'extract-test-columns.mjs', 'extract-official-benchmarks.mjs')) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $nodeTools
     }
     & npm.cmd ci --prefix $nodeTools --ignore-scripts --no-audit --no-fund
@@ -56,19 +60,19 @@ try {
     & $python $testScript
     if ($LASTEXITCODE -ne 0) { throw 'Research split/model guard tests failed.' }
 
-    $extractorOutput = @(& $node $extractor $csvPath)
+    $extractorOutput = @(& $node $extractor $csvPath --allow-network)
     if ($LASTEXITCODE -ne 0) { throw 'PhreshPhish train column extraction failed.' }
     $extraction = $extractorOutput[-1] | ConvertFrom-Json
     [IO.File]::WriteAllText($manifestPath, ($extraction | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 
     $testExtractor = Join-Path $nodeTools 'extract-test-columns.mjs'
-    $testExtractorOutput = @(& $node $testExtractor $testCsvPath)
+    $testExtractorOutput = @(& $node $testExtractor $testCsvPath --allow-network)
     if ($LASTEXITCODE -ne 0) { throw 'Pinned PhreshPhish test URL extraction failed.' }
     $testExtraction = $testExtractorOutput[-1] | ConvertFrom-Json
     if ($testExtraction.datasetRevision -ne $extraction.datasetRevision) { throw 'Dataset revision changed between train and test extraction.' }
     [IO.File]::WriteAllText($testManifestPath, ($testExtraction | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 
-    $benchmarkTestOutput = @(& $node $testExtractor $benchmarkTestCsvPath --include-previously-inspected-row)
+    $benchmarkTestOutput = @(& $node $testExtractor $benchmarkTestCsvPath --allow-network --include-previously-inspected-row)
     if ($LASTEXITCODE -ne 0) { throw 'Full PhreshPhish test score extraction failed.' }
     $benchmarkTestExtraction = $benchmarkTestOutput[-1] | ConvertFrom-Json
     if ($benchmarkTestExtraction.datasetRevision -ne $extraction.datasetRevision) { throw 'Dataset revision changed before benchmark scoring.' }
@@ -81,7 +85,7 @@ try {
     $modelReport = Get-Content -LiteralPath (Join-Path $outputDirectory 'model-screening-report.json') -Raw | ConvertFrom-Json
 
     $benchmarkExtractor = Join-Path $nodeTools 'extract-official-benchmarks.mjs'
-    $benchmarkOutput = @(& $node $benchmarkExtractor $benchmarkDirectory)
+    $benchmarkOutput = @(& $node $benchmarkExtractor $benchmarkDirectory --allow-network)
     if ($LASTEXITCODE -ne 0) { throw 'Official PhreshPhish benchmark list extraction failed.' }
     $benchmarkInventory = $benchmarkOutput[-1] | ConvertFrom-Json
     if ($benchmarkInventory.revision -ne $extraction.datasetRevision -or $benchmarkInventory.files -ne 976) {

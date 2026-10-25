@@ -23,7 +23,6 @@ const navItems = [
   ["users", "users", "Administratorzy"], ["diagnostics", "events", "Diagnostyka"], ["audit", "audit", "Audyt"], ["backups", "devices", "Kopie zapasowe"], ["server", "settings", "Ustawienia serwera"]
 ];
 const unavailableSources = {
-  diagnostics: { title: "Diagnostyka serwera jest ograniczona", detail: "Dostępne są publiczne healthz i readyz. API nie udostępnia dziennika błędów technicznych ani diagnostyki hosta.", source: "Dostępne tylko GET /healthz i GET /readyz; brak endpointu diagnostycznego." },
   server: { title: "Konfiguracja serwera poza panelem", detail: "Konfigurację hosta, TLS, certyfikatu i katalogu danych ustawia administrator systemu poza aplikacją.", source: "Brak API zarządzania konfiguracją wdrożenia." }
 };
 const iconPaths = {
@@ -79,7 +78,7 @@ function clearSession() {
 }
 function buildNavigation() {
   navigation.replaceChildren();
-  const visibleItems = navItems.filter(([key]) => key !== "audit" || canSecurity()).filter(([key]) => key !== "users" || canSystem());
+  const visibleItems = navItems.filter(([key]) => key !== "audit" || canSecurity()).filter(([key]) => key !== "users" || canSystem()).filter(([key]) => key !== "diagnostics" || canSystem());
   for (const [key, glyph, label] of visibleItems) {
     const button = node("button", "nav-button"); button.type = "button"; button.dataset.section = key;
     button.setAttribute("aria-current", activeSection === key ? "page" : "false");
@@ -168,6 +167,7 @@ async function showSection(section) {
     else if (section === "knowledge") await renderKnowledge();
     else if (section === "models") await renderModels();
     else if (section === "backups") await renderBackups();
+    else if (section === "diagnostics") await renderDiagnostics();
     else if (unavailableSources[section]) renderUnavailable(section);
   } catch (error) { showError(error, () => showSection(section)); }
 }
@@ -219,11 +219,11 @@ async function renderModels() {
 }
 async function renderKnowledge() {
   const documents = await request("/knowledge/documents");
-  const heading = pageHeading("Centralna baza wiedzy", "Dokumenty są zapisywane lokalnie na serwerze i indeksowane przez SQLite FTS5. Wyszukiwanie jest pełnotekstowe, nie semantyczne.");
+  const heading = pageHeading("Centralna baza wiedzy", "Dokumenty są zapisywane lokalnie na serwerze i indeksowane przez SQLite FTS5. Wyszukiwanie semantyczne jest opcjonalne i po wyraźnym wyborze przesyła fragmenty do embeddingów w lokalnej usłudze Ollama skonfigurowanej na serwerze.");
   view.replaceChildren(heading);
   const controls = node("section", "card");
-  controls.append(node("h3", "", "Dodaj źródło"), node("p", "muted", "Formaty: TXT, Markdown i DOCX · limit 10 MB · PDF i embeddingi nie są dostępne."));
-  const file = node("input"); file.type = "file"; file.accept = ".txt,.md,.docx"; file.setAttribute("aria-label", "Wybierz plik wiedzy");
+  controls.append(node("h3", "", "Dodaj źródło"), node("p", "muted", "Formaty: TXT, Markdown, DOCX i tekstowe PDF · limit 10 MB · PDF bez OCR. FTS5 działa lokalnie na serwerze; wyszukiwanie semantyczne jest osobną, opcjonalną akcją."));
+  const file = node("input"); file.type = "file"; file.accept = ".txt,.md,.docx,.pdf"; file.setAttribute("aria-label", "Wybierz plik wiedzy");
   const importButton = actionButton("Importuj dokument", async () => {
     if (!file.files?.length) { toast("Wybierz dokument do importu.", "warning"); return; }
     const selected = file.files[0];
@@ -248,13 +248,25 @@ async function renderKnowledge() {
   view.append(list);
   const search = node("section", "card"); search.append(node("h3", "", "Test wyszukiwania"));
   const input = node("input"); input.type = "search"; input.maxLength = 4000; input.placeholder = "Wpisz słowa kluczowe"; input.setAttribute("aria-label", "Zapytanie do lokalnej bazy wiedzy");
-  const results = node("div"); const submit = actionButton("Szukaj", async () => {
+  const embeddingModel = node("input"); embeddingModel.type = "text"; embeddingModel.maxLength = 160; embeddingModel.placeholder = "np. nomic-embed-text"; embeddingModel.setAttribute("aria-label", "Lokalny model embeddingowy Ollama");
+  const semanticNotice = node("p", "field-help", "Przy semantycznym wyszukiwaniu treść wszystkich fragmentów bazy zostanie wysłana do lokalnej usługi Ollama na serwerze w celu utworzenia embeddingów. Model musi być wcześniej zainstalowany i obsługiwać /api/embed.");
+  const results = node("div"); const submit = actionButton("Szukaj FTS5", async () => {
     const query = input.value.trim(); if (!query) { toast("Wpisz słowa do wyszukania.", "warning"); return; }
     const hits = await request(`/knowledge/search?query=${encodeURIComponent(query)}&limit=10`); results.replaceChildren();
     if (!hits.length) results.append(node("p", "muted", "Brak pasujących fragmentów; brak wyniku nie oznacza bezpieczeństwa."));
     for (const hit of hits) { const item = node("article", "notice"); item.append(node("strong", "", hit.sourceName), node("p", "muted", `Fragment ${hit.chunkNumber + 1}`), node("p", "", hit.excerpt)); results.append(item); }
   }, "primary");
-  search.append(input, submit, results); view.append(search);
+  const semanticSubmit = actionButton("Szukaj semantycznie", async () => {
+    const query = input.value.trim(); const model = embeddingModel.value.trim();
+    if (!query || !model) { toast("Wpisz zapytanie i nazwę lokalnego modelu embeddingowego.", "warning"); return; }
+    if (!confirm("Sentinel wyśle treść fragmentów całej centralnej bazy do skonfigurowanej lokalnej usługi Ollama na serwerze. Kontynuować?")) return;
+    const hits = await request(`/knowledge/search-semantic?query=${encodeURIComponent(query)}&limit=10&model=${encodeURIComponent(model)}`);
+    results.replaceChildren();
+    if (!hits.length) results.append(node("p", "muted", "Brak pasujących fragmentów; brak wyniku nie oznacza bezpieczeństwa."));
+    for (const hit of hits) { const item = node("article", "notice"); item.append(node("strong", "", hit.sourceName), node("p", "muted", `Fragment ${hit.chunkNumber + 1}`), node("p", "", hit.excerpt)); results.append(item); }
+  }, "secondary");
+  if (!canSecurity()) semanticSubmit.disabled = true;
+  search.append(input, submit, node("h3", "", "Opcjonalne wyszukiwanie semantyczne"), embeddingModel, semanticNotice, semanticSubmit, results); view.append(search);
 }
 async function renderDashboard() {
   const [devices, events, audit, health, documents, aiConfig] = await Promise.all([
@@ -302,6 +314,28 @@ function renderUnavailable(section) {
   card.append(node("h2", "", info.title), node("p", "muted", info.detail));
   const source = node("p", "field-help", `Źródło danych: ${info.source}`); card.append(source); view.append(card);
 }
+async function renderDiagnostics() {
+  const diagnostics = await request("/diagnostics/host");
+  view.replaceChildren(pageHeading("Diagnostyka hosta", "Metryki procesu, bazy i bezpieczne podsumowanie konfiguracji wdrożenia. Bez sekretów, ścieżek i danych konta."));
+  const card = node("section", "card");
+  const rows = [
+    ["Zebrano", new Date(diagnostics.capturedAtUtc).toLocaleString("pl-PL")],
+    ["Wersja Sentinel AI Server", diagnostics.productVersion],
+    ["System", diagnostics.operatingSystem],
+    ["Runtime", diagnostics.runtimeVersion],
+    ["Czas działania procesu", `${Math.floor(diagnostics.processUptimeSeconds / 3600)} godz. ${Math.floor(diagnostics.processUptimeSeconds % 3600 / 60)} min`],
+    ["Pamięć procesu", `${(diagnostics.processWorkingSetBytes / 1048576).toFixed(1)} MiB`],
+    ["Pamięć zarządzana .NET", `${(diagnostics.managedMemoryBytes / 1048576).toFixed(1)} MiB`],
+    ["Baza danych", diagnostics.database.state === "available" ? `${(diagnostics.database.totalBytes / 1048576).toFixed(2)} MiB` : "Niedostępna"],
+    ["Retencja zdarzeń", `${diagnostics.deployment.eventRetentionDays} dni`],
+    ["Nadpisany katalog danych", diagnostics.deployment.customDataDirectory ? "Tak" : "Nie"],
+    ["Nasłuchiwanie", diagnostics.deployment.listeners.map(item => `${item.scheme.toUpperCase()} :${item.port}${item.loopback ? " (loopback)" : " (sieć)"}`).join(", ")]
+  ];
+  const list = node("dl", "diagnostics-list");
+  for (const [label, value] of rows) list.append(node("dt", "", label), node("dd", "", value));
+  card.append(list, node("p", "field-help", "Metryki są odczytywane na żądanie i nie są zapisywane w historii audytowej."));
+  view.append(card);
+}
 async function renderBackups() {
   view.replaceChildren(pageHeading("Kopie zapasowe", "Twórz spójne kopie bazy serwera. Pliki zawierają dane administracyjne i powinny być przechowywane w bezpiecznym miejscu."));
   const card = node("section", "card");
@@ -328,10 +362,11 @@ async function renderDevices() {
     { title: "Urządzenie", render: d => tableCell(d.name, d.id) }, { title: "Grupa", key: "group" }, { title: "Klient", key: "clientVersion" },
     { title: "Połączenie", render: d => tableCell(statusBadge(d.revoked ? "Unieważnione / odrzucone" : !d.approved ? "Oczekuje na akceptację" : d.isOnline ? "Online" : "Offline", d.revoked ? "danger" : !d.approved ? "warning" : d.isOnline ? "success" : "warning")) },
     { title: "Ostatni sygnał", render: d => tableCell(d.lastSeenAt ? new Date(d.lastSeenAt).toLocaleString("pl-PL") : "Brak") },
+    { title: "Polityka", render: d => tableCell(d.policyCurrent === null ? "Nieznana" : d.policyCurrent ? "Aktualna" : "Nieaktualna") },
     { title: "Błąd", render: d => tableCell(d.lastError || "—") },
     { title: "Działania", render: d => { const cell = node("td"); cell.append(actionButton("Szczegóły", () => showDeviceDetails(d, groups))); if (!d.revoked && canSecurity() && !d.approved) { cell.append(actionButton("Zatwierdź", () => setDeviceApproval(d, true))); cell.append(actionButton("Odrzuć", () => setDeviceApproval(d, false))); } else if (!d.revoked && canSecurity()) cell.append(actionButton("Odłącz", () => revokeDevice(d))); return cell; } }
   ];
-  pagedTable(tableHost, devices, columns, d => `${d.name} ${d.id} ${d.group} ${d.clientVersion} ${d.lastError || ""}`, "Nie zarejestrowano urządzeń", "Utwórz zaproszenie w sekcji Grupy urządzeń.", [{ label: "Filtruj według stanu połączenia", options: [["all","Wszystkie stany"],["online","Online"],["offline","Offline"],["pending","Oczekuje na akceptację"],["revoked","Unieważnione / odrzucone"]], getValue: d => d.revoked ? "revoked" : !d.approved ? "pending" : d.isOnline ? "online" : "offline" }]);
+  pagedTable(tableHost, devices, columns, d => `${d.name} ${d.id} ${d.group} ${d.clientVersion} ${d.policyCurrent === null ? "unknown" : d.policyCurrent ? "current" : "stale"} ${d.lastError || ""}`, "Nie zarejestrowano urządzeń", "Utwórz zaproszenie w sekcji Grupy urządzeń.", [{ label: "Filtruj według stanu połączenia", options: [["all","Wszystkie stany"],["online","Online"],["offline","Offline"],["pending","Oczekuje na akceptację"],["revoked","Unieważnione / odrzucone"]], getValue: d => d.revoked ? "revoked" : !d.approved ? "pending" : d.isOnline ? "online" : "offline" }]);
 }
 async function setDeviceApproval(device, approved) {
   const message = approved ? `Zatwierdzić urządzenie „${device.name}”?` : `Odrzucić urządzenie „${device.name}” i unieważnić jego poświadczenie?`;
@@ -343,7 +378,7 @@ async function showDeviceDetails(device, groups) {
   const detail = node("section", "card"); const modal = node("dialog"); modal.className = "details-dialog";
   modal.append(pageHeading(device.name, device.id));
   const fields = node("div", "grid two-col");
-  for (const [name, value] of [["Grupa", device.group], ["Wersja klienta", device.clientVersion], ["Zarejestrowano", new Date(device.registeredAt).toLocaleString("pl-PL")], ["Ostatnia komunikacja", device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString("pl-PL") : "Brak"], ["Stan", device.revoked ? "Unieważnione / odrzucone" : !device.approved ? "Oczekuje na akceptację" : device.isOnline ? "Online" : "Offline"], ["Ostatni błąd", device.lastError || "Brak"]]) { const card = node("div", "notice"); card.append(node("span", "muted small", name), node("div", "cell-main", value)); fields.append(card); }
+  for (const [name, value] of [["Grupa", device.group], ["Wersja klienta", device.clientVersion], ["Zarejestrowano", new Date(device.registeredAt).toLocaleString("pl-PL")], ["Ostatnia komunikacja", device.lastSeenAt ? new Date(device.lastSeenAt).toLocaleString("pl-PL") : "Brak"], ["Stan", device.revoked ? "Unieważnione / odrzucone" : !device.approved ? "Oczekuje na akceptację" : device.isOnline ? "Online" : "Offline"], ["Zastosowana polityka", device.appliedPolicy ? `globalna ${device.appliedPolicy.globalVersion}, grupa ${device.appliedPolicy.groupVersion}, urządzenie ${device.appliedPolicy.deviceVersion}` : "Brak raportu"], ["Zgodność polityki", device.policyCurrent === null ? "Nieznana" : device.policyCurrent ? "Aktualna" : "Nieaktualna"], ["Ostatni błąd", device.lastError || "Brak"]]) { const card = node("div", "notice"); card.append(node("span", "muted small", name), node("div", "cell-main", value)); fields.append(card); }
   modal.append(fields);
   if (canSecurity() && !device.revoked && !device.approved) {
     const approvals = node("section", "card"); approvals.append(node("h3", "", "Wymagana akceptacja administratora"));

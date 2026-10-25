@@ -10,7 +10,8 @@ const backgroundSource = readFileSync(backgroundPath, 'utf8');
 
 function createWorker(sessionStorage, shared, {
   integrationSettings = Promise.resolve({ integrationEnabled: true }),
-  connectNative
+  connectNative,
+  cancelDownload
 } = {}) {
   const listeners = {};
   const portListeners = {};
@@ -47,7 +48,11 @@ function createWorker(sessionStorage, shared, {
       onHistoryStateUpdated: { addListener(listener) { listeners.historyNavigate = listener; } }
     },
     downloads: {
-      onCreated: { addListener(listener) { listeners.download = listener; } }
+      onCreated: { addListener(listener) { listeners.download = listener; } },
+      cancel: async (downloadId) => {
+        if (cancelDownload) return cancelDownload(downloadId);
+        shared.cancelledDownloads.push(downloadId);
+      }
     },
     tabs: {
       onRemoved: { addListener(listener) { listeners.removed = listener; } },
@@ -107,7 +112,7 @@ test('navigation waits for saved integration setting before contacting the nativ
 });
 
 test('navigation stays local when the saved integration setting cannot be read', async () => {
-  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
   const worker = createWorker(new Map(), shared, {
     integrationSettings: Promise.reject(new Error('storage unavailable'))
   });
@@ -192,7 +197,7 @@ test('committed redirect destinations are analyzed once and iframe commits are i
 
 test('suspicious download final URLs are analyzed and warned in a separate tab without sending file metadata', async () => {
   const sessionStorage = new Map();
-  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
   const worker = createWorker(sessionStorage, shared);
 
   worker.download({
@@ -230,6 +235,78 @@ test('suspicious download final URLs are analyzed and warned in a separate tab w
   const details = await worker.sendMessage({ type: 'details', token });
   assert.equal(details.kind, 'download');
   assert.equal(details.risk, 'High');
+  assert.equal(details.canStopDownload, true);
+  const stopped = await worker.sendMessage({ type: 'stop-download', token });
+  assert.equal(stopped.ok, true);
+  assert.deepEqual(shared.cancelledDownloads, [42]);
+});
+
+test('download cancellation rejects forged or expired warning targets', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
+  const worker = createWorker(new Map(), shared);
+  const navigationCancel = await worker.sendMessage({ type: 'stop-download', token: '00000000-0000-0000-0000-000000000000' });
+  assert.equal(navigationCancel.ok, false);
+  assert.deepEqual(shared.cancelledDownloads, []);
+});
+
+test('download cancellation cannot be used with a navigation warning', async () => {
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
+  const worker = createWorker(new Map(), shared);
+  worker.navigate({ tabId: 15, frameId: 0, url: 'https://paypal-login.test/account' });
+  await new Promise((resolve) => setImmediate(resolve));
+  worker.respondToNative({
+    id: shared.nativeRequests[0].id, available: true, shouldWarn: true,
+    risk: 'High', indicators: [], rulesVersion: 'test'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const token = new URL(shared.tabUpdates[0].update.url).searchParams.get('token');
+  const details = await worker.sendMessage({ type: 'details', token });
+  assert.equal(details.canStopDownload, false);
+  const response = await worker.sendMessage({ type: 'stop-download', token });
+  assert.equal(response.ok, false);
+  assert.deepEqual(shared.cancelledDownloads, []);
+});
+
+test('download warnings cannot continue as a page navigation', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
+  const worker = createWorker(sessionStorage, shared);
+  worker.download({ id: 44, tabId: 17, url: 'https://paypal-login.test/file.exe' });
+  await new Promise((resolve) => setImmediate(resolve));
+  worker.respondToNative({
+    id: shared.nativeRequests[0].id, available: true, shouldWarn: true,
+    risk: 'High', indicators: [], rulesVersion: 'test'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const warningUrl = shared.tabUpdates[0].update.url;
+  const token = new URL(warningUrl).searchParams.get('token');
+  const result = await worker.sendMessage({ type: 'continue', token });
+
+  assert.equal(result.ok, false);
+  assert.equal(shared.tabUpdates.length, 1, 'the warning tab must not navigate back to the download URL');
+  assert.equal(sessionStorage.has(`warningTarget:${token}`), true, 'the warning remains available for explicit close or cancellation');
+});
+
+test('download cancellation reports a browser error without claiming success', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [], cancelledDownloads: [] };
+  const worker = createWorker(sessionStorage, shared, {
+    cancelDownload: async () => { throw new Error('download already complete'); }
+  });
+  worker.download({ id: 43, tabId: 16, url: 'https://paypal-login.test/file.exe' });
+  await new Promise((resolve) => setImmediate(resolve));
+  worker.respondToNative({
+    id: shared.nativeRequests[0].id, available: true, shouldWarn: true,
+    risk: 'High', indicators: [], rulesVersion: 'test'
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  const token = new URL(shared.tabUpdates[0].update.url).searchParams.get('token');
+  const response = await worker.sendMessage({ type: 'stop-download', token });
+  assert.equal(response.ok, false);
+  assert.deepEqual(shared.cancelledDownloads, []);
 });
 
 test('downloads remain local when browser integration is disabled', async () => {

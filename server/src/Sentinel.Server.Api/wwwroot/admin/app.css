@@ -113,6 +113,8 @@ tbody tr:hover { background:color-mix(in srgb,var(--blue) 4%,var(--surface)); }
 .menu-toggle { display:none; }
 .pagination { display:flex;justify-content:flex-end;align-items:center;gap:10px;padding-top:12px;color:var(--muted);font-size:12px; }
 .field-help { margin:5px 2px 0;color:var(--muted);font-size:12px;line-height:1.45; }
+.diagnostics-list { display:grid;grid-template-columns:minmax(180px,1fr) 2fr;gap:10px 18px;margin:0; }
+.diagnostics-list dt { color:var(--muted); }.diagnostics-list dd { margin:0;font-variant-numeric:tabular-nums; }
 .code-box { padding:14px;border-radius:10px;background:var(--surface-2);font-family:Consolas,monospace;word-break:break-all;user-select:all; }
 dialog.details-dialog { width:min(900px,calc(100vw - 28px));max-height:calc(100vh - 32px);overflow:auto;border:1px solid var(--line);border-radius:20px;padding:22px;background:var(--surface);color:var(--text);box-shadow:var(--shadow); }
 dialog.details-dialog::backdrop { background:rgb(10 18 30 / 48%);backdrop-filter:blur(2px); }

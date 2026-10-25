@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
-import { asyncBufferFromUrl, parquetReadObjects } from 'hyparquet';
-import { compressors } from 'hyparquet-compressors';
+import { assertResearchDatasetMetadata } from './dataset-metadata.mjs';
 
 const DATASET = 'phreshphish/phreshphish';
 const EXPECTED_DATASET_REVISION = 'eca603e0ecd4f698f8d4d226c088659e72681239';
 const EXPECTED_ROWS = 168_060;
 const EXPECTED_PARQUET_BYTES = 9_175_760_158;
+if (!process.argv.includes('--allow-network')) {
+  throw new Error('This extractor downloads dataset columns. Pass --allow-network to authorize network access.');
+}
+const { asyncBufferFromUrl, parquetReadObjects } = await import('hyparquet');
+const { compressors } = await import('hyparquet-compressors');
 const outputPath = process.argv[2];
 if (!outputPath) throw new Error('Pass an output CSV path under the system temporary directory.');
 const includePreviouslyInspectedRow = process.argv.includes('--include-previously-inspected-row');
@@ -44,7 +48,7 @@ globalThis.fetch = async (input, init) => {
 const revisionResponse = await fetchOriginal(`https://huggingface.co/api/datasets/${DATASET}`);
 if (!revisionResponse.ok) throw new Error(`Dataset metadata request failed: HTTP ${revisionResponse.status}`);
 const revision = await revisionResponse.json();
-if (revision.sha !== EXPECTED_DATASET_REVISION) throw new Error(`Dataset revision changed: expected ${EXPECTED_DATASET_REVISION}, got ${revision.sha}`);
+assertResearchDatasetMetadata(revision, EXPECTED_DATASET_REVISION);
 
 const parquetResponse = await fetchOriginal(`https://datasets-server.huggingface.co/parquet?dataset=${encodeURIComponent(DATASET)}`);
 if (!parquetResponse.ok) throw new Error(`Parquet metadata request failed: HTTP ${parquetResponse.status}`);

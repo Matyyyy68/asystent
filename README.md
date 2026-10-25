@@ -7,15 +7,21 @@ Rozwojowa aplikacja Windows 10/11 x64. React + TypeScript + Electron jest jedyny
 ## Wymagania i budowanie
 
 - Windows x64, PowerShell, .NET SDK 10.0.300+ z najnowszą dostępną funkcją SDK, Node.js 24 i npm.
-- Internet do pierwszego pobrania zależności. Własny instalator jest publikowany jako pojedynczy plik EXE.
+- Pierwsze pobranie zależności wymaga jawnego `-AllowDownloads`. Własny instalator jest publikowany jako pojedynczy plik EXE.
 - Brak wymaganych uprawnień administratora; instalacja jest na konto użytkownika. Polityki organizacji mogą zablokować rejestrację hosta.
 
 ```powershell
-./scripts/build-user.ps1
-./scripts/build-user.ps1 -Installer
+./scripts/build-user.ps1 -Offline
+./scripts/build-user.ps1 -Installer -Offline
+./scripts/build-user.ps1 -AllowDownloads
+./scripts/build-user.ps1 -Installer -AllowDownloads
 ```
 
-Skrypt uruchamia testy .NET, publikuje dwa samodzielne EXE, sprawdza IPC i buduje React. Parametr `-Installer` tworzy własny kreator instalacji (bez oSI/NSIS) jako `artifacts/desktop/Sentinel.AI.Setup.<wersja>.exe`. Program instaluje się dla bieżącego użytkownika, weryfikuje wbudowany pakiet i zachowuje lokalne dane przy odinstalowaniu. Samodzielne uruchomienie deweloperskie: po `./scripts/build-user.ps1` wykonaj `./desktop/node_modules/.bin/electron.cmd ./desktop`. Nie uruchamiaj bez skompilowanego `artifacts/engine`.
+Skrypt uruchamia testy .NET, publikuje dwa samodzielne EXE, sprawdza IPC i buduje React. Pobieranie jest domyślnie wyłączone: uruchomienie bez `-Offline` albo `-AllowDownloads` kończy się jasnym komunikatem przed przywracaniem zależności. Flaga `-AllowDownloads` zezwala na NuGet restore, `npm ci`, instalację runtime Electron oraz narzędzia wymagane przez electron-builder. Parametr `-Installer` tworzy własny kreator instalacji (bez oSI/NSIS) jako `artifacts/desktop/Sentinel.AI.Setup.<wersja>.exe`. Program instaluje się dla bieżącego użytkownika, weryfikuje wbudowany pakiet i zachowuje lokalne dane przy odinstalowaniu. Samodzielne uruchomienie deweloperskie: po `./scripts/build-user.ps1 -Offline` wykonaj `./desktop/node_modules/.bin/electron.cmd ./desktop`. Nie uruchamiaj bez skompilowanego `artifacts/engine`.
+
+Wariant `-Offline` nie przywraca pakietów NuGet/npm, nie uruchamia instalatora runtime Electron i pomija live DNS test. Wymaga już dostępnych lokalnie pakietów, runtime Electron, narzędzi Node oraz cache .NET; gdy czegoś brakuje, kończy się błędem bez próby pobrania. Można go połączyć z `-Installer` tylko wtedy, gdy lokalnie dostępny jest również zestaw `rcedit-x64`; wskaż jego folder zmienną `ELECTRON_BUILDER_RCEDIT_PATH`. Brak narzędzia zatrzymuje build przed publikacją. Electron Builder używa lokalnego `node_modules/electron/dist`, więc nie musi pobierać archiwum Electron.
+
+Bezpieczne polecenie `npm run package` działa offline; jawnie sieciowe pakowanie to `npm run package:allow-downloads`.
 
 Aby odinstalować aplikację, uruchom `Uninstall Sentinel AI.exe` z jej folderu instalacji albo wybierz Sentinel AI w ustawieniach Windows → Aplikacje. Deinstalator korzysta z plików osadzonych w lokalnym pakiecie, nie wymaga pobierania aplikacji i zachowuje lokalne dane użytkownika.
 
@@ -35,7 +41,7 @@ cd desktop; npm.cmd ci; npm.cmd run build
 cd ../website; npm.cmd ci; npm.cmd test; npm.cmd run build -- --base=/asystent/
 ```
 
-Przed testem na czystym komputerze przeczytaj [procedurę Windows](docs/USER-VALIDATION.md), [architekturę](ARCHITECTURE.md), [ograniczenia](docs/KNOWN-LIoITATIONS.md) i [changelog](CHANGELOG.md).
+Przed testem na czystym komputerze przeczytaj [procedurę Windows](docs/USER-VALIDATION.md), [architekturę](ARCHITECTURE.md), [ograniczenia](docs/KNOWN-LIMITATIONS.md) i [changelog](CHANGELOG.md).
 
 Do połączenia z serwerem organizacji zobacz [konfigurację klienta Enterprise](docs/ENTERPRISE-CLIENT-SETUP.md). Serwer jest osobnym projektem i wymaga własnego wdrożenia HTTPS.
 

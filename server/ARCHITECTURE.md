@@ -2,19 +2,20 @@
 
 ## Wyniki audytu istniejącego repozytorium
 
-Repozytorium przed etapem serwera zawiera istniejącego klienta WPF/MVVM na .NET 10 (`src/Sentinel.Desktop`) i bibliotekę platformowo neutralną (`src/Sentinel.Core`). Klient ma regułowy analizator URL i tekstu (`UrlAnalyzer`, `ThreatAnalysisEngine`), ograniczone zbieranie statycznych nazw dostępnych elementów UI Automation na żądanie, filtrowanie prywatności, lokalny magazyn SQLite (`LocalStore`) oraz testy jednostkowe z użyciem rzeczywistego SQLite. W historii są metadane oceny, nie treść analizowanych wiadomości.
+Pierwotny audyt sprzed migracji opisywał klienta WPF/MVVM na .NET 10; ten kod zachowano w `legacy/`. Aktualny klient to React/TypeScript w Electronie (`desktop/`) oraz osobny silnik .NET 10 (`src/Sentinel.Engine`) korzystający z `src/Sentinel.Core`. Regułowy analizator URL i tekstu, ograniczone zbieranie metadanych, filtrowanie prywatności oraz lokalny magazyn SQLite pozostają w aktywnym przepływie. W historii są metadane oceny, nie treść analizowanych wiadomości.
 
-W audycie pierwotnym nie znaleziono klient-serwerowego API, rejestracji urządzeń, zarządzania flotą, centralnych polityk ani kont administratorów. Te elementy zostały potem wdrożone w etapach B1–B2b. Klient lokalny ma provider Ollama loopback oraz osobną bazę FTS5 dla TXT/MD/DOCX. Serwer ma centralny import i wyszukiwanie FTS5, konfigurację lokalnego Ollama oraz ograniczony endpoint analizy agenta. Klient ma tray i tryb ukrytego okna; nie ma autostartu ani synchronizacji z serwerem. Instalator nie instaluje Enterprise Server.
+W audycie pierwotnym nie znaleziono klient-serwerowego API, rejestracji urządzeń, zarządzania flotą, centralnych polityk ani kont administratorów; wdrożono je później w etapach B1–B2b. Klient lokalny ma provider Ollama loopback oraz bazę FTS5 dla TXT/MD/DOCX i tekstowych PDF, a także opcjonalne pełne wyszukiwanie semantyczne. Serwer ma centralny import i wyszukiwanie FTS5 dla tych samych formatów, osobną semantyczną akcję administratorską przez lokalne Ollama oraz ograniczony endpoint analizy agenta. Klient ma tray, tryb ukrytego okna, opt-in autostart i synchronizację Enterprise w tle. Instalator serwera Enterprise jest osobnym pakietem NSIS z obsługą usługi Windows.
 
 ## Komponenty i granice
 
 ```mermaid
 flowchart LR
   subgraph Client[Komputer pracownika — istniejący klient]
-    WPF[Sentinel.Desktop / WPF]
+    UI[React UI / Electron]
+    Engine[Sentinel.Engine / JSON Lines IPC]
     Core[Sentinel.Core / analiza lokalna i SQLite]
-    Queue[Planowana ograniczona kolejka offline]
-    WPF --> Core
+    Queue[Ograniczona kolejka Enterprise offline]
+    UI --> Engine --> Core
     Core --> Queue
   end
   subgraph Server[Serwer firmowy — nowy katalog server/]
@@ -49,23 +50,23 @@ Serwer używa obecnego celu `net10.0`, zgodnego z istniejącym repozytorium i ws
 - `healthz` i `readyz` zwracają jedynie stan i wersję API; nie publikują ścieżki bazy ani sekretów. Dostępność modelu nie jest częścią gotowości, ponieważ działa lokalny fallback regułowy.
 - Baza serwera jest w `C:\ProgramData\SentinelAI\Server` na Windows albo w systemowym katalogu danych na innych platformach; można ustawić `Sentinel__DataDirectory`. Nie jest trzymana w katalogu programu ani tymczasowym.
 
-W produkcji trzeba uruchamiać usługę pod dedykowanym kontem o minimalnych uprawnieniach do jej katalogu danych i certyfikatu. Instalator usługi, ACL, rotacja logów, backup/restore, rotacja poświadczeń urządzeń, zatwierdzanie ryzykownych zmian polityk i odporniejsza na rozproszony brute force blokada kont są zaplanowane, ale nie są zaimplementowane w tym etapie.
+Pakiet serwera zawiera instalację usługi Windows na wirtualnym koncie serwisowym, ograniczone ACL katalogu danych, restart po awarii i jawny bootstrap administratora. Dostępne są narzędzia backup/restore, rotacja poświadczeń urządzeń oraz ręczna akceptacja rejestracji. Pozostają kreator TLS/firewall, weryfikacja wdrożenia na Windows Server, automatyczne aktualizacje i odporna na rozproszony brute force blokada kont.
 
 ## Plan migracji i etapowanie
 
 1. **Etap A — audyt i projekt (ukończony):** inwentaryzacja klienta, diagram, uzasadnienie granic, plan migracji, decyzje prywatności i transportu.
 2. **Etap B1 — fundament API i urządzeń (zaimplementowany):** host API, SQLite serwera, health/readiness, zaproszenia ograniczone limitem i czasem, rejestracja z unikalnym poświadczeniem, lista/odwołanie urządzeń, uwierzytelniony heartbeat oraz testy trwałości i unieważniania.
 3. **Etap B2a — tożsamość administracyjna (zaimplementowany):** bootstrap administratora, PBKDF2, sesje, cztery role, limit logowania, unieważnianie sesji i audyt.
-4. **Etap B2b — flota, polityki i historia zdarzeń (częściowo zaimplementowany):** zarządzane grupy, przypisywanie urządzeń, polityki globalne/grupowe/urządzeń, dziedziczenie, wersjonowanie, walidacja i audyt są zaimplementowane. Uwierzytelniony endpoint agenta zwraca efektywną konfigurację. API przyjmuje minimalne, idempotentne metadane zdarzeń, pozwala zmieniać status incydentu i usuwa stare dane zgodnie z retencją. Pozostają: bezpieczne zatwierdzanie urządzeń w trybie ręcznym oraz synchronizacja kolejki zdarzeń z klienta i stosowanie pobranej konfiguracji.
-5. **Etap C — panel (częściowo zaimplementowany):** hostowany panel operacyjny z ochroną żądań przeglądarkowych; dostępne są dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta, audyt, konfiguracja/test Ollama i centralna baza FTS5. Panel wyświetla rzeczywisty stan z API. Brakuje kopii i odtwarzania całej bazy oraz administracji hostem.
-6. **Etap D — klient-serwer:** klient rejestruje się zaproszeniem, chroni poświadczenia w Windows Credential Manager/DPAPI, pobiera walidowaną politykę, synchronizuje ograniczoną kolejkę z retry/backoff/jitter i działa lokalnie offline.
+4. **Etap B2b — flota, polityki i historia zdarzeń (częściowo zaimplementowany):** zarządzane grupy, przypisywanie i ręczna akceptacja/odwołanie urządzeń, polityki globalne/grupowe/urządzeń, dziedziczenie, wersjonowanie, walidacja i audyt są zaimplementowane. Uwierzytelniony endpoint agenta zwraca efektywną konfigurację. Po zastosowaniu ustawień klient raportuje wersje polityki globalnej, grupowej i urządzenia; panel porównuje je z bieżącym stanem i pokazuje zgodność, niezgodność lub brak raportu. API przyjmuje minimalne, idempotentne metadane zdarzeń, pozwala zmieniać status incydentu i usuwa stare dane zgodnie z retencją. Diagnostyka hosta pozostaje otwarta.
+5. **Etap C — panel (częściowo zaimplementowany):** hostowany panel operacyjny z ochroną żądań przeglądarkowych; dostępne są dashboard, urządzenia, grupy i zaproszenia, polityki, zdarzenia, konta, audyt, konfiguracja/test Ollama oraz centralna baza wiedzy FTS5 dla TXT/MD/DOCX i tekstowych PDF. Administrator bezpieczeństwa/systemu może jawnie uruchomić pełne wyszukiwanie semantyczne przez skonfigurowane lokalne Ollama po potwierdzeniu przesłania fragmentów. Panel wyświetla rzeczywisty stan z API. Brakuje wersjonowania źródeł i administracji hostem; backup/restore działa jako narzędzia offline.
+6. **Etap D — klient-serwer (częściowo zaimplementowany):** klient rejestruje się zaproszeniem, chroni poświadczenia DPAPI, pobiera i stosuje walidowaną politykę oraz automatycznie synchronizuje ograniczoną kolejkę w tle z retry/backoff/jitter. Klient pozostaje lokalny i offline, gdy serwer jest niedostępny; wymagania pozostałe opisuje PLAN-010.
 7. **Etap E — UX klienta (częściowo zaimplementowany):** tray, jednoznaczny lokalny stan, ukrywanie okna i uruchamianie analizy w tle są dostępne. Pozostają opt-in autostart, systemowe ograniczone powiadomienia i integracja modułów Enterprise.
-8. **Etap F — AI i wiedza (częściowo zaimplementowany):** konfiguracja loopback Ollama, rzeczywiste wykrywanie modeli/test syntetyczny, timeouty, walidowany wynik i fallback regułowy; odseparowany import TXT/MD/DOCX, walidacja typów/rozmiaru i wyszukiwanie FTS5 z cytowaniami. Brakuje PDF, embeddingów/semantycznego wyszukiwania, kwot równoległości i pełnej obsługi retencji/wersji źródeł.
-9. **Etap G — wdrożenie operacyjne:** kreator instalacji i konfiguracji, usługa Windows, TLS/CA, firewall, backup/restore, aktualizacje podpisane kryptograficznie i rollback; natywne testy Windows Server oraz testy klienta na Windows.
+8. **Etap F — AI i wiedza (częściowo zaimplementowany):** konfiguracja loopback Ollama, rzeczywiste wykrywanie modeli/test syntetyczny, timeouty, walidowany wynik i fallback regułowy; odseparowany import TXT/MD/DOCX oraz tekstowych PDF (do 10 MB, 500 stron i 2 mln znaków, bez OCR), walidacja typów/rozmiaru i wyszukiwanie FTS5 z cytowaniami. Brakuje embeddingów/semantycznego wyszukiwania po całym korpusie, kwot współbieżności i pełnej obsługi retencji/wersji źródeł.
+9. **Etap G — wdrożenie operacyjne (częściowo zaimplementowany):** pakiet NSIS self-contained instaluje usługę Windows, bootstrap administratora, ACL danych i restart po awarii; działają backup/restore. Brakuje kreatora TLS/CA/firewall, podpisanych aktualizacji i rollbacku oraz natywnych testów instalacji i usługi na Windows Server.
 
 ## Bieżący zakres i uruchomienie
 
-Ten etap dostarcza audyt A, fundament B1, tożsamość B2a, część B2b, panel administracyjny oraz część UX klienta. Działają konta/role/sesje, audyt, rejestracja z zaproszeniem, heartbeat, health/readiness, SQLite, API grup/polityk/minimalnych metadanych zdarzeń, centralna baza FTS5, konfiguracja/test serwerowego Ollama i zgoda polityki dla endpointu analizy agenta. `EnterpriseClient` umożliwia parowanie przez HTTPS, chroni token przez DPAPI, pobiera efektywną politykę i ręcznie synchronizuje kolejkę ograniczonych metadanych. Nadal brakuje egzekwowania polityki i automatycznego retry. Klient zachowuje lokalne reguły i działa offline. Lokalne User ma provider Ollama i FTS5 dla TXT/MD/DOCX, ale nie ma automatycznego doboru sprzętowego, lokalnego modelu w paczce ani semantycznego RAG. Nadal brakuje ręcznej akceptacji, rotacji, instalatora usługi Windows, pełnego backup/restore, PDF i embeddingów.
+Ten etap dostarcza audyt A, fundament B1, tożsamość B2a, część B2b, panel administracyjny oraz część UX klienta. Działają konta/role/sesje, audyt, rejestracja z zaproszeniem i akceptacją, heartbeat, health/readiness, SQLite, API grup/polityk/minimalnych metadanych zdarzeń, centralna baza FTS5 dla TXT/MD/DOCX i tekstowych PDF, jawne pełne wyszukiwanie semantyczne w kliencie i panelu oraz konfiguracja/test serwerowego Ollama i zgoda polityki dla endpointu analizy agenta. `EnterpriseClient` paruje się przez HTTPS, chroni token DPAPI, pobiera i stosuje efektywną politykę, raportuje jej trzy wersje i synchronizuje metadane w tle z retry/backoff. Panel oznacza politykę jako aktualną, nieaktualną albo nieznaną. Klient zachowuje lokalne reguły i działa offline. PDF nie jest OCR-owany; jakość embeddingów nie została zweryfikowana na rzeczywistym modelu. Brakuje automatycznego doboru sprzętowego, lokalnego modelu w paczce, reprezentatywnej jakości wyszukiwania, diagnostyki hosta oraz kwot współbieżności.
 
 Uruchomienie lokalne (domyślnie loopback):
 
@@ -76,7 +77,7 @@ dotnet run --project server/src/Sentinel.Server.Api/Sentinel.Server.Api.csproj
 
 Przy pierwszym uruchomieniu ustaw `Sentinel__BootstrapAdminUsername` i `Sentinel__BootstrapAdminPassword` w środowisku procesu (hasło 14–128 znaków). Aplikacja tworzy konto systemowe tylko jeśli baza nie ma jeszcze administratora; usuń zmienne ze stałej konfiguracji usługi po pierwszym uruchomieniu. Logowanie: `POST /api/v1/admin/auth/login`; użyj zwróconego tokenu w `Authorization: Bearer …`. Sesja trwa 12 godzin. Administrator może zmienić hasło pod `PUT /api/v1/admin/auth/password`. Do LAN skonfiguruj `ASPNETCORE_URLS=https://0.0.0.0:5443` oraz certyfikat Kestrel przez chronioną konfigurację lub magazyn certyfikatów i rozdystrybuuj łańcuch zaufania na klientach. Nie otwieraj portu HTTP do sieci.
 
-Testy: `dotnet test server/tests/Sentinel.Server.Tests/Sentinel.Server.Tests.csproj`. Testują działającą bazę SQLite, limit, wygaśnięcie, odwołanie i poświadczenia. Integracyjne testy HTTP, TLS na Windows, restartu usługi i instalatora serwera są przyszłą pracą.
+Testy: `dotnet test server/tests/Sentinel.Server.Tests/Sentinel.Server.Tests.csproj`. Oprócz testów SQLite są live testy HTTP loopback uploadu/wyszukiwania PDF oraz scenariusze HTTPS agenta: pairing, zgoda, synchronizacja, retry po restarcie API, rotacja i odwołanie. Ograniczone środowisko może zablokować import tymczasowego certyfikatu przez Windows CryptoAPI; instalacja i restart usługi na rzeczywistym Windows Server nadal wymagają testu wdrożeniowego.
 
 ## Wdrożeniowe systemy Windows
 

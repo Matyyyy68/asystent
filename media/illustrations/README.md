@@ -78,6 +78,6 @@ Kolumna „Przeznaczenie” wskazuje odpowiedni obszar produktu, nie oznacza uż
 
 - **Strona:** `people/analyst-investigate.png` w sekcji głównej; `phishing/warning-email.png`, `ai/knowledge-cards.png` i `infrastructure/trusted-network.png` w kartach funkcji; `security/data-safe.png` przy prywatności; `installer/welcome.png` przy pobieraniu.
 - **Aplikacja Windows:** `states/initial-setup.png` w pierwszej konfiguracji, `states/connection-lost.png` przy niedostępnym silniku, `states/empty-threats.png` przy pustej historii wykryć oraz `ai/local-model.png` w sekcji o niepodłączonym providerze.
-- **Instalator Windows:** sześć plików (powitanie, przygotowanie, konfiguracja, instalowanie, zakończenie i błąd) jest osadzonych w samym pliku instalatora i zmienianych w trakcie pracy kreatora.
+- **Instalator Windows:** siedem plików (powitanie, przygotowanie, konfiguracja, instalowanie, zakończenie, błąd i anulowanie) jest osadzonych w samym pliku instalatora i dobieranych do stanu kreatora.
 
 Pozostałe grafiki są przygotowane do zastosowania w odpowiednich ekranach pomocy, stanach aplikacji i kolejnych sekcjach witryny. Przegląd wizualny wykonano na podglądach jasnym i ciemnym; nie znaleziono powtórzeń koncepcyjnych. Arkusze podglądu pozostają poza repozytorium, by nie dublować 63 plików w Git.

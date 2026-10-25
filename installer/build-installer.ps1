@@ -1,5 +1,18 @@
+param([switch]$Offline, [switch]$AllowDownloads)
 $ErrorActionPreference = 'Stop'
+if ($Offline -and $AllowDownloads) { throw 'Choose either -Offline or -AllowDownloads, not both.' }
+if (-not $Offline -and -not $AllowDownloads) {
+  throw 'Installer packaging does not download tools by default. Use -Offline for locally available tools or pass -AllowDownloads to permit tool downloads.'
+}
+$dotnetRestoreArgs = @()
+if ($Offline) { $dotnetRestoreArgs = @('--no-restore') }
 $repo = Split-Path $PSScriptRoot -Parent
+$electronDistribution = Join-Path $repo 'desktop/node_modules/electron/dist'
+if (!(Test-Path -LiteralPath (Join-Path $electronDistribution 'electron.exe') -PathType Leaf)) {
+  throw 'The local Electron runtime is missing. Install the locked desktop dependencies before packaging.'
+}
+# electron-builder 26.15.3 edits the Windows executable using its installed
+# `resedit` dependency; the `dir` target does not need the optional rcedit toolset.
 $version = ([xml](Get-Content (Join-Path $repo 'eng/ProductVersion.props'))).Project.PropertyGroup.VersionPrefix
 $out = Join-Path $repo 'artifacts/desktop'
 $unpacked = Join-Path $out 'win-unpacked'
@@ -13,7 +26,8 @@ function Get-Sha256Hex([string]$path) {
 New-Item -ItemType Directory -Force $out | Out-Null
 Push-Location (Join-Path $repo 'desktop')
 try {
-  npm.cmd run build
+  # Use Vite's runner to load the config without esbuild traversing parent directories.
+  npm.cmd run build -- --configLoader runner
   if ($LASTEXITCODE) { throw 'Application build failed.' }
   node.exe ../scripts/build-npm-third-party-notices.mjs
   if ($LASTEXITCODE) { throw 'Generating npm third-party notices failed.' }
@@ -24,15 +38,16 @@ try {
       throw "Brak ilustracji instalatora w paczce aplikacji: $asset.png"
     }
   }
-  npx.cmd electron-builder --win dir
+  $electronBuilder = Join-Path $repo 'desktop/node_modules/.bin/electron-builder.cmd'
+  if (!(Test-Path -LiteralPath $electronBuilder -PathType Leaf)) {
+    throw 'Electron Builder is not installed locally; install the locked desktop dependencies before packaging.'
+  }
+  & $electronBuilder --win dir
   if ($LASTEXITCODE) { throw 'Electron packaging failed.' }
   $npmNotices = Join-Path $unpacked 'resources/ThirdPartyNotices/npm-runtime.txt'
-  if (!(Test-Path $npmNotices) -or !(Select-String -Path $npmNotices -Pattern 'lucide-react@' -Quiet) -or
-      !(Select-String -Path $npmNotices -Pattern 'react-dom@' -Quiet) -or
-      !(Select-String -Path $npmNotices -Pattern 'ISC License' -Quiet) -or
-      !(Select-String -Path $npmNotices -Pattern 'MIT License' -Quiet)) {
-    throw 'npm runtime license notices are missing from the packaged application.'
-  }
+  if (!(Test-Path $npmNotices)) { throw 'npm runtime license notices are missing from the packaged application.' }
+  node.exe ../scripts/audit-packaged-npm-licenses.mjs (Join-Path $unpacked 'resources/app.asar') $npmNotices
+  if ($LASTEXITCODE) { throw 'Packaged npm runtime modules do not match their bundled license notices.' }
   $nugetNotices = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/nuget-runtime.txt'
   $dotnetNotices = Join-Path $unpacked 'resources/engine/THIRD-PARTY-LICENSES/dotnet/ThirdPartyNotices.txt'
   if (!(Test-Path $nugetNotices) -or !(Select-String -Path $nugetNotices -Pattern 'Microsoft.Data.Sqlite 10.0.13' -Quiet) -or
@@ -49,7 +64,7 @@ if (Test-Path $payload) { Remove-Item $payload -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [System.IO.Compression.ZipFile]::CreateFromDirectory($unpacked, $payload, [System.IO.Compression.CompressionLevel]::Optimal, $false)
 $hash = Get-Sha256Hex $payload
-dotnet publish (Join-Path $PSScriptRoot 'Sentinel.Setup/Sentinel.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PayloadZip="$payload" -p:PayloadSha256="$hash" -o $out
+dotnet publish (Join-Path $PSScriptRoot 'Sentinel.Setup/Sentinel.Setup.csproj') -c Release -r win-x64 --self-contained true -p:PayloadZip="$payload" -p:PayloadSha256="$hash" -o $out @dotnetRestoreArgs
 if ($LASTEXITCODE) { throw 'Installer publish failed.' }
 $installer = Join-Path $out 'Sentinel.AI.Setup.exe'
 $namedInstaller = Join-Path $out "Sentinel.AI.Setup.$version.exe"

@@ -33,7 +33,7 @@ public sealed class SqliteServerStore : IServerStore
         await using var command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), System.Globalization.CultureInfo.InvariantCulture);
-        if (version > 8) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
+        if (version > 9) throw new InvalidDataException("Baza serwera została utworzona przez nowszą wersję.");
         command.Parameters.Clear();
         command.CommandText = """
             PRAGMA journal_mode=WAL;
@@ -90,6 +90,9 @@ public sealed class SqliteServerStore : IServerStore
         await EnsureColumnAsync(connection, "invitations", "requires_approval", "INTEGER NOT NULL DEFAULT 0 CHECK(requires_approval IN (0,1))", cancellationToken);
         await EnsureColumnAsync(connection, "devices", "approved", "INTEGER NOT NULL DEFAULT 1 CHECK(approved IN (0,1))", cancellationToken);
         await EnsureColumnAsync(connection, "devices", "candidate_token_hash", "TEXT NULL", cancellationToken);
+        await EnsureColumnAsync(connection, "devices", "applied_global_policy_version", "INTEGER NULL CHECK(applied_global_policy_version IS NULL OR applied_global_policy_version >= 0)", cancellationToken);
+        await EnsureColumnAsync(connection, "devices", "applied_group_policy_version", "INTEGER NULL CHECK(applied_group_policy_version IS NULL OR applied_group_policy_version >= 0)", cancellationToken);
+        await EnsureColumnAsync(connection, "devices", "applied_device_policy_version", "INTEGER NULL CHECK(applied_device_policy_version IS NULL OR applied_device_policy_version >= 0)", cancellationToken);
         await EnsureColumnAsync(connection, "security_events", "source", "TEXT NOT NULL DEFAULT 'unknown'", cancellationToken);
         await EnsureColumnAsync(connection, "security_events", "rule_version", "TEXT NULL", cancellationToken);
         await EnsureColumnAsync(connection, "security_events", "schema_version", "INTEGER NOT NULL DEFAULT 1 CHECK(schema_version=1)", cancellationToken);
@@ -98,7 +101,7 @@ public sealed class SqliteServerStore : IServerStore
             candidateIndex.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_candidate_token ON devices(candidate_token_hash) WHERE candidate_token_hash IS NOT NULL";
             await candidateIndex.ExecuteNonQueryAsync(cancellationToken);
         }
-        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=8";
+        await using var setVersion = connection.CreateCommand(); setVersion.CommandText = "PRAGMA user_version=9";
         await setVersion.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -636,7 +639,7 @@ public sealed class SqliteServerStore : IServerStore
             promote.Parameters.AddWithValue("$hash", tokenHash); await promote.ExecuteNonQueryAsync(cancellationToken);
         }
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved FROM devices WHERE token_hash=$hash AND revoked=0 AND approved=1";
+        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved,applied_global_policy_version,applied_group_policy_version,applied_device_policy_version FROM devices WHERE token_hash=$hash AND revoked=0 AND approved=1";
         command.Parameters.AddWithValue("$hash", tokenHash);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
@@ -646,7 +649,7 @@ public sealed class SqliteServerStore : IServerStore
     public async Task<IReadOnlyList<Device>> ListDevicesAsync(CancellationToken cancellationToken = default)
     {
         var items = new List<Device>(); await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved FROM devices ORDER BY name COLLATE NOCASE";
+        command.CommandText = "SELECT id,name,device_group,client_version,registered_at,last_seen_at,revoked,last_error,approved,applied_global_policy_version,applied_group_policy_version,applied_device_policy_version FROM devices ORDER BY name COLLATE NOCASE";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) items.Add(ReadDevice(reader)); return items;
     }
@@ -694,13 +697,19 @@ public sealed class SqliteServerStore : IServerStore
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
-    public async Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default)
+    public async Task<bool> HeartbeatAsync(string id, DateTimeOffset now, string? lastError, CancellationToken cancellationToken = default, AppliedPolicyRevision? appliedPolicy = null)
     {
         if (lastError is { Length: > 256 }) lastError = lastError[..256];
         await using var connection = await OpenAsync(cancellationToken); await using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE devices SET last_seen_at=$now,last_error=$error WHERE id=$id AND revoked=0";
+        command.CommandText = "UPDATE devices SET last_seen_at=$now,last_error=$error,"
+            + "applied_global_policy_version=COALESCE($global,applied_global_policy_version),"
+            + "applied_group_policy_version=COALESCE($group,applied_group_policy_version),"
+            + "applied_device_policy_version=COALESCE($device,applied_device_policy_version) WHERE id=$id AND revoked=0";
         command.Parameters.AddWithValue("$id", id); command.Parameters.AddWithValue("$now", now.ToString("O"));
         command.Parameters.AddWithValue("$error", (object?)lastError ?? DBNull.Value);
+        command.Parameters.AddWithValue("$global", (object?)appliedPolicy?.GlobalVersion ?? DBNull.Value);
+        command.Parameters.AddWithValue("$group", (object?)appliedPolicy?.GroupVersion ?? DBNull.Value);
+        command.Parameters.AddWithValue("$device", (object?)appliedPolicy?.DeviceVersion ?? DBNull.Value);
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
@@ -794,5 +803,6 @@ public sealed class SqliteServerStore : IServerStore
 
     private static Device ReadDevice(SqliteDataReader reader) => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
         DateTimeOffset.Parse(reader.GetString(4)), reader.IsDBNull(5) ? null : DateTimeOffset.Parse(reader.GetString(5)), reader.GetInt32(6) != 0,
-        reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetInt32(8) != 0);
+        reader.IsDBNull(7) ? null : reader.GetString(7), reader.GetInt32(8) != 0,
+        reader.IsDBNull(9) || reader.IsDBNull(10) || reader.IsDBNull(11) ? null : new AppliedPolicyRevision(reader.GetInt64(9), reader.GetInt64(10), reader.GetInt64(11)));
 }
