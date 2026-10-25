@@ -148,7 +148,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase)) return IntegrationTest();
+        if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase))
+        {
+            const string browserE2ePrefix = "--browser-e2e-repo=";
+            var browserE2eRepo = args.FirstOrDefault(x => x.StartsWith(browserE2ePrefix, StringComparison.OrdinalIgnoreCase))?[browserE2ePrefix.Length..];
+            return IntegrationTest(browserE2eRepo);
+        }
         if (args.Contains("--wizard-integration-test", StringComparer.OrdinalIgnoreCase)) return WizardIntegrationTest();
         if (args.Contains("--uninstall-guard-self-test", StringComparer.OrdinalIgnoreCase)) return UninstallRegistrationSelfTest();
         if (args.Contains("--uninstall-cleanup-self-test", StringComparer.OrdinalIgnoreCase)) return UninstallCleanupSelfTest();
@@ -441,7 +446,7 @@ internal static class Program
         args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase)
         || string.Equals(Path.GetFileName(executablePath), "Uninstall Sentinel AI.exe", StringComparison.OrdinalIgnoreCase);
 
-    private static int IntegrationTest()
+    private static int IntegrationTest(string? browserE2eRepo = null)
     {
         Log("INTEGRATION_TEST_REQUESTED");
         if (!OperatingSystem.IsWindows()) return 2;
@@ -471,6 +476,8 @@ internal static class Program
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
             VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            if (!string.IsNullOrWhiteSpace(browserE2eRepo))
+                RunInstalledHostBrowserE2E(browserE2eRepo, root);
             var preservedFile = Path.Combine(root, "integration-test-user-file.txt");
             const string preservedContents = "preserve across installed update and uninstall";
             File.WriteAllText(preservedFile, preservedContents);
@@ -528,6 +535,63 @@ internal static class Program
             }
             catch (Exception cleanupError) { Log($"INTEGRATION_TEST_CLEANUP_FAILED type={cleanupError.GetType().Name} message={Clean(cleanupError.Message)}"); }
             return 1;
+        }
+    }
+
+    private static void RunInstalledHostBrowserE2E(string repoRoot, string installRoot)
+    {
+        repoRoot = Path.GetFullPath(repoRoot);
+        var script = Path.Combine(repoRoot, "scripts", "test-chrome-extension-e2e.cjs");
+        if (!File.Exists(script)) throw new FileNotFoundException("The browser E2E script was not found.", script);
+
+        var isolatedLocalAppData = Path.Combine(Path.GetTempPath(), ".SentinelAI-InstalledHost-E2E-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(isolatedLocalAppData);
+        try
+        {
+            foreach (var browser in new[] { "chrome", "edge" })
+            {
+                Log($"INTEGRATION_TEST_BROWSER_E2E_START browser={browser} host=installed");
+                var start = new ProcessStartInfo("node")
+                {
+                    WorkingDirectory = repoRoot,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true
+                };
+                start.ArgumentList.Add(script);
+                start.ArgumentList.Add(browser);
+                start.ArgumentList.Add("--allow-headless-browser");
+                start.ArgumentList.Add("--allow-local-download-fixtures");
+                start.ArgumentList.Add("--use-installed-host");
+                start.Environment["SENTINEL_TEST_INSTALL_ROOT"] = installRoot;
+                start.Environment["LOCALAPPDATA"] = isolatedLocalAppData;
+
+                using var process = Process.Start(start) ?? throw new InvalidOperationException($"Could not start {browser} installed-host E2E.");
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                var stderr = process.StandardError.ReadToEndAsync();
+                if (!process.WaitForExit(300_000))
+                {
+                    try { process.Kill(entireProcessTree: true); } catch { }
+                    throw new TimeoutException($"{browser} installed-host E2E exceeded five minutes.");
+                }
+                Task.WaitAll(stdout, stderr);
+                var output = Clean((stdout.Result + Environment.NewLine + stderr.Result).Trim());
+                if (output.Length > MaximumLogMessageCharacters) output = output[^MaximumLogMessageCharacters..];
+                Log($"INTEGRATION_TEST_BROWSER_E2E_OUTPUT browser={browser} output={output}");
+                if (process.ExitCode != 0)
+                    throw new InvalidOperationException($"{browser} installed-host E2E failed with exit code {process.ExitCode}.");
+                Log($"INTEGRATION_TEST_BROWSER_E2E_SUCCESS browser={browser} host=installed");
+            }
+        }
+        finally
+        {
+            var temporaryRoot = Path.GetFullPath(Path.GetTempPath());
+            var isolatedRoot = Path.GetFullPath(isolatedLocalAppData);
+            if (!isolatedRoot.StartsWith(temporaryRoot, StringComparison.OrdinalIgnoreCase) ||
+                !Path.GetFileName(isolatedRoot).StartsWith(".SentinelAI-InstalledHost-E2E-", StringComparison.Ordinal))
+                throw new InvalidOperationException("Refusing to remove the browser E2E data folder outside its generated temporary location.");
+            if (Directory.Exists(isolatedRoot)) Directory.Delete(isolatedRoot, recursive: true);
         }
     }
 

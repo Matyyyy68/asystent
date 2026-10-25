@@ -12,6 +12,7 @@ const browserName = process.argv[2] ?? 'chrome';
 const allowVisibleBrowser = process.argv.includes('--allow-visible-browser');
 const allowHeadlessBrowser = process.argv.includes('--allow-headless-browser');
 const allowLocalDownloadFixtures = process.argv.includes('--allow-local-download-fixtures');
+const useInstalledHost = process.argv.includes('--use-installed-host');
 const browsers = {
   chrome: {
     displayName: 'Chrome',
@@ -175,7 +176,9 @@ async function main() {
   const manifest = JSON.parse(fs.readFileSync(manifestSource, 'utf8'));
   const extensionId = extensionIdFromKey(manifest.key);
   if (extensionId !== expectedExtensionId) throw new Error('The repository extension ID does not match the Native Messaging host contract.');
-  if (registryValue() !== null) throw new Error(`The ${browserConfig.displayName} Native Messaging registration already exists; refusing to overwrite ${registryKey}.`);
+  const registeredManifestPath = registryValue();
+  if (!useInstalledHost && registeredManifestPath !== null) throw new Error(`The ${browserConfig.displayName} Native Messaging registration already exists; refusing to overwrite ${registryKey}.`);
+  if (useInstalledHost && !registeredManifestPath) throw new Error(`The installed ${browserConfig.displayName} Native Messaging host is not registered.`);
 
   const browserPath = browserConfig.executablePaths.find(candidate => fs.existsSync(candidate));
   if (!browserPath) throw new Error(`${browserConfig.displayName} was not found in Program Files.`);
@@ -188,6 +191,21 @@ async function main() {
   const engineHostOutput = path.join(root, 'engine-host');
   const hostPath = path.join(engineHostOutput, 'Sentinel.NativeMessagingEngineHost.exe');
   const hostManifestPath = path.join(root, 'native-host.json');
+  const installRoot = process.env.SENTINEL_TEST_INSTALL_ROOT;
+  if (useInstalledHost) {
+    if (!installRoot) throw new Error('--use-installed-host requires SENTINEL_TEST_INSTALL_ROOT to identify the isolated installer target.');
+    const expectedManifestPath = path.join(installRoot, 'resources', 'engine', 'com.sentinelai.urlcheck.json');
+    if (path.resolve(registeredManifestPath) !== path.resolve(expectedManifestPath)) {
+      throw new Error(`Registered Native Messaging manifest does not belong to the isolated installation: ${registeredManifestPath}`);
+    }
+    const installedManifest = JSON.parse(fs.readFileSync(registeredManifestPath, 'utf8'));
+    const expectedHostPath = path.join(installRoot, 'resources', 'engine', 'Sentinel.UrlHost.exe');
+    if (installedManifest.name !== hostName || installedManifest.type !== 'stdio' ||
+        installedManifest.path !== expectedHostPath || !fs.existsSync(expectedHostPath) ||
+        !installedManifest.allowed_origins?.includes(`chrome-extension://${extensionId}/`)) {
+      throw new Error('The installed Native Messaging manifest does not point to the expected production Sentinel host.');
+    }
+  }
   const hostManifest = {
     name: hostName,
     description: 'Temporary test-only Native Messaging host using Sentinel URL rules',
@@ -212,10 +230,16 @@ async function main() {
     manifest.web_accessible_resources[0].matches = ['http://*.test/*', 'https://*.test/*'];
     fs.writeFileSync(path.join(extensionPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
-    run('dotnet', ['publish', engineHostProject, '-c', 'Release', '-o', engineHostOutput, '--nologo', '--no-restore', '-p:NuGetAudit=false']);
-    fs.writeFileSync(hostManifestPath, `${JSON.stringify(hostManifest, null, 2)}\n`);
-    sendRegistryValue(hostManifestPath);
-    if (registryValue() !== hostManifestPath) throw new Error(`${browserConfig.displayName} Native Messaging registration was not written.`);
+    if (!useInstalledHost) {
+      run('dotnet', ['publish', engineHostProject, '-c', 'Release', '-o', engineHostOutput, '--nologo', '--no-restore', '-p:NuGetAudit=false']);
+      fs.writeFileSync(hostManifestPath, `${JSON.stringify(hostManifest, null, 2)}\n`);
+      sendRegistryValue(hostManifestPath);
+      if (registryValue() !== hostManifestPath) throw new Error(`${browserConfig.displayName} Native Messaging registration was not written.`);
+    }
+
+    const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
+    const statusMarker = path.join(process.env.LOCALAPPDATA || '', 'SentinelAI', `browser-${browserName}.json`);
+    const initialStatusMarker = useInstalledHost && fs.existsSync(statusMarker) ? fs.readFileSync(statusMarker, 'utf8') : null;
 
     fixtureServer = createServer((request, response) => {
       const requestUrl = new URL(request.url, 'http://127.0.0.1');
@@ -294,6 +318,18 @@ async function main() {
     if (!probeResult?.reply?.available) {
       throw new Error(`Native Messaging Sentinel host probe failed: ${JSON.stringify(probeResult)}`);
     }
+    if (useInstalledHost) {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (fs.existsSync(statusMarker) && fs.readFileSync(statusMarker, 'utf8') !== initialStatusMarker) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      if (!fs.existsSync(statusMarker) || fs.readFileSync(statusMarker, 'utf8') === initialStatusMarker) {
+        throw new Error(`The production host replied but did not update its ${browserName} status marker.`);
+      }
+      const status = JSON.parse(fs.readFileSync(statusMarker, 'utf8'));
+      if (status.Enabled !== true) throw new Error(`The production ${browserName} host marker reports the browser integration disabled.`);
+    }
 
     const fixtureUrl = `http://paypal-login.test:${fixturePort}/login`;
     const created = await browser.command('Target.createTarget', { url: fixtureUrl });
@@ -316,7 +352,6 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     if (!observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) {
-      const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
       const requestTypes = fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
       throw new Error(`The warning page was not reached in ${browserConfig.displayName}. Final page: ${observed?.href ?? 'unavailable'}; Native Messaging requests: ${requestTypes.join(',') || 'none'}.`);
     }
@@ -328,13 +363,24 @@ async function main() {
     if (observed.text.includes('paypal-login.test') || observed.text.includes(fixtureUrl)) {
       throw new Error('The warning page displayed the submitted URL or host.');
     }
-    const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
     const requestTypes = fs.existsSync(requestLog) ? fs.readFileSync(requestLog, 'utf8').trim().split(/\r?\n/).filter(Boolean) : [];
-    if (!requestTypes.includes('analyze')) throw new Error('The Native Messaging Sentinel host did not receive an analyze request.');
+    if (!useInstalledHost && !requestTypes.includes('analyze')) throw new Error('The Native Messaging Sentinel host did not receive an analyze request.');
+    if (useInstalledHost && !fs.existsSync(statusMarker)) throw new Error(`The production host did not create its ${browserName} status marker.`);
 
-    const analyzeCount = () => fs.existsSync(requestLog)
-      ? fs.readFileSync(requestLog, 'utf8').split(/\r?\n/).filter(type => type === 'analyze').length
-      : 0;
+    let lastProductionMarker = initialStatusMarker;
+    let productionMarkerChanges = 0;
+    const analyzeCount = () => {
+      if (!useInstalledHost) return fs.existsSync(requestLog)
+        ? fs.readFileSync(requestLog, 'utf8').split(/\r?\n/).filter(type => type === 'analyze').length
+        : 0;
+      if (!fs.existsSync(statusMarker)) return productionMarkerChanges;
+      const currentMarker = fs.readFileSync(statusMarker, 'utf8');
+      if (currentMarker !== lastProductionMarker) {
+        lastProductionMarker = currentMarker;
+        productionMarkerChanges++;
+      }
+      return productionMarkerChanges;
+    };
 
     const beforeRedirectCount = analyzeCount();
     const redirectTarget = await browser.command('Target.createTarget', { url: `http://example.test:${fixturePort}/redirect-to-brand` });
@@ -624,6 +670,8 @@ async function main() {
       extensionId,
       fixtureHost: 'paypal-login.test',
       nativeMessagingRequests: requestTypes,
+      nativeMessagingHost: useInstalledHost ? 'installed-production-host' : 'test-host',
+      productionStatusMarkerUpdated: useInstalledHost,
       warningRendered: true,
       productionRuleRendered: true,
       submittedUrlRedacted: true,
@@ -656,7 +704,10 @@ async function main() {
       await new Promise(resolve => fixtureServer.close(resolve));
     }
     try {
-      if (registryValue() === hostManifestPath) removeRegistryValue(hostManifestPath);
+      if (!useInstalledHost && registryValue() === hostManifestPath) removeRegistryValue(hostManifestPath);
+      if (useInstalledHost && registryValue() !== registeredManifestPath) {
+        throw new Error('The installed Native Messaging registration changed during the browser E2E.');
+      }
     } finally {
       const temporaryRoot = path.resolve(root);
       if (!temporaryRoot.startsWith(repoRoot + path.sep)) throw new Error('Refusing to remove a test directory outside the repository.');
