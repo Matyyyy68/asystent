@@ -397,6 +397,39 @@ test('a top-level navigation warning is upgraded when the response becomes a dow
   assert.equal(sessionStorage.get(`warningTarget:${token}`).downloadId, item.id);
 });
 
+test('a download is analyzed independently when multiple tabs have the same recent URL', async () => {
+  const sessionStorage = new Map();
+  const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
+  const worker = createWorker(sessionStorage, shared);
+  const url = 'https://paypal-login.test/shared-download';
+
+  worker.navigate({ tabId: 31, frameId: 0, url });
+  worker.navigate({ tabId: 32, frameId: 0, url });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.nativeRequests.length, 2);
+
+  worker.download({ id: 74, url, finalUrl: url });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(shared.nativeRequests.length, 3, 'ambiguous correlation must trigger independent download analysis');
+  const downloadRequest = shared.nativeRequests[2];
+  worker.respondToNative({
+    id: downloadRequest.id, available: true, shouldWarn: true,
+    risk: 'High', indicators: [], rulesVersion: 'test'
+  });
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(worker.createdTabs.length, 1, 'the ambiguous download should get its own warning tab');
+  assert.equal(shared.tabUpdates.length, 1);
+  const warningTabId = worker.createdTabs[0].id;
+  const token = new URL(shared.tabUpdates[0].update.url).searchParams.get('token');
+  const target = sessionStorage.get(`warningTarget:${token}`);
+  assert.equal(target.kind, 'download');
+  assert.equal(target.tabId, warningTabId);
+  assert.equal(target.downloadId, 74);
+  assert.notEqual(target.tabId, 31);
+  assert.notEqual(target.tabId, 32);
+});
+
 test('closing a tab ignores pending analysis and clears its saved warning details', async () => {
   const sessionStorage = new Map();
   const shared = { nativeRequests: [], tabUpdates: [], removedTabs: [] };
