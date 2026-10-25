@@ -238,7 +238,9 @@ async function main() {
     }
 
     const requestLog = path.join(engineHostOutput, 'native-host-requests.log');
-    const statusMarker = path.join(process.env.LOCALAPPDATA || '', 'SentinelAI', `browser-${browserName}.json`);
+    const statusDirectory = process.env.SENTINEL_TEST_STATUS_DIRECTORY ||
+      path.join(process.env.LOCALAPPDATA || '', 'SentinelAI');
+    const statusMarker = path.join(statusDirectory, `browser-${browserName}.json`);
     const initialStatusMarker = useInstalledHost && fs.existsSync(statusMarker) ? fs.readFileSync(statusMarker, 'utf8') : null;
 
     fixtureServer = createServer((request, response) => {

@@ -565,7 +565,7 @@ internal static class Program
                 start.ArgumentList.Add("--allow-local-download-fixtures");
                 start.ArgumentList.Add("--use-installed-host");
                 start.Environment["SENTINEL_TEST_INSTALL_ROOT"] = installRoot;
-                start.Environment["LOCALAPPDATA"] = isolatedLocalAppData;
+                start.Environment["SENTINEL_TEST_STATUS_DIRECTORY"] = Path.Combine(isolatedLocalAppData, "SentinelAI");
 
                 using var process = Process.Start(start) ?? throw new InvalidOperationException($"Could not start {browser} installed-host E2E.");
                 var stdout = process.StandardOutput.ReadToEndAsync();

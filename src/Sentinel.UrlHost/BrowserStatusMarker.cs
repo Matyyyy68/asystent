@@ -6,7 +6,10 @@ internal static class BrowserStatusMarker
 {
     public static async Task TouchAsync(string browser, bool enabled, CancellationToken cancellationToken)
     {
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI");
+        var testRoot = Environment.GetEnvironmentVariable("SENTINEL_TEST_STATUS_DIRECTORY");
+        var root = string.IsNullOrWhiteSpace(testRoot)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SentinelAI")
+            : Path.GetFullPath(testRoot);
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, $"browser-{browser}.json");
         var temporary = path + "." + Environment.ProcessId + ".new";
