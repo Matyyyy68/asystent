@@ -81,7 +81,13 @@ jobs:
             Stop-Process -Id $test.Id -Force -ErrorAction SilentlyContinue
             throw 'Visible installer wizard integration test exceeded its 11-minute CI limit.'
           }
-          if ($test.ExitCode -ne 0) { throw "Visible installer wizard integration test failed with exit code $($test.ExitCode)." }
+          if ($test.ExitCode -ne 0) {
+            $log = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/installer.log'
+            if (Test-Path -LiteralPath $log -PathType Leaf) {
+              Get-Content -LiteralPath $log -Tail 80 | Select-String 'WIZARD_INTEGRATION_TEST|UI_INSTALL_|INSTALL_VERIFIED|UNINSTALL_'
+            }
+            throw "Visible installer wizard integration test failed with exit code $($test.ExitCode)."
+          }
       - name: Build and test Enterprise API
         shell: pwsh
         run: |
