@@ -474,8 +474,13 @@ async function main() {
     if (!linkReady) throw new Error(`${browserConfig.displayName} download-link fixture did not finish loading.`);
     const beforeLinkDownloadCount = analyzeCount();
     const linkDownloadUrl = `http://paypal-login.test:${fixturePort}/download-link-response`;
-    const clickResult = await evaluatePage(linkBrowser, `(() => { const link = document.createElement('a'); link.id = 'download'; link.href = ${JSON.stringify(linkDownloadUrl)}; link.textContent = 'Download fixture'; document.body.append(link); link.click(); return 'clicked'; })()`);
-    if (clickResult !== 'clicked') throw new Error(`${browserConfig.displayName} did not activate the download fixture link.`);
+    const clickBoundsValue = await evaluatePage(linkBrowser, `(() => { const link = document.createElement('a'); link.id = 'download'; link.href = ${JSON.stringify(linkDownloadUrl)}; link.textContent = 'Download fixture'; document.body.append(link); const bounds = link.getBoundingClientRect(); return JSON.stringify({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }); })()`);
+    const clickBounds = JSON.parse(clickBoundsValue);
+    if (!(clickBounds.width > 0 && clickBounds.height > 0)) throw new Error(`${browserConfig.displayName} download fixture link has no clickable bounds.`);
+    const clickX = clickBounds.x + clickBounds.width / 2;
+    const clickY = clickBounds.y + clickBounds.height / 2;
+    await linkBrowser.command('Input.dispatchMouseEvent', { type: 'mousePressed', x: clickX, y: clickY, button: 'left', clickCount: 1 });
+    await linkBrowser.command('Input.dispatchMouseEvent', { type: 'mouseReleased', x: clickX, y: clickY, button: 'left', clickCount: 1 });
     const linkDownloadDeadline = Date.now() + timeoutMs;
     let linkFileSaved = false;
     let linkWarningTab;
@@ -525,7 +530,18 @@ async function main() {
       throw new Error(`${browserConfig.displayName} downloaded unexpected link fixture contents.`);
     }
     if (analyzeCount() <= beforeLinkDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze a link-initiated download.`);
-    if (!linkWarningTab?.webSocketDebuggerUrl) throw new Error(`${browserConfig.displayName} did not render a download-specific warning for the link-initiated download (warning pages observed: ${JSON.stringify([...observedWarningKinds.values()]) || 'none'}).`);
+    if (!linkWarningTab?.webSocketDebuggerUrl) {
+      let runtimeDiagnostics = null;
+      try {
+        const result = await worker.command('Runtime.evaluate', {
+          expression: `Promise.all([new Promise(resolve => chrome.downloads.search({filename: ${JSON.stringify(path.join(downloadPath, 'sentinel-link-download.txt'))}}, items => resolve(items.map(({ id, tabId, byExtensionId }) => ({ id, tabId, byExtensionId: byExtensionId ?? null }))))), chrome.storage.session.get(null).then(items => Object.values(items).filter(item => item && item.tabId !== undefined && item.kind).map(({ tabId, kind, downloadId }) => ({ tabId, kind, hasDownloadId: Number.isInteger(downloadId) }))) ]).then(([downloads, warnings]) => ({ downloads, warnings }))`,
+          awaitPromise: true,
+          returnByValue: true
+        });
+        runtimeDiagnostics = result.result?.value ?? null;
+      } catch {}
+      throw new Error(`${browserConfig.displayName} did not render a download-specific warning for the link-initiated download (warning pages observed: ${JSON.stringify([...observedWarningKinds.values()]) || 'none'}; runtime metadata: ${JSON.stringify(runtimeDiagnostics)}).`);
+    }
     if (!warningPage) throw new Error(`${browserConfig.displayName} did not render the expected download-specific warning.`);
     if (!downloadNotice?.title?.includes('pobierania') || !downloadNotice.continueHidden || !downloadNotice.text.includes('Pobieranie mogło już się rozpocząć')) {
       throw new Error(`${browserConfig.displayName} link-download warning had unexpected content: ${JSON.stringify(downloadNotice)}`);

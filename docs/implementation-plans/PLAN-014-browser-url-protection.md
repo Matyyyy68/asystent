@@ -1,5 +1,7 @@
 # PLAN-014 — ochrona URL w rozszerzeniu przeglądarki
 
+**F09 — run 40194715426 nie potwierdził poprawki produkcyjnej (2026-10-25):** build oraz autotest instalatora PASS, lecz Chrome nadal nie pokazał ostrzeżenia `download`; poprzedni automat klikał link syntetycznie. Test teraz wysyła rzeczywiste zdarzenia myszy CDP i przy błędzie odczytuje tylko metadane ID/tabId pobrania oraz rodzaje ostrzeżeń zapisanych w sesji, bez URL-i. Kolejny Windows CI ma rozstrzygnąć, czy problem leży w kontekście pobrania, czy obsłudze rozszerzenia. F09 pozostaje otwarte.
+
 **Poprawka produkcyjna po runie 40193866532 (2026-10-25):** E2E udowodniło wyścig: Chrome pokazał ostrzeżenia `navigation`, a nie ostrzeżenie `download`. Silnik przypina teraz ID transferu do analizy oczekującej; ostrzeżenie powstałe wcześniej zostaje awansowane i przeładowane z komunikatem o rozpoczętym transferze. Desktop regresje kolejności zdarzeń PASS 48/48; kolejny Windows CI jest wymagany.
 
 **Wynik runu 40192858145 (2026-10-25):** build/test oraz autotest instalatora PASS; Chrome E2E nadal nie znalazł warning page dla link-download mimo zapisu fixture i analizy hosta. Edge i Enterprise API pominięte. Poprzednia strona źródłowa `example.test` z losowym HTTP portem mogła dodać równoległą analizę nawigacji. Test zmieniono na link wstrzyknięty w `about:blank` i dodano bezpieczne rozróżnianie typów warning page. Nowy CI wymagany; F09 pozostaje otwarte.
