@@ -537,6 +537,8 @@ internal static class Program
         if (!OperatingSystem.IsWindows()) return 2;
         var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Programs", ".SentinelAI-WizardIntegration-Test-" + Guid.NewGuid().ToString("N"));
+        var preservedFile = Path.Combine(root, "wizard-integration-user-file.txt");
+        const string preservedContents = "preserve across GUI repair and uninstall";
         try
         {
             using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"))
@@ -559,14 +561,18 @@ internal static class Program
             ApplicationConfiguration.Initialize();
             using (var wizard = new SetupWizard(repairModeOverride: false, integrationTestTarget: root))
             {
-                Application.Run(wizard);
-                if (!string.IsNullOrWhiteSpace(wizard.IntegrationTestFailure))
-                    throw new InvalidOperationException($"Wizard flow failed: {wizard.IntegrationTestFailure}");
-                if (wizard.DialogResult != DialogResult.OK)
-                    throw new InvalidOperationException($"Wizard flow closed with result {wizard.DialogResult}.");
+                RunWizardIntegrationFlow(wizard, repairExpected: false);
             }
 
             VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            File.WriteAllText(preservedFile, preservedContents);
+            using (var wizard = new SetupWizard(integrationTestTarget: root))
+            {
+                RunWizardIntegrationFlow(wizard, repairExpected: true);
+            }
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
+                throw new InvalidDataException("GUI repair/update did not preserve a file outside the application payload.");
             Uninstall(root);
             using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
             using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
@@ -575,6 +581,9 @@ internal static class Program
                     var installedPath = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
                     if (File.Exists(installedPath)) throw new InvalidDataException($"Wizard integration test left an application file: {entry.FullName}.");
                 }
+            if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
+                throw new InvalidDataException("GUI uninstall did not preserve a file outside the application payload.");
+            DeleteInstallPathSafely(preservedFile, root, isDirectory: false);
             using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI"))
                 if (key is not null) throw new InvalidDataException("Wizard integration test left an uninstall registration behind.");
             if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
@@ -588,7 +597,7 @@ internal static class Program
                     if (key is not null) throw new InvalidDataException($"Wizard integration test left Native Messaging registration behind ({keyPath}).");
             if (File.Exists(startMenuLink) || File.Exists(desktopLink))
                 throw new InvalidDataException("Wizard integration test left a Sentinel AI shortcut behind.");
-            Log("WIZARD_INTEGRATION_TEST_SUCCESS form=true install=true verification=true uninstall=true shortcuts=false autostart=false");
+            Log("WIZARD_INTEGRATION_TEST_SUCCESS form=true install=true repairUpdate=true verification=true uninstall=true userFilePreserved=true shortcuts=false autostart=false");
             return 0;
         }
         catch (Exception exception)
@@ -597,13 +606,29 @@ internal static class Program
             try
             {
                 var registered = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\SentinelAI")?.GetValue("InstallLocation") as string;
-                if (Directory.Exists(root) && PathsEqual(registered, root)) Uninstall(root);
+                if (Directory.Exists(root) && PathsEqual(registered, root))
+                {
+                    Uninstall(root);
+                    if (Directory.Exists(root) && File.Exists(preservedFile))
+                        DeleteInstallPathSafely(preservedFile, root, isDirectory: false);
+                }
                 if (Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any())
                     DeleteInstallPathSafely(root, Path.GetDirectoryName(root)!, isDirectory: true);
             }
             catch (Exception cleanupError) { Log($"WIZARD_INTEGRATION_TEST_CLEANUP_FAILED type={cleanupError.GetType().Name} message={Clean(cleanupError.Message)}"); }
             return 1;
         }
+    }
+
+    private static void RunWizardIntegrationFlow(SetupWizard wizard, bool repairExpected)
+    {
+        if (wizard.IsRepairMode != repairExpected)
+            throw new InvalidOperationException($"Wizard opened in the wrong mode. Expected repairMode={repairExpected}.");
+        Application.Run(wizard);
+        if (!string.IsNullOrWhiteSpace(wizard.IntegrationTestFailure))
+            throw new InvalidOperationException($"Wizard flow failed: {wizard.IntegrationTestFailure}");
+        if (wizard.DialogResult != DialogResult.OK)
+            throw new InvalidOperationException($"Wizard flow closed with result {wizard.DialogResult}.");
     }
 
     private static bool VerifyPayload(bool showErrors)
@@ -2277,6 +2302,7 @@ internal sealed class SetupWizard : Form
     private System.Windows.Forms.Timer? integrationTestTimer;
     private DateTime integrationTestStartedAt;
     internal string? IntegrationTestFailure { get; private set; }
+    internal bool IsRepairMode => repairMode;
 
     public SetupWizard(bool? repairModeOverride = null, (bool StartMenu, bool Desktop, bool AutoStart)? existingOptionsOverride = null,
         Exception? repairOptionsErrorOverride = null, string? integrationTestTarget = null)

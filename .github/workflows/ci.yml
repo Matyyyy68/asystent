@@ -69,7 +69,7 @@ jobs:
           if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Built installer was not found.' }
           $test = Start-Process -FilePath $installer -ArgumentList @('--integration-test') -Wait -PassThru -WindowStyle Hidden
           if ($test.ExitCode -ne 0) { throw "Isolated installer integration test failed with exit code $($test.ExitCode)." }
-      - name: Run visible installer wizard install-verify-uninstall integration test
+      - name: Run visible installer wizard install-repair-uninstall integration test
         shell: pwsh
         run: |
           $version = ([xml](Get-Content eng/ProductVersion.props -Raw)).Project.PropertyGroup.VersionPrefix
