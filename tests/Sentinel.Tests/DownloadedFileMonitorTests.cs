@@ -468,11 +468,23 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         await Task.Delay(TimeSpan.FromMilliseconds(900));
 
         const int swapIterations = 160;
+        TimeSpan? soakDuration = null;
+        var soakSetting = Environment.GetEnvironmentVariable("SENTINEL_TEST_DOWNLOADS_SOAK_SECONDS");
+        if (soakSetting is not null)
+        {
+            if (!int.TryParse(soakSetting, out var soakSeconds) || soakSeconds is < 120 or > 600)
+                throw new InvalidOperationException("SENTINEL_TEST_DOWNLOADS_SOAK_SECONDS must be between 120 and 600.");
+            soakDuration = TimeSpan.FromSeconds(soakSeconds);
+        }
         var swaps = 0;
         var random = new Random(0x5E17);
+        var soakStarted = Stopwatch.GetTimestamp();
         var toggler = Task.Run(async () =>
         {
-            for (var index = 0; index < swapIterations; index++)
+            var index = 0;
+            while (soakDuration is { } duration
+                ? Stopwatch.GetElapsedTime(soakStarted) < duration
+                : index < swapIterations)
             {
                 Directory.Move(parent, movedParent);
                 CreateJunction(parent, outside);
@@ -481,7 +493,9 @@ public sealed class DownloadedFileMonitorTests : IDisposable
                 Directory.Delete(parent);
                 Directory.Move(movedParent, parent);
                 await Task.Delay(TimeSpan.FromMilliseconds(random.Next(1, 6)));
+                index++;
             }
+            return index;
         });
 
         try
@@ -491,11 +505,12 @@ public sealed class DownloadedFileMonitorTests : IDisposable
                 await monitor.CollectAsync(store, reputation);
                 await Task.Delay(TimeSpan.FromMilliseconds(1));
             }
-            await toggler;
+            var completedSwaps = await toggler;
             for (var attempt = 0; attempt < 5; attempt++)
                 await monitor.CollectAsync(store, reputation);
 
-            Assert.Equal(swapIterations, swaps);
+            Assert.Equal(completedSwaps, swaps);
+            Assert.True(completedSwaps >= swapIterations);
             Assert.Empty(await store.ReadAsync());
             Assert.DoesNotContain((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files,
                 item => string.Equals(item.Key, outsideFile, StringComparison.OrdinalIgnoreCase));

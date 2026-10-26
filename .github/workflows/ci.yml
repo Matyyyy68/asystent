@@ -60,6 +60,13 @@ jobs:
         run: |
           dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName~MonitorUsesRedirectedWindowsKnownFolder
           if ($LASTEXITCODE) { throw 'Redirected Windows Downloads Known Folder integration test failed' }
+      - name: Soak test Downloads junction race in isolated runner
+        shell: pwsh
+        env:
+          SENTINEL_TEST_DOWNLOADS_SOAK_SECONDS: '120'
+        run: |
+          dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName~ConcurrentParentJunctionStressNeverReadsOrAlertsOnOutsideFile
+          if ($LASTEXITCODE) { throw 'Downloads junction race soak test failed' }
       - name: Verify Electron Windows autostart in isolated runner
         shell: pwsh
         working-directory: desktop
