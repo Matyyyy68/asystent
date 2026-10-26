@@ -26,9 +26,9 @@ app.whenReady().then(() => {
     if (method === 'autostart') {
       const loginItem = { path: process.execPath, args: ['--minimized'], name: 'Sentinel AI' };
       app.setLoginItemSettings({ ...loginItem, args: ['--', ...loginItem.args], openAtLogin: data.enabled === true });
-      return app.getLoginItemSettings(loginItem).openAtLogin;
+      return app.getLoginItemSettings({ ...loginItem, args: ['--', ...loginItem.args] }).openAtLogin;
     }
-    if (method === 'getAutostart') return app.getLoginItemSettings({ path: process.execPath, args: ['--minimized'] }).openAtLogin;
+    if (method === 'getAutostart') return app.getLoginItemSettings({ path: process.execPath, args: ['--', '--minimized'] }).openAtLogin;
     if (method === 'chooseFile') {
       const choice = await dialog.showOpenDialog(win, { properties: ['openFile'] });
       return choice.canceled ? null : call('file', { path: choice.filePaths[0] });
