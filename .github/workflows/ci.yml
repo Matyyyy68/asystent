@@ -58,7 +58,7 @@ jobs:
         env:
           SENTINEL_TEST_ALLOW_KNOWN_FOLDER_MUTATION: '1'
         run: |
-          dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName~KnownDownloadsDirectoryHonorsRedirectedWindowsKnownFolder
+          dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-build --no-restore --filter FullyQualifiedName~MonitorUsesRedirectedWindowsKnownFolder
           if ($LASTEXITCODE) { throw 'Redirected Windows Downloads Known Folder integration test failed' }
       - name: Verify Electron Windows autostart in isolated runner
         shell: pwsh

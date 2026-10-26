@@ -28,7 +28,7 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     }
 
     [Fact]
-    public void KnownDownloadsDirectoryHonorsRedirectedWindowsKnownFolder()
+    public async Task MonitorUsesRedirectedWindowsKnownFolder()
     {
         // Mutating the current user's Known Folder is safe only on an isolated CI runner.
         if (!OperatingSystem.IsWindows() ||
@@ -37,7 +37,7 @@ public sealed class DownloadedFileMonitorTests : IDisposable
 
         const string valueName = "{374DE290-123F-4565-9164-39C4925E467B}";
         const string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
-        var redirected = Path.Combine(Path.GetTempPath(), "Sentinel Downloads Redirect " + Guid.NewGuid().ToString("N"));
+        var redirected = Path.Combine(root, "Downloads Redirected");
         using var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Default).CreateSubKey(keyPath, writable: true)
             ?? throw new InvalidOperationException("Could not open the current user's Known Folder registry key.");
         var previous = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
@@ -53,6 +53,34 @@ public sealed class DownloadedFileMonitorTests : IDisposable
             var actual = Path.GetFullPath(DownloadedFileMonitor.GetKnownDownloadsDirectory());
             Assert.Equal(Path.GetFullPath(redirected).TrimEnd(Path.DirectorySeparatorChar),
                 actual.TrimEnd(Path.DirectorySeparatorChar), ignoreCase: true);
+
+            var data = Path.Combine(root, "data");
+            const string payload = "synthetic match in redirected Downloads";
+            var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+            var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+            reputation.Import(payloadHash, DateTimeOffset.UtcNow);
+            var store = new LocalStore(data);
+            await store.InitializeAsync();
+
+            using var monitor = new DownloadedFileMonitor(actual);
+            await monitor.SetEnabledAsync(store, true);
+            Assert.Contains("działa", monitor.State, StringComparison.OrdinalIgnoreCase);
+            await File.WriteAllTextAsync(Path.Combine(actual, "synthetic-match.bin"), payload);
+            await Task.Delay(TimeSpan.FromMilliseconds(900));
+
+            var detected = 0;
+            for (var attempt = 0; attempt < 40 && detected == 0; attempt++)
+            {
+                detected += await monitor.CollectAsync(store, reputation);
+                if (detected == 0) await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
+
+            Assert.Equal(1, detected);
+            var events = await store.ReadAsync();
+            Assert.Single(events);
+            Assert.Equal("downloads-local-hash", events[0].Source);
+            Assert.Equal("Monitoring Downloads", events[0].Application);
+            Assert.DoesNotContain("synthetic-match.bin", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
