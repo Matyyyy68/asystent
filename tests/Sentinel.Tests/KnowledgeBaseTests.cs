@@ -217,7 +217,9 @@ public sealed class KnowledgeBaseTests : IDisposable
         start.ArgumentList.Add(lockPath);
         using var lockProcess = Process.Start(start) ?? throw new IOException("Could not start the cross-process lock helper.");
         var stderrTask = lockProcess.StandardError.ReadToEndAsync();
-        var helperTimeout = TimeSpan.FromSeconds(30);
+        // Windows PowerShell may start slowly on a busy hosted runner; this timeout
+        // covers only helper startup/release, while the lock-wait assertion stays 150 ms.
+        var helperTimeout = TimeSpan.FromSeconds(90);
         try
         {
             string? ready;
