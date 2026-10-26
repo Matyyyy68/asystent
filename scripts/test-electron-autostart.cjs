@@ -1,4 +1,3 @@
-const path = require('node:path');
 const name = 'Sentinel AI';
 const args = ['--minimized'];
 let changed = false;
@@ -7,7 +6,7 @@ let loginItem;
 async function run(app) {
   await app.whenReady();
   loginItem = {
-    path: path.join(process.env.LOCALAPPDATA || app.getPath('temp'), 'Programs', 'Sentinel AI', 'Sentinel AI.exe'),
+    path: process.execPath,
     args,
     name
   };
@@ -22,8 +21,8 @@ async function run(app) {
     const enabled = app.getLoginItemSettings(loginItem);
     const entry = enabled.launchItems?.find(item => item.name === name);
     if (!enabled.openAtLogin || !enabled.executableWillLaunchAtLogin
-        || entry?.path !== loginItem.path || !entry.args.includes('--minimized') || entry.scope !== 'user' || !entry.enabled) {
-      throw new Error('Electron did not register the expected Windows login item.');
+        || entry?.path !== loginItem.path || !entry.args?.includes('--minimized') || entry.scope !== 'user' || !entry.enabled) {
+      throw new Error(`Electron did not register the expected Windows login item: ${JSON.stringify({ openAtLogin: enabled.openAtLogin, executableWillLaunchAtLogin: enabled.executableWillLaunchAtLogin, entry })}`);
     }
 
     app.setLoginItemSettings({ ...loginItem, openAtLogin: false });

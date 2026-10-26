@@ -23,8 +23,12 @@ app.whenReady().then(() => {
   ipcMain.handle('sentinel', async (event, method, data) => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
     if (method === 'engineStatus') return { ...engine.diagnostics(), lastFailure: readLastFailure(lifecycleLogDirectory) };
-    if (method === 'autostart') { app.setLoginItemSettings({ openAtLogin: data.enabled === true, args: ['--minimized'], name: 'Sentinel AI' }); return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin; }
-    if (method === 'getAutostart') return app.getLoginItemSettings({ name: 'Sentinel AI' }).openAtLogin;
+    if (method === 'autostart') {
+      const loginItem = { path: process.execPath, args: ['--minimized'], name: 'Sentinel AI' };
+      app.setLoginItemSettings({ ...loginItem, openAtLogin: data.enabled === true });
+      return app.getLoginItemSettings(loginItem).openAtLogin;
+    }
+    if (method === 'getAutostart') return app.getLoginItemSettings({ path: process.execPath, args: ['--minimized'] }).openAtLogin;
     if (method === 'chooseFile') {
       const choice = await dialog.showOpenDialog(win, { properties: ['openFile'] });
       return choice.canceled ? null : call('file', { path: choice.filePaths[0] });
