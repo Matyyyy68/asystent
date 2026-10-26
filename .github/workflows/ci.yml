@@ -53,6 +53,11 @@ jobs:
       - name: Build and test application
         shell: pwsh
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
+      - name: Smoke-test active Electron app against isolated engine and database
+        shell: pwsh
+        run: |
+          node scripts/test-electron-app-smoke.cjs
+          if ($LASTEXITCODE) { throw 'Active Electron app smoke test failed' }
       - name: Verify redirected Windows Downloads Known Folder in isolated runner
         shell: pwsh
         env:
