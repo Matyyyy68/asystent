@@ -168,8 +168,9 @@ internal static class Program
             try { Uninstall(Path.GetDirectoryName(Environment.ProcessPath!)!); return 0; }
             catch (Exception ex)
             {
-                Log($"UNINSTALL_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
-                MessageBox.Show($"Nie udało się odinstalować Sentinel AI.\n\n{ex.Message}\n\nLog diagnostyczny: {LogPath}", Product, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                if (ex.Data["SentinelUninstallStage"] is not string)
+                    Log(FormatUninstallFailureLog("dispatch", ex));
+                MessageBox.Show(FormatUninstallErrorMessage(ex), Product, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
         }
@@ -234,6 +235,15 @@ internal static class Program
                 || !uninstallFailure.Contains("hresult=0x", StringComparison.Ordinal)
                 || !uninstallFailure.Contains("simulated file lock", StringComparison.Ordinal))
                 throw new InvalidDataException("Błąd deinstalacji nie zawiera etapu, typu wyjątku i kodu HRESULT.");
+            var uninstallMessageException = new IOException("simulated file lock");
+            uninstallMessageException.Data["SentinelUninstallStage"] = "remove_payload_files";
+            var uninstallMessage = FormatUninstallErrorMessage(uninstallMessageException);
+            if (!uninstallMessage.Contains("Etap: remove_payload_files", StringComparison.Ordinal)
+                || !uninstallMessage.Contains("IOException", StringComparison.Ordinal)
+                || !uninstallMessage.Contains("0x", StringComparison.Ordinal)
+                || !uninstallMessage.Contains("simulated file lock", StringComparison.Ordinal)
+                || !uninstallMessage.Contains(LogPath, StringComparison.Ordinal))
+                throw new InvalidDataException("Okno błędu deinstalacji pomija etap, typ, HRESULT, przyczynę lub log.");
             Console.WriteLine("UNINSTALL_GUARD_SELF_TEST_SUCCESS missingRegistrationRejected=true mismatchedPathRejected=true matchingPathAccepted=true autostartOwnership=true unrelatedAutostartPreserved=true failureLogging=true reparsePointRejected=true junctionTreeRejected=true handleEnumeration=true paginatedEnumeration=true handleContainment=true safeDirectoryCreation=true safeRename=true safeFileCreation=true safeCopy=true safeDeletion=true");
             return 0;
         }
@@ -1877,6 +1887,13 @@ internal static class Program
     internal static string FormatUninstallFailureLog(string stage, Exception exception) =>
         $"UNINSTALL_FAILED stage={Clean(stage)} type={exception.GetType().Name} hresult=0x{exception.HResult:X8} message={Clean(exception.Message)}";
 
+    internal static string FormatUninstallErrorMessage(Exception exception)
+    {
+        var stage = exception.Data["SentinelUninstallStage"] as string;
+        var stageText = stage is null ? string.Empty : $"Etap: {Clean(stage)}\r\n";
+        return $"Nie udało się odinstalować Sentinel AI.\r\n\r\n{stageText}Typ: {Clean(exception.GetType().Name)}\r\nHRESULT: 0x{exception.HResult:X8}\r\n{Clean(exception.Message)}\r\n\r\nLog diagnostyczny: {LogPath}";
+    }
+
     internal static string FormatInstallErrorMessage(Exception exception)
     {
         var stage = exception.Data["SentinelInstallStage"] as string;
@@ -2262,6 +2279,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
+            exception.Data["SentinelUninstallStage"] = stage;
             Log(FormatUninstallFailureLog(stage, exception));
             throw;
         }
