@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Diagnostics;
+using Microsoft.Win32;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
 using Xunit;
@@ -24,6 +25,44 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         Assert.False(DownloadedFileMonitor.IsResolvedPathInside(downloads, escaped));
         if (OperatingSystem.IsWindows())
             Assert.True(DownloadedFileMonitor.IsResolvedPathInside(@"\\?\" + downloads, @"\\?\" + inside));
+    }
+
+    [Fact]
+    public void KnownDownloadsDirectoryHonorsRedirectedWindowsKnownFolder()
+    {
+        // Mutating the current user's Known Folder is safe only on an isolated CI runner.
+        if (!OperatingSystem.IsWindows() ||
+            !string.Equals(Environment.GetEnvironmentVariable("SENTINEL_TEST_ALLOW_KNOWN_FOLDER_MUTATION"), "1", StringComparison.Ordinal))
+            return;
+
+        const string valueName = "{374DE290-123F-4565-9164-39C4925E467B}";
+        const string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
+        var redirected = Path.Combine(Path.GetTempPath(), "Sentinel Downloads Redirect " + Guid.NewGuid().ToString("N"));
+        using var key = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Default).CreateSubKey(keyPath, writable: true)
+            ?? throw new InvalidOperationException("Could not open the current user's Known Folder registry key.");
+        var previous = key.GetValue(valueName, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+        var hadPreviousValue = key.GetValueNames().Contains(valueName, StringComparer.OrdinalIgnoreCase);
+        var previousKind = hadPreviousValue ? key.GetValueKind(valueName) : RegistryValueKind.None;
+
+        try
+        {
+            Directory.CreateDirectory(redirected);
+            key.SetValue(valueName, redirected, RegistryValueKind.ExpandString);
+            key.Flush();
+
+            var actual = Path.GetFullPath(DownloadedFileMonitor.GetKnownDownloadsDirectory());
+            Assert.Equal(Path.GetFullPath(redirected).TrimEnd(Path.DirectorySeparatorChar),
+                actual.TrimEnd(Path.DirectorySeparatorChar), ignoreCase: true);
+        }
+        finally
+        {
+            if (hadPreviousValue && previous is not null)
+                key.SetValue(valueName, previous, previousKind);
+            else
+                key.DeleteValue(valueName, throwOnMissingValue: false);
+            key.Flush();
+            if (Directory.Exists(redirected)) Directory.Delete(redirected, recursive: true);
+        }
     }
 
     [Fact]
