@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { lifecycleLogDirectory } = require('../electron/lifecycle-log-path.cjs');
+const { isolatedElectronPaths, lifecycleLogDirectory } = require('../electron/lifecycle-log-path.cjs');
+
+test('smoke Electron profile and session data stay under the isolated root', () => {
+  assert.deepEqual(isolatedElectronPaths('C:\\Temp\\sentinel-smoke\\data'), {
+    userData: 'C:\\Temp\\sentinel-smoke\\data\\electron-user-data',
+    sessionData: 'C:\\Temp\\sentinel-smoke\\data\\electron-session-data'
+  });
+});
 
 test('smoke diagnostics stay inside the isolated test data directory', () => {
   assert.equal(lifecycleLogDirectory({

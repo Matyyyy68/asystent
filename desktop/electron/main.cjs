@@ -4,12 +4,17 @@ const { requestEnterpriseContextConsent } = require('./enterprise-context-consen
 const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-log.cjs');
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
-const { lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
+const { isolatedElectronPaths, lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 let win, tray, quitting = false;
 const smokeTest = process.argv.includes('--smoke-test');
+if (smokeTest && process.env.SENTINEL_DATA_ROOT) {
+  const isolatedPaths = isolatedElectronPaths(process.env.SENTINEL_DATA_ROOT);
+  app.setPath('userData', isolatedPaths.userData);
+  app.setPath('sessionData', isolatedPaths.sessionData);
+}
 const isAutostartEnabled = () => {
   const settings = app.getLoginItemSettings({ path: process.execPath });
   return settings.executableWillLaunchAtLogin === true &&
