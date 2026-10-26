@@ -40,10 +40,24 @@ try {
     # `resedit` dependency. `rcedit-x64.exe` is not used for the `dir` target.
     Push-Location (Join-Path $repo 'desktop')
     try {
-      npm.cmd ls --all --silent *> $null
+      $npmTreeOutput = & npm.cmd ls --all --json 2>&1
       $npmTreeExitCode = $LASTEXITCODE
     } finally { Pop-Location }
-    if ($npmTreeExitCode) { throw 'Offline npm dependency tree is incomplete or inconsistent; no install was attempted.' }
+    if ($npmTreeExitCode) {
+      Write-Host 'Offline npm dependency validation details:'
+      try {
+        $npmTreeText = $npmTreeOutput -join [Environment]::NewLine
+        $jsonStart = $npmTreeText.IndexOf('{')
+        $jsonEnd = $npmTreeText.LastIndexOf('}')
+        if ($jsonStart -lt 0 -or $jsonEnd -le $jsonStart) { throw 'npm did not return a JSON report.' }
+        $npmTreeReport = $npmTreeText.Substring($jsonStart, $jsonEnd - $jsonStart + 1) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+        if ($npmTreeReport.error.summary) { Write-Host " - $($npmTreeReport.error.summary)" }
+        else { foreach ($problem in $npmTreeReport.problems) { Write-Host " - $problem" } }
+      } catch {
+        $npmTreeOutput | Select-Object -Last 5 | ForEach-Object { Write-Host $_ }
+      }
+      throw 'Offline npm dependency tree is incomplete or inconsistent; no install was attempted.'
+    }
   }
   node scripts/check-product.cjs
   if ($LASTEXITCODE) { throw 'Product consistency check failed' }
