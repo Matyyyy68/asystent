@@ -25,7 +25,7 @@ app.whenReady().then(() => {
     if (method === 'engineStatus') return { ...engine.diagnostics(), lastFailure: readLastFailure(lifecycleLogDirectory) };
     if (method === 'autostart') {
       const loginItem = { path: process.execPath, args: ['--minimized'], name: 'Sentinel AI' };
-      app.setLoginItemSettings({ ...loginItem, openAtLogin: data.enabled === true });
+      app.setLoginItemSettings({ ...loginItem, args: ['--', ...loginItem.args], openAtLogin: data.enabled === true });
       return app.getLoginItemSettings(loginItem).openAtLogin;
     }
     if (method === 'getAutostart') return app.getLoginItemSettings({ path: process.execPath, args: ['--minimized'] }).openAtLogin;

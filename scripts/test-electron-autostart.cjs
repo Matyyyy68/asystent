@@ -16,7 +16,7 @@ async function run(app) {
   }
 
   try {
-    app.setLoginItemSettings({ ...loginItem, openAtLogin: true });
+    app.setLoginItemSettings({ ...loginItem, args: ['--', ...args], openAtLogin: true });
     changed = true;
     const enabled = app.getLoginItemSettings(loginItem);
     const entry = enabled.launchItems?.find(item => item.name === name);
