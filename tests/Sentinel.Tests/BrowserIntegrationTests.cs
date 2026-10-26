@@ -78,6 +78,20 @@ public sealed class BrowserIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void BrowserWarningCatchesInvisibleFormatCharacterInHostnameWithoutLeakingUrl()
+    {
+        const string requestUrl = "https://pay\u200Bpal.com/login";
+        var response = new UrlRequestProcessor().Process(new BrowserRequest("invisible-host-1", "analyze", requestUrl));
+
+        Assert.True(response.ShouldWarn);
+        Assert.Equal("Moderate", response.Risk);
+        Assert.Contains(response.Indicators, item => item.Id == "url.host_obfuscation");
+        var serialized = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain(requestUrl, serialized);
+        Assert.DoesNotContain("paypal.com", serialized);
+    }
+
+    [Fact]
     public void BrowserWarningMatchesExactLocalUrlFeedWithoutReturningUrlOrHost()
     {
         var url = "https://bad.example.test/login?campaign=synthetic";

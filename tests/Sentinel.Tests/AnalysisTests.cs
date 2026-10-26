@@ -76,8 +76,8 @@ public sealed class AnalysisTests
         const string url = "https://pay\u200Bpal.com/login";
         var result = Engine().Analyze(Input("", url));
 
-        Assert.Equal(RiskLevel.Low, result.Risk);
-        Assert.Contains(result.Indicators, item => item.Id == "url.host_obfuscation" && item.Weight == 2);
+        Assert.Equal(RiskLevel.Moderate, result.Risk);
+        Assert.Contains(result.Indicators, item => item.Id == "url.host_obfuscation" && item.Weight == 3);
         Assert.Contains("niewidoczny", result.Explanation, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(url, result.Explanation);
     }
@@ -88,6 +88,14 @@ public sealed class AnalysisTests
     [InlineData("https://example.test:8443/path")]
     public void HostObfuscationSignalIgnoresPathQueryUserInfoAndPort(string url) =>
         Assert.DoesNotContain(Urls().Analyze(url).Indicators, item => item.Id == "url.host_obfuscation");
+    [Fact]
+    public void ValidContextualJoinerInInternationalizedHostIsNotMarkedAsObfuscation()
+    {
+        var result = Urls().Analyze("https://\u0915\u094D\u200D\u0937.test/");
+
+        Assert.True(result.IsValid);
+        Assert.DoesNotContain(result.Indicators, item => item.Id == "url.host_obfuscation");
+    }
     [Theory]
     [InlineData("file:///tmp/a")]
     [InlineData("javascript:alert(1)")]

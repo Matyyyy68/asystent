@@ -36,7 +36,7 @@ public sealed class UrlAnalyzer(DomainNames domains)
         if (!uri.IsDefaultPort) Add("url.port", "Adres zawiera niestandardowy port.", 1);
         if (uri.UserInfo.Length > 0) Add("url.userinfo", "Adres zawiera część przed znakiem @, która może mylić co do celu.", 3);
         if (ContainsInvisibleHostCharacter(value))
-            Add("url.host_obfuscation", "Nazwa hosta zawiera niewidoczny znak sterujący lub formatujący.", 2);
+            Add("url.host_obfuscation", "Nazwa hosta zawiera niewidoczny znak sterujący lub formatujący.", 3);
         if (host.Split('.').Any(l => l.StartsWith("xn--", StringComparison.Ordinal))) Add("url.idn", "Nazwa domeny zawiera znaki IDN; sama ta cecha nie dowodzi oszustwa.", 1);
         if (host.Split('.').Any(ContainsMixedLatinGreekOrCyrillic))
             Add("url.idn_mixed_script", "Jedna etykieta domeny miesza alfabet łaciński z greckim lub cyrylicą; może to utrudniać rozpoznanie nazwy.", 1);
@@ -120,7 +120,8 @@ public sealed class UrlAnalyzer(DomainNames domains)
         foreach (var rune in hostPort.EnumerateRunes())
         {
             var category = Rune.GetUnicodeCategory(rune);
-            if (category is UnicodeCategory.Format or UnicodeCategory.Control) return true;
+            if (category == UnicodeCategory.Control ||
+                category == UnicodeCategory.Format && rune.Value is not (0x200C or 0x200D)) return true;
         }
         return false;
     }
