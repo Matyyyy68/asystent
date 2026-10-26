@@ -8,7 +8,7 @@ namespace Sentinel.Core.Analysis;
 /// <summary>Deterministic rules; untrusted content cannot invoke tools or alter the rules.</summary>
 public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
 {
-    public const string RulesVersion = "2026.10.12";
+    public const string RulesVersion = "2026.10.13";
     private const int MaximumEmbeddedUrls = 10;
     private static readonly Regex EmbeddedHttpUrl = new(
         @"\bhttps?://[^\s<>""']{1,4096}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);

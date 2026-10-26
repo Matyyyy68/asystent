@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -34,6 +35,8 @@ public sealed class UrlAnalyzer(DomainNames domains)
         if (ip) Add("url.ip", "Adres docelowy używa adresu IP zamiast nazwy domeny.", 1);
         if (!uri.IsDefaultPort) Add("url.port", "Adres zawiera niestandardowy port.", 1);
         if (uri.UserInfo.Length > 0) Add("url.userinfo", "Adres zawiera część przed znakiem @, która może mylić co do celu.", 3);
+        if (ContainsInvisibleHostCharacter(value))
+            Add("url.host_obfuscation", "Nazwa hosta zawiera niewidoczny znak sterujący lub formatujący.", 2);
         if (host.Split('.').Any(l => l.StartsWith("xn--", StringComparison.Ordinal))) Add("url.idn", "Nazwa domeny zawiera znaki IDN; sama ta cecha nie dowodzi oszustwa.", 1);
         if (host.Split('.').Any(ContainsMixedLatinGreekOrCyrillic))
             Add("url.idn_mixed_script", "Jedna etykieta domeny miesza alfabet łaciński z greckim lub cyrylicą; może to utrudniać rozpoznanie nazwy.", 1);
@@ -97,6 +100,29 @@ public sealed class UrlAnalyzer(DomainNames domains)
             else if (value is >= 0x0400 and <= 0x052F or >= 0x2DE0 and <= 0x2DFF or >= 0xA640 and <= 0xA69F) cyrillic = true;
         }
         return (latin && (greek || cyrillic)) || (greek && cyrillic);
+    }
+    private static bool ContainsInvisibleHostCharacter(string value)
+    {
+        var schemeSeparator = value.IndexOf("://", StringComparison.Ordinal);
+        if (schemeSeparator < 0) return false;
+        var authorityStart = schemeSeparator + 3;
+        var authorityEnd = value.IndexOfAny(['/','?','#'], authorityStart);
+        if (authorityEnd < 0) authorityEnd = value.Length;
+        var authority = value.AsSpan(authorityStart, authorityEnd - authorityStart);
+        var hostStart = authority.LastIndexOf('@') + 1;
+        var hostPort = authority[hostStart..];
+        if (hostPort.StartsWith("[", StringComparison.Ordinal)) return false;
+        var portSeparator = hostPort.LastIndexOf(':');
+        if (portSeparator >= 0 && portSeparator < hostPort.Length - 1 &&
+            hostPort[(portSeparator + 1)..].ToString().All(char.IsAsciiDigit))
+            hostPort = hostPort[..portSeparator];
+
+        foreach (var rune in hostPort.EnumerateRunes())
+        {
+            var category = Rune.GetUnicodeCategory(rune);
+            if (category is UnicodeCategory.Format or UnicodeCategory.Control) return true;
+        }
+        return false;
     }
     public IReadOnlyList<ThreatIndicator> Compare(NavigationSignal navigation)
     {

@@ -1,5 +1,7 @@
 # Ewaluacja deterministycznej analizy URL
 
+**Bieżące ograniczenie pomiaru (2026-10-26):** reguły `2026.10.13` dodają syntetycznie przetestowany sygnał `url.host_obfuscation` dla niewidocznych znaków formatujących w oryginalnym hoście URL. Historyczne wyniki poniżej dotyczą wcześniejszych wersji i nie mierzą tej zmiany. Nie deklarujemy wpływu na recall ani FPR bez nowego, zgodnego licencyjnie holdoutu.
+
 ## Nowy zbiór Mendeley Phishing URL v1 — zamrożone reguły (2026-10-24)
 
 Oficjalna [karta Mendeley Data](https://data.mendeley.com/datasets/3jddhy2f6s/1) podaje licencję CC BY 4.0, 149 726 URL-i, z czego 94 919 benign i 54 807 phishing, zebranych z Common Crawl `CC-MAIN-2024-33` oraz PhishTank. Pobrany ZIP miał 4 864 089 B, SHA-256 `D933B3237571184C889F45967508B4F9B0E87445843B9D00759C1D8BA259936A`; jego jedyny plik `dataset2.csv` miał 11 234 312 B, SHA-256 `FCCCE1A99282B3CD8A1FE08FA83350FE44F7AFC4C8889A6D0A94EF9C4D7897E3`. W CSV `Label=0` występuje 94 919 razy, a `Label=1` 54 807 razy, dokładnie jak liczby klas w karcie. Karta nie opisuje jawnie mapowania liczb; ewaluator przyjmuje zatem `0=benign,1=phish` jako inferencję z tych zgodnych liczebności. Zmiana mapowania odwróciłaby metryki, dlatego ich interpretacja jest warunkowa dla tej inferencji.

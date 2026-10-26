@@ -70,6 +70,24 @@ public sealed class AnalysisTests
     [InlineData("https://example.рф")] // Different scripts in separate labels are not treated as a mixed label.
     public void NonMixedIdnLabelsDoNotGetTheMixedScriptSignal(string url) =>
         Assert.DoesNotContain(Urls().Analyze(url).Indicators, item => item.Id == "url.idn_mixed_script");
+    [Fact]
+    public void InvisibleFormatCharacterInHostIsNotSilentlyNormalizedAway()
+    {
+        const string url = "https://pay\u200Bpal.com/login";
+        var result = Engine().Analyze(Input("", url));
+
+        Assert.Equal(RiskLevel.Low, result.Risk);
+        Assert.Contains(result.Indicators, item => item.Id == "url.host_obfuscation" && item.Weight == 2);
+        Assert.Contains("niewidoczny", result.Explanation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(url, result.Explanation);
+    }
+    [Theory]
+    [InlineData("https://example.test/path\u200Bsegment")]
+    [InlineData("https://example.test/?q=\u202E")]
+    [InlineData("https://us\u200Ber:pass@example.test/")]
+    [InlineData("https://example.test:8443/path")]
+    public void HostObfuscationSignalIgnoresPathQueryUserInfoAndPort(string url) =>
+        Assert.DoesNotContain(Urls().Analyze(url).Indicators, item => item.Id == "url.host_obfuscation");
     [Theory]
     [InlineData("file:///tmp/a")]
     [InlineData("javascript:alert(1)")]
@@ -123,7 +141,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", "https://paypal.com@attacker.test/login"));
         Assert.Contains(result.Indicators, item => item.Id == "url.userinfo");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.12", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.13", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("https://example.test/account/verify-and-confirm-password?continue=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
@@ -133,7 +151,7 @@ public sealed class AnalysisTests
         var result = Engine().Analyze(Input("", url));
         Assert.Contains(result.Indicators, item => item.Id == "url.auth_structure");
         Assert.True(result.Risk >= RiskLevel.Moderate);
-        Assert.Equal("2026.10.12", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.13", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -154,7 +172,7 @@ public sealed class AnalysisTests
 
         Assert.Contains(result.Indicators, item => item.Id == "url.structure_combination");
         Assert.Equal(RiskLevel.Moderate, result.Risk);
-        Assert.Equal("2026.10.12", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.13", ThreatAnalysisEngine.RulesVersion);
         Assert.DoesNotContain(url, result.Explanation);
     }
     [Theory]
@@ -198,7 +216,7 @@ public sealed class AnalysisTests
     {
         var result = Engine().Analyze(Input(text));
         Assert.Contains(result.Indicators, item => item.Id == id);
-        Assert.Equal("2026.10.12", ThreatAnalysisEngine.RulesVersion);
+        Assert.Equal("2026.10.13", ThreatAnalysisEngine.RulesVersion);
     }
     [Theory]
     [InlineData("Kurier dostarczy paczkę jutro.")]
