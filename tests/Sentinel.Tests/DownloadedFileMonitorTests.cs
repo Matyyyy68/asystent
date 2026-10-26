@@ -439,18 +439,20 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         await File.WriteAllTextAsync(candidate, benignPayload);
         await Task.Delay(TimeSpan.FromMilliseconds(900));
 
+        const int swapIterations = 160;
         var swaps = 0;
+        var random = new Random(0x5E17);
         var toggler = Task.Run(async () =>
         {
-            for (var index = 0; index < 40; index++)
+            for (var index = 0; index < swapIterations; index++)
             {
                 Directory.Move(parent, movedParent);
                 CreateJunction(parent, outside);
                 Interlocked.Increment(ref swaps);
-                await Task.Delay(TimeSpan.FromMilliseconds(3));
+                await Task.Delay(TimeSpan.FromMilliseconds(random.Next(1, 6)));
                 Directory.Delete(parent);
                 Directory.Move(movedParent, parent);
-                await Task.Delay(TimeSpan.FromMilliseconds(2));
+                await Task.Delay(TimeSpan.FromMilliseconds(random.Next(1, 6)));
             }
         });
 
@@ -465,7 +467,7 @@ public sealed class DownloadedFileMonitorTests : IDisposable
             for (var attempt = 0; attempt < 5; attempt++)
                 await monitor.CollectAsync(store, reputation);
 
-            Assert.Equal(40, swaps);
+            Assert.Equal(swapIterations, swaps);
             Assert.Empty(await store.ReadAsync());
             Assert.DoesNotContain((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files,
                 item => string.Equals(item.Key, outsideFile, StringComparison.OrdinalIgnoreCase));
