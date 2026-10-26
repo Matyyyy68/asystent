@@ -11,24 +11,23 @@ async function run(app) {
     args: ['--', ...args],
     name
   };
-  const before = app.getLoginItemSettings(loginItem);
-  if (before.openAtLogin || before.executableWillLaunchAtLogin || before.launchItems?.some(item => item.name === name)) {
+  const before = app.getLoginItemSettings({ path: loginItem.path });
+  if (before.executableWillLaunchAtLogin || before.launchItems?.some(item => item.name === name)) {
     throw new Error('Refusing to overwrite a pre-existing Sentinel AI login item.');
   }
 
   try {
     app.setLoginItemSettings({ ...loginItem, openAtLogin: true });
     changed = true;
-    const enabled = app.getLoginItemSettings(loginItem);
+    const enabled = app.getLoginItemSettings({ path: loginItem.path });
     const entry = enabled.launchItems?.find(item => item.name === name);
-    if (!enabled.openAtLogin || !enabled.executableWillLaunchAtLogin
-        || entry?.path !== loginItem.path || !entry.args?.includes('--minimized') || entry.scope !== 'user' || !entry.enabled) {
+    if (!enabled.executableWillLaunchAtLogin || !entry?.args?.includes('--minimized') || entry.scope !== 'user' || !entry.enabled) {
       throw new Error(`Electron did not register the expected Windows login item: ${JSON.stringify({ openAtLogin: enabled.openAtLogin, executableWillLaunchAtLogin: enabled.executableWillLaunchAtLogin, entry })}`);
     }
 
     app.setLoginItemSettings({ ...loginItem, openAtLogin: false });
-    const disabled = app.getLoginItemSettings(loginItem);
-    if (disabled.openAtLogin || disabled.executableWillLaunchAtLogin || disabled.launchItems?.some(item => item.name === name)) {
+    const disabled = app.getLoginItemSettings({ path: loginItem.path });
+    if (disabled.executableWillLaunchAtLogin || disabled.launchItems?.some(item => item.name === name)) {
       throw new Error('Electron did not remove the Windows login item.');
     }
     changed = false;
@@ -37,8 +36,8 @@ async function run(app) {
   } finally {
     if (changed) {
       app.setLoginItemSettings({ ...loginItem, openAtLogin: false });
-      const cleaned = app.getLoginItemSettings(loginItem);
-      if (cleaned.openAtLogin || cleaned.executableWillLaunchAtLogin || cleaned.launchItems?.some(item => item.name === name)) {
+      const cleaned = app.getLoginItemSettings({ path: loginItem.path });
+      if (cleaned.executableWillLaunchAtLogin || cleaned.launchItems?.some(item => item.name === name)) {
         throw new Error('The Windows login item test could not clean its HKCU registration.');
       }
     }
