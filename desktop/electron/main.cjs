@@ -4,6 +4,7 @@ const { requestEnterpriseContextConsent } = require('./enterprise-context-consen
 const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-log.cjs');
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
+const { lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
@@ -21,7 +22,12 @@ else {
 app.on('second-instance', () => win?.show());
 app.whenReady().then(() => {
   const executable = app.isPackaged ? path.join(process.resourcesPath, 'engine/Sentinel.Engine.exe') : path.join(__dirname, '../../artifacts/engine/Sentinel.Engine.exe');
-  const lifecycleLogDirectory = path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'Sentinel AI', 'Logs');
+  const lifecycleLogDirectory = resolveLifecycleLogDirectory({
+    smokeTest,
+    isolatedDataRoot: process.env.SENTINEL_DATA_ROOT,
+    localAppData: process.env.LOCALAPPDATA,
+    userDataPath: app.getPath('userData')
+  });
   const engine = new EngineClient(executable, { onDiagnostic: failure => recordFailure(lifecycleLogDirectory, failure) });
   engine.start();
   const call = (method, data) => engine.call(method, data);
