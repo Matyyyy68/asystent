@@ -1,3 +1,4 @@
+const path = require('node:path');
 const name = 'Sentinel AI';
 const args = ['--minimized'];
 let changed = false;
@@ -6,7 +7,7 @@ let loginItem;
 async function run(app) {
   await app.whenReady();
   loginItem = {
-    path: process.execPath,
+    path: path.join(app.getPath('temp'), 'Sentinel AI Autostart Test', 'Sentinel AI.exe'),
     args: ['--', ...args],
     name
   };
