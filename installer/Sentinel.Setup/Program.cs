@@ -862,6 +862,7 @@ internal static class Program
                 || AutoStartValueMatches(expectedRunValue, Path.Combine(root, "Sentinel AI.exe"), enabled: false))
                 throw new InvalidDataException("Weryfikacja wartości autostartu nie odróżnia prawidłowej ścieżki od braku lub błędnej wartości.");
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
+            VerifyInstallerExecutableIcon();
             SetupWizard.ValidateVisualStates();
             foreach (var resourceName in new[] { "welcome", "prepare", "configure", "installing", "complete", "error", "cancel" })
             {
@@ -1070,6 +1071,17 @@ internal static class Program
             return 1;
         }
         finally { TryDelete(root); TryDelete(data); TryDelete(testDirectory); selfTestLogPath = previousLogPath; }
+    }
+
+    private static void VerifyInstallerExecutableIcon()
+    {
+        var executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable) || !File.Exists(executable))
+            throw new InvalidDataException("Nie można ustalić ścieżki uruchomionego instalatora do weryfikacji ikony EXE.");
+        using var icon = Icon.ExtractAssociatedIcon(executable);
+        if (icon is null || icon.Handle == IntPtr.Zero)
+            throw new InvalidDataException("Plik EXE instalatora nie zawiera czytelnej ikony Sentinel AI.");
+        Log($"INSTALLER_ICON_VERIFIED executable={Path.GetFileName(executable)} size={icon.Size.Width}x{icon.Size.Height}");
     }
 
     private static void VerifySmokeDatabase(string dataDirectory, string fileName)
@@ -2412,6 +2424,7 @@ internal sealed class SetupWizard : Form
     private string lastError = string.Empty;
     private bool errorCanRetry;
     private bool repairSettingsReadFailed;
+    private bool visualAssetFailureShown;
     private readonly string? integrationTestTarget;
     private System.Windows.Forms.Timer? integrationTestTimer;
     private DateTime integrationTestStartedAt;
@@ -2450,7 +2463,15 @@ internal sealed class SetupWizard : Form
         Text = "Sentinel AI — Instalator"; ClientSize = new Size(700, 480); MinimumSize = new Size(680, 500); StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi; BackColor = Color.FromArgb(19, 28, 42); Font = new Font("Segoe UI", 10); FormBorderStyle = FormBorderStyle.Sizable; MaximizeBox = false;
         try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
+        folder.BackColor = Color.FromArgb(26, 37, 54); folder.ForeColor = Color.White; folder.BorderStyle = BorderStyle.FixedSingle;
+        foreach (var option in new[] { startMenu, desktop, start, launchAfter })
+        {
+            option.FlatStyle = FlatStyle.Flat;
+            option.FlatAppearance.BorderColor = Color.FromArgb(93, 112, 137);
+            option.FlatAppearance.CheckedBackColor = Color.FromArgb(47, 61, 80);
+        }
         next.BackColor = Color.FromArgb(238, 126, 42); next.ForeColor = Color.White; next.FlatStyle = FlatStyle.Flat; next.FlatAppearance.BorderSize = 0;
+        next.FlatAppearance.MouseOverBackColor = Color.FromArgb(255, 151, 69); next.FlatAppearance.MouseDownBackColor = Color.FromArgb(215, 104, 30);
         back.BackColor = Color.FromArgb(47, 61, 80); back.ForeColor = Color.White; back.FlatStyle = FlatStyle.Flat;
         cancel.BackColor = Color.FromArgb(47, 61, 80); cancel.ForeColor = Color.White; cancel.FlatStyle = FlatStyle.Flat;
         openLog.BackColor = Color.FromArgb(47, 61, 80); openLog.ForeColor = Color.White; openLog.FlatStyle = FlatStyle.Flat;
@@ -2780,11 +2801,27 @@ internal sealed class SetupWizard : Form
 
     private void SetIllustration(string name)
     {
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream($"installer-{name}.png");
-        if (stream is null) return;
-        using var source = Image.FromStream(stream);
-        illustration.Image?.Dispose();
-        illustration.Image = new Bitmap(source);
+        try
+        {
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream($"installer-{name}.png")
+                ?? throw new FileNotFoundException($"Brak osadzonego zasobu ilustracji: installer-{name}.png");
+            using var source = Image.FromStream(stream);
+            illustration.Image?.Dispose();
+            illustration.Image = new Bitmap(source);
+        }
+        catch (Exception exception)
+        {
+            Program.Log($"INSTALLER_RESOURCE_LOAD_FAILED resource=installer-{Program.Clean(name)}.png type={exception.GetType().Name} hresult=0x{exception.HResult:X8}");
+            illustration.Image?.Dispose();
+            illustration.Image = null;
+            next.Enabled = false;
+            status.Text = $"Nie można załadować zasobów instalatora. Zamknij instalator i pobierz plik ponownie. Log: {Program.LogPath}";
+            if (!visualAssetFailureShown)
+            {
+                visualAssetFailureShown = true;
+                MessageBox.Show(this, status.Text, "Sentinel AI — błąd instalatora", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
     }
 
     internal static void ValidateVisualStates()
@@ -2800,6 +2837,11 @@ internal sealed class SetupWizard : Form
             throw new InvalidDataException("Kreator instalatora nie może blokować aktywacji okna.");
         if (!ReferenceEquals(wizard.AcceptButton, wizard.next) || !ReferenceEquals(wizard.CancelButton, wizard.cancel))
             throw new InvalidDataException("Kreator nie udostępnia klawiaturowych przycisków Dalej i Anuluj.");
+        if (wizard.folder.BackColor != Color.FromArgb(26, 37, 54) || wizard.folder.ForeColor != Color.White
+            || wizard.folder.BorderStyle != BorderStyle.FixedSingle
+            || new[] { wizard.startMenu, wizard.desktop, wizard.start, wizard.launchAfter }.Any(option => option.FlatStyle != FlatStyle.Flat)
+            || wizard.next.FlatStyle != FlatStyle.Flat || wizard.next.FlatAppearance.BorderSize != 0)
+            throw new InvalidDataException("Kontrolki kreatora nie zachowały stylu Sentinel AI.");
         wizard.lastError = "Kontrolowany błąd testowy instalatora.";
         foreach (var page in Enum.GetValues<WizardPage>())
         {

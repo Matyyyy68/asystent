@@ -17,12 +17,29 @@ $version = ([xml](Get-Content (Join-Path $repo 'eng/ProductVersion.props'))).Pro
 $out = Join-Path $repo 'artifacts/desktop'
 $unpacked = Join-Path $out 'win-unpacked'
 $payload = Join-Path $out "Sentinel.AI.Payload.$version.zip"
+foreach ($requiredAsset in @(
+  'desktop/assets/sentinel.ico',
+  'media/illustrations/installer/welcome.png',
+  'media/illustrations/installer/prepare.png',
+  'media/illustrations/installer/configure.png',
+  'media/illustrations/installer/installing.png',
+  'media/illustrations/installer/complete.png',
+  'media/illustrations/installer/error.png',
+  'media/illustrations/installer/cancel.png'
+)) {
+  if (!(Test-Path -LiteralPath (Join-Path $repo $requiredAsset) -PathType Leaf)) {
+    throw "Wymagany zasób instalatora nie istnieje: $requiredAsset"
+  }
+}
 function Get-Sha256Hex([string]$path) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
   $stream = [System.IO.File]::OpenRead($path)
   try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '') }
   finally { $stream.Dispose(); $sha.Dispose() }
 }
+# Delete all previous package outputs only after preflight has passed. This prevents
+# a failed build from leaving a stale EXE that looks like the result of this run.
+if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 Push-Location (Join-Path $repo 'desktop')
 try {
