@@ -486,12 +486,12 @@ public sealed class DownloadedFileMonitorTests : IDisposable
                 ? Stopwatch.GetElapsedTime(soakStarted) < duration
                 : index < swapIterations)
             {
-                Directory.Move(parent, movedParent);
+                RetryTransientDirectoryMutation(() => Directory.Move(parent, movedParent));
                 CreateJunction(parent, outside);
                 Interlocked.Increment(ref swaps);
                 await Task.Delay(TimeSpan.FromMilliseconds(random.Next(1, 6)));
-                Directory.Delete(parent);
-                Directory.Move(movedParent, parent);
+                RetryTransientDirectoryMutation(() => Directory.Delete(parent));
+                RetryTransientDirectoryMutation(() => Directory.Move(movedParent, parent));
                 await Task.Delay(TimeSpan.FromMilliseconds(random.Next(1, 6)));
                 index++;
             }
@@ -619,5 +619,57 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         var error = process.StandardError.ReadToEnd();
         process.WaitForExit();
         Assert.True(process.ExitCode == 0 && Directory.Exists(path), $"Nie utworzono junction testowego. {output} {error}");
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(32)]
+    [InlineData(33)]
+    public void RetryTransientDirectoryMutationRetriesWindowsSharingConflicts(int win32Error)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var attempts = 0;
+        var retries = 0;
+        RetryTransientDirectoryMutation(() =>
+        {
+            if (Interlocked.Increment(ref attempts) == 1)
+                throw new IOException("Synthetic transient directory mutation failure.",
+                    unchecked((int)(0x80070000u | (uint)win32Error)));
+        }, () => retries++);
+        Assert.Equal(2, attempts);
+        Assert.Equal(1, retries);
+    }
+
+    [Fact]
+    public void RetryTransientDirectoryMutationDoesNotRetryOtherIoErrors()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var retries = 0;
+        var exception = Assert.Throws<IOException>(() => RetryTransientDirectoryMutation(
+            () => throw new IOException("Synthetic non-transient directory mutation failure.",
+                unchecked((int)0x80070057u)),
+            () => retries++));
+        Assert.Equal(unchecked((int)0x80070057u), exception.HResult);
+        Assert.Equal(0, retries);
+    }
+
+    private static void RetryTransientDirectoryMutation(Action mutation, Action? onRetry = null)
+    {
+        const int maximumAttempts = 100;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                mutation();
+                return;
+            }
+            catch (IOException exception) when (OperatingSystem.IsWindows()
+                && (exception.HResult & 0xFFFF) is 5 or 32 or 33
+                && attempt + 1 < maximumAttempts)
+            {
+                onRetry?.Invoke();
+                Thread.Sleep(TimeSpan.FromMilliseconds(5));
+            }
+        }
     }
 }
