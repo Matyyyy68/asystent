@@ -1,8 +1,8 @@
 # Biblioteka ilustracji Sentinel AI
 
-Zestaw zawiera 63 oryginalne ilustracje w spójnym, płaskim stylu kreskówkowym: proste kształty, zaokrąglone granatowe kontury i oszczędne akcenty niebieskie, pomarańczowe oraz zielone. Pliki nie zawierają napisów ani plansz tła.
+Zestaw zawiera 103 ilustracje: 63 wcześniejsze oraz 40 nowych, unikalnych konceptów dodanych w ramach redesignu. Wspólny kierunek to płaski, minimalistyczny styl kreskówkowy z prostymi kształtami, zaokrąglonymi granatowymi konturami i oszczędnymi akcentami niebieskimi, pomarańczowymi oraz zielonymi. Pliki nie zawierają napisów ani plansz tła.
 
-Wszystkie pozycje sprawdzono automatycznie jako 8-bitowe PNG RGBA: kanał alfa zawiera w pełni przezroczyste piksele, a SHA-256 zdekodowanego obrazu nie powtarza się między plikami. Każdy plik ma wymiar 512 × 341 lub 512 × 342 px. Test: `node scripts/test-illustrations.mjs`.
+Wszystkie pozycje sprawdzono automatycznie jako 8-bitowe PNG RGBA: kanał alfa zawiera w pełni przezroczyste piksele, a SHA-256 zdekodowanego obrazu nie powtarza się między plikami. Każdy plik ma wymiar 512 × 341 lub 512 × 342 px. Test: `node scripts/test-illustrations.mjs`. Podglądy wszystkich ilustracji na jasnym i ciemnym tle tworzy `./scripts/preview-illustrations.ps1`; `-NewOnly` ogranicza podgląd do 40 nowych zasobów. Podglądy trafiają do ignorowanego przez Git katalogu `artifacts/illustration-previews/`.
 
 ## Katalog
 
@@ -78,6 +78,57 @@ Kolumna „Przeznaczenie” wskazuje odpowiedni obszar produktu, nie oznacza uż
 
 - **Strona:** `people/analyst-investigate.png` w sekcji głównej; `phishing/warning-email.png`, `ai/knowledge-cards.png` i `infrastructure/trusted-network.png` w kartach funkcji; `security/data-safe.png` przy prywatności; `installer/welcome.png` przy pobieraniu.
 - **Aplikacja Windows:** `states/initial-setup.png` w pierwszej konfiguracji, `states/connection-lost.png` przy niedostępnym silniku, `states/empty-threats.png` przy pustej historii wykryć oraz `ai/local-model.png` w sekcji o niepodłączonym providerze.
-- **Instalator Windows:** siedem plików (powitanie, przygotowanie, konfiguracja, instalowanie, zakończenie, błąd i anulowanie) jest osadzonych w samym pliku instalatora i dobieranych do stanu kreatora.
+- **Instalator Windows:** osiem plików (powitanie, przygotowanie, konfiguracja, instalowanie, zakończenie, błąd, kontrola systemu i rollback) jest osadzonych w samym pliku instalatora i dobieranych do stanu kreatora. `installer/cancel.png` pozostaje w bibliotece do innych zastosowań.
 
-Pozostałe grafiki są przygotowane do zastosowania w odpowiednich ekranach pomocy, stanach aplikacji i kolejnych sekcjach witryny. Przegląd wizualny wykonano na podglądach jasnym i ciemnym; nie znaleziono powtórzeń koncepcyjnych. Arkusze podglądu pozostają poza repozytorium, by nie dublować 63 plików w Git.
+Pozostałe grafiki są przygotowane do zastosowania w odpowiednich ekranach pomocy, stanach aplikacji i kolejnych sekcjach witryny. Nowe koncepty wyszczególniono poniżej. Zestawy podglądowe jasnego i ciemnego tła są generowane do `artifacts/illustration-previews/` i nie wchodzą do paczki produktu.
+
+## 40 nowych ilustracji
+
+| Plik | Zastosowanie | Format i wymiary | Alfa | Przeznaczenie |
+|---|---|---|---|---|
+| `security/permission-gate.png` | Bramka uprawnień oczekuje na klucz zgody. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `security/backup-orbit.png` | Oddzielne nośniki kopii zapasowej. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `security/privacy-curtain.png` | Fizyczna kontrola kamery i mikrofonu. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `security/patch-puzzle.png` | Aktualizacja zamyka lukę w ochronie. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `security/password-vault.png` | Klucze dostępu przechowywane w sejfie. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `security/identity-check.png` | Karta tożsamości sprawdzana lupą. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `security/secure-wipe.png` | Bezpieczne niszczenie arkuszy danych. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/qr-decoy.png` | Kod QR jako podejrzana przynęta. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/voice-spoof.png` | Maska ukryta w fali rozmowy głosowej. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/fake-invoice.png` | Fałszywa faktura ze sprzecznymi detalami. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/delivery-scam.png` | Przynęta w fałszywym powiadomieniu dostawy. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/domain-mismatch.png` | Lupa ujawnia różnicę w podobnych domenach. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/calendar-bait.png` | Podejrzane zaproszenie kalendarza. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `phishing/credential-trap.png` | Pułapka próbuje przejąć klucz dostępu. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/behavior-baseline.png` | Pojedyncze odchylenie od typowego zachowania. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/signal-triage.png` | Sygnały trafiają do różnych poziomów ważności. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/explainable-decision.png` | Robot wskazuje dowody swojej decyzji. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/model-sandbox.png` | Model działa w odizolowanej kapsule. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/federated-nodes.png` | Lokalne węzły dzielą się modelem, nie danymi. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/false-positive-filter.png` | Filtr oddziela szum od sygnału. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `ai/risk-timeline.png` | Oś czasu z jednym podejrzanym zdarzeniem. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `people/secure-handoff.png` | Dwie osoby przekazują zapieczętowany pakiet. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `people/remote-worker.png` | Pracownik korzysta z bezpiecznego laptopa. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `people/accessibility-review.png` | Test dostępności z użyciem lupy i kontrastu. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `people/incident-coordination.png` | Zespół dzieli się zadaniami w incydencie. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `people/password-coach.png` | Użytkowniczka wybiera mocniejszy klucz. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `people/quiet-focus.png` | Skupiona praca przy wyciszonym powiadomieniu. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `infrastructure/zero-trust-gateway.png` | Brama sprawdza urządzenia przed dostępem. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `infrastructure/segmented-network.png` | Sieć podzielona na kontrolowane segmenty. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `infrastructure/backup-restore.png` | Dane wracają z odłączonego nośnika. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `infrastructure/key-rotation.png` | Wymiana klucza dostępu. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `infrastructure/isolated-device.png` | Odłączone urządzenie poza siecią. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `infrastructure/secure-api-bridge.png` | Kontrolowany most łączy dwa systemy. | PNG RGBA · 512x341 | Tak | WWW · aplikacja |
+| `states/scan-paused.png` | Skanowanie wstrzymane w bezpiecznym stanie. | PNG RGBA · 512x341 | Tak | Aplikacja Windows |
+| `states/action-required.png` | Karta oczekuje na decyzję użytkownika. | PNG RGBA · 512x341 | Tak | Aplikacja Windows |
+| `states/sync-complete.png` | Synchronizacja urządzeń zakończona. | PNG RGBA · 512x341 | Tak | Aplikacja Windows |
+| `states/permission-needed.png` | Urządzenia oczekują na świadomą zgodę. | PNG RGBA · 512x341 | Tak | Aplikacja Windows |
+| `states/report-exported.png` | Raport zapisany z potwierdzeniem. | PNG RGBA · 512x341 | Tak | Aplikacja Windows |
+| `installer/system-check.png` | Instalator sprawdza wymagania systemowe. | PNG RGBA · 512x341 | Tak | Instalator Windows · strona WWW |
+| `installer/rollback-ready.png` | Bezpieczne cofnięcie nieukończonej instalacji. | PNG RGBA · 512x341 | Tak | Instalator Windows · strona WWW |
+
+## Nowe użycia w interfejsie
+
+- **Strona:** `phishing/credential-trap.png` ilustruje ryzyko przejęcia danych logowania; `phishing/domain-mismatch.png` obrazuje sprawdzanie domen.
+- **Aplikacja Windows:** `states/permission-needed.png` uzupełnia ekran pierwszej konfiguracji, który prosi użytkownika o świadome ustawienie obserwacji.
+- **Instalator Windows:** `installer/system-check.png` pojawia się na etapie weryfikacji; `installer/rollback-ready.png` przy kontrolowanym cofnięciu anulowanej instalacji.

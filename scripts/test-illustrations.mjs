@@ -6,15 +6,31 @@ import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../media/illustrations');
+const repo = path.resolve(root, '../..');
 const files = fs.readdirSync(root, { recursive: true })
   .filter(file => typeof file === 'string' && file.endsWith('.png'))
   .map(file => path.join(root, file)).sort();
-assert.equal(files.length, 63, `Expected 63 distinct illustration files; found ${files.length}`);
-const installerProject = fs.readFileSync(path.resolve(root, '../../installer/Sentinel.Setup/Sentinel.Setup.csproj'), 'utf8');
-for (const name of ['welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel']) {
+assert.ok(files.length >= 103, `Expected the original library plus at least 40 new illustration files; found ${files.length}`);
+const newPlan = fs.readFileSync(path.join(root, 'NEW_ASSETS_PLAN.md'), 'utf8');
+const newAssetPaths = [...newPlan.matchAll(/^\d+\. `([^`]+\.png)`/gm)].map(([, asset]) => path.join(root, asset));
+assert.equal(newAssetPaths.length, 40, `Expected a documented plan for 40 new illustrations; found ${newAssetPaths.length}`);
+for (const file of newAssetPaths) assert.ok(fs.existsSync(file), `Planned illustration is missing: ${file}`);
+const installerProjectPath = path.join(repo, 'installer/Sentinel.Setup/Sentinel.Setup.csproj');
+const installerProject = fs.readFileSync(installerProjectPath, 'utf8');
+for (const name of ['welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'system-check', 'rollback-ready']) {
   assert.ok(installerProject.includes(`LogicalName="installer-${name}.png"`), `Installer is missing embedded ${name} illustration`);
   assert.ok(fs.existsSync(path.join(root, 'installer', `${name}.png`)), `Installer illustration not found: ${name}`);
 }
+assert.ok(installerProject.includes('<ApplicationIcon>../../desktop/assets/sentinel.ico</ApplicationIcon>'), 'Installer project must embed the Sentinel AI EXE icon');
+assert.ok(fs.existsSync(path.join(repo, 'desktop/assets/sentinel.ico')), 'Sentinel AI icon source is missing');
+const website = fs.readFileSync(path.join(repo, 'website/index.html'), 'utf8');
+assert.ok(website.includes('./media/illustrations/phishing/credential-trap.png'), 'Website does not use its new phishing illustration');
+assert.ok(website.includes('./media/illustrations/phishing/domain-mismatch.png'), 'Website does not use its new domain illustration');
+const desktop = fs.readFileSync(path.join(repo, 'desktop/src/main.tsx'), 'utf8');
+assert.ok(desktop.includes('name="permission-needed"'), 'Desktop onboarding does not use its new permission illustration');
+const installerSource = fs.readFileSync(path.join(repo, 'installer/Sentinel.Setup/Program.cs'), 'utf8');
+assert.ok(installerSource.includes('WizardPage.Verify => "system-check"'), 'Installer verification page does not use its new illustration');
+assert.ok(installerSource.includes('=> "rollback-ready"'), 'Installer rollback page does not use its new illustration');
 
 function decodePng(file) {
   const bytes = fs.readFileSync(file);
@@ -70,4 +86,4 @@ for (const file of files) {
   assert.ok(!hashes.has(hash), `${file}: exact duplicate of ${hashes.get(hash)}`);
   hashes.set(hash, file);
 }
-console.log(`PASS: ${files.length} unique RGBA PNG illustrations; real alpha, expected dimensions, and seven installer resources verified.`);
+console.log(`PASS: ${files.length} unique RGBA PNG illustrations; real alpha, expected dimensions, and eight installer resources verified.`);

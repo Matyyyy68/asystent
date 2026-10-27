@@ -35,6 +35,9 @@ const browserConfig = browsers[browserName];
 if (!browserConfig) throw new Error('Choose chrome or edge as the browser argument.');
 const registryKey = 'HKCU\\' + browserConfig.registryPath + hostName;
 const expectedExtensionId = 'nakmencmekkefmcddpihiiohjgabfemg';
+const analysisEngine = fs.readFileSync(path.resolve(__dirname, '../src/Sentinel.Core/Analysis/ThreatAnalysisEngine.cs'), 'utf8');
+const expectedRulesVersion = analysisEngine.match(/public const string RulesVersion = "([^"]+)";/)?.[1];
+if (!expectedRulesVersion) throw new Error('Could not read the active production rules version from ThreatAnalysisEngine.');
 const timeoutMs = 30_000;
 
 if (!allowVisibleBrowser && !allowHeadlessBrowser) {
@@ -350,7 +353,7 @@ async function main() {
       try { observed = JSON.parse(value); } catch {}
       if (observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`) &&
           observed.text.includes('Domena przypomina znaną markę') &&
-          observed.text.includes('reguły 2026.10.12')) break;
+          observed.text.includes(`reguły ${expectedRulesVersion}`)) break;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
     if (!observed?.href?.startsWith(`chrome-extension://${extensionId}/warning.html`)) {
@@ -359,7 +362,7 @@ async function main() {
     }
     if (!observed.text.includes('Sprawdź ten adres przed kontynuowaniem') ||
         !observed.text.includes('Domena przypomina znaną markę') ||
-        !observed.text.includes('reguły 2026.10.12')) {
+        !observed.text.includes(`reguły ${expectedRulesVersion}`)) {
       throw new Error(`The warning page did not render the expected production rule and indicator. Page text: ${observed.text}`);
     }
     if (observed.text.includes('paypal-login.test') || observed.text.includes(fixtureUrl)) {

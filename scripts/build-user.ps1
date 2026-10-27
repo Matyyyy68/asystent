@@ -95,8 +95,8 @@ try {
   if ($LASTEXITCODE) { throw 'Installed npm license metadata audit tests failed' }
   node --test scripts/research/phreshphish/network-opt-in.test.mjs
   if ($LASTEXITCODE) { throw 'Research extractor network opt-in tests failed' }
-  # Each publish writes to the shared engine output directory. Start from a clean
-  # directory so files removed from a project cannot leak into a release payload.
+  # Both self-contained engine publishes write here; remove stale files first so
+  # artifacts removed from a project cannot survive into the packaged release.
   $engineOutput = Join-Path $repo 'artifacts/engine'
   if (Test-Path -LiteralPath $engineOutput) { Remove-Item -LiteralPath $engineOutput -Recurse -Force }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {

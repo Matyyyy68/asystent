@@ -25,6 +25,7 @@
     <EmbeddedResource Include="../../media/illustrations/installer/installing.png" LogicalName="installer-installing.png" />
     <EmbeddedResource Include="../../media/illustrations/installer/complete.png" LogicalName="installer-complete.png" />
     <EmbeddedResource Include="../../media/illustrations/installer/error.png" LogicalName="installer-error.png" />
-    <EmbeddedResource Include="../../media/illustrations/installer/cancel.png" LogicalName="installer-cancel.png" />
+    <EmbeddedResource Include="../../media/illustrations/installer/system-check.png" LogicalName="installer-system-check.png" />
+    <EmbeddedResource Include="../../media/illustrations/installer/rollback-ready.png" LogicalName="installer-rollback-ready.png" />
   </ItemGroup>
 </Project>

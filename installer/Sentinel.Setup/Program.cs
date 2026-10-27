@@ -864,7 +864,7 @@ internal static class Program
             if (!VerifyPayload(showErrors: false)) throw new InvalidDataException("Nieprawidłowy pakiet instalacyjny.");
             VerifyInstallerExecutableIcon();
             SetupWizard.ValidateVisualStates();
-            foreach (var resourceName in new[] { "welcome", "prepare", "configure", "installing", "complete", "error", "cancel" })
+            foreach (var resourceName in new[] { "welcome", "prepare", "configure", "installing", "complete", "error", "system-check", "rollback-ready" })
             {
                 using var illustration = Assembly.GetExecutingAssembly().GetManifestResourceStream($"installer-{resourceName}.png");
                 if (illustration is null || illustration.Length == 0)
@@ -2761,9 +2761,9 @@ internal sealed class SetupWizard : Form
             WizardPage.Options or WizardPage.Summary => "configure",
             WizardPage.Location => "prepare",
             WizardPage.Installing => progress.Value < 10 ? "prepare" : "installing",
-            WizardPage.Verify => "configure",
+            WizardPage.Verify => "system-check",
             WizardPage.Complete => "complete",
-            WizardPage.Error when lastError.Contains("anulowana", StringComparison.OrdinalIgnoreCase) => "cancel",
+            WizardPage.Error when lastError.Contains("anulowana", StringComparison.OrdinalIgnoreCase) => "rollback-ready",
             _ => "error"
         });
         if (showLocation) RefreshSpaceInfo();

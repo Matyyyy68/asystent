@@ -1,29 +1,25 @@
-# Architektura instalatora Sentinel AI
+# Architektura instalatora Windows
 
-## Dwie osobne warstwy
+## Dwie warstwy produktu
 
-Windowsowy instalator jest natywną aplikacją WinForms w `installer/Sentinel.Setup`. Nie korzysta z Electron, WebView2, przeglądarki ani serwera Vite. Interfejs kreatora i jego kod są skompilowane do jednego pliku EXE. Ilustracje ekranów są osadzonymi zasobami assembly, a nie plikami pobieranymi obok instalatora.
+Windowsowy instalator jest natywną aplikacją WinForms; zainstalowany Sentinel AI używa osobnego frontendu React/Vite uruchamianego w spakowanym Electronie. To różne interfejsy i nie są piksel-w-piksel identyczne. Sam instalator ma spójny własny styl, jednak Windows nadal wpływa na natywne kontrolki, czcionki i skalę DPI. Różnica w całym kreatorze wymaga najpierw sprawdzenia, czy na obu komputerach uruchomiono ten sam EXE (SHA-256).
 
-Zainstalowany produkt ma osobny interfejs: produkcyjny frontend React/Vite działa w spakowanym Electronie. `installer/build-installer.ps1` buduje frontend, przygotowuje produkcyjny katalog Electron `win-unpacked`, pakuje jego zawartość do ZIP i osadza ZIP w instalatorze jako `payload.zip`. Zależności npm i runtime Chromium/Electron są częścią tego payloadu. Silniki .NET są publikowane jako samodzielne aplikacje dla Windows x64. Użytkownik nie potrzebuje Node.js, npm, repozytorium ani osobnej instalacji .NET lub WebView2.
+## Granice pakietu
 
-## Przyczyna i zachowanie UI
+- Kreator jest natywną aplikacją WinForms w `installer/Sentinel.Setup/Program.cs`. Interfejs nie ładuje HTML, CSS, JavaScriptu, Node.js, Codexa ani plików z katalogu tymczasowego.
+- `installer/Sentinel.Setup/Sentinel.Setup.csproj` publikuje `win-x64` jako aplikację samodzielną i jednoplikową (`SelfContained`, `PublishSingleFile`). Wymagany runtime .NET oraz kod kreatora trafiają do EXE.
+- `installer/build-installer.ps1` buduje aplikację desktopową, tworzy z jej kompletnego katalogu ZIP, a następnie osadza ZIP jako `payload.zip` w kreatorze. Osadza też ilustracje stron kreatora jako zasoby assembly. Nie są wymagane dodatkowe pliki obok instalatora.
+- Ikona pliku EXE pochodzi z `desktop/assets/sentinel.ico`, wskazanej w `ApplicationIcon`. Kreator odczytuje ikonę z uruchomionego EXE.
+- Końcowy plik to `artifacts/desktop/Sentinel.AI.Setup.<wersja>.exe`; obok powstaje plik `.sha256`.
 
-Źródłem różnic między środowiskami jest architektura kreatora: to UI WinForms, a nie ten sam frontend webowy co w aplikacji. WinForms korzysta z natywnych kontrolek Windows, więc wygląd pól, checkboxów, czcionek i ich skalowanie zależą częściowo od wersji Windows, motywu oraz DPI. Aplikacja zainstalowana używa zaś własnego frontendu HTML/CSS w Electronie. Obie warstwy nie mogą wyglądać identycznie piksel w piksel, bo są innymi technologiami.
+## Co może się różnić między komputerami
 
-Kreator ustawia własne kolory, typografię i płaskie przyciski, używa `AutoScaleMode.Dpi`, a projekt jawnie deklaruje `PerMonitorV2`. Okno jest skalowalne i ma minimalny rozmiar. Test kreatora przechodzi po ekranach, sprawdza ilustracje, nawigację klawiaturą, pola i bezpieczny fokus. Test nie zastępuje wizualnej kontroli na różnych wersjach Windows i DPI.
+Pakiet zawiera ten sam interfejs i zasoby, ale system Windows nadal wpływa na skalę i rasteryzację tekstu oraz natywnych kontrolek. Kreator używa `Segoe UI` i `AutoScaleMode.Dpi`, dlatego rozmiar fizyczny elementów może różnić się przy ustawieniu innego skalowania ekranu. Pixel-perfect identyczność na każdym DPI i wydaniu Windows nie jest obietnicą WinForms.
 
-## Zasoby i ścieżki
+Jeżeli inne urządzenie pokazuje zupełnie inny, systemowy interfejs, w pierwszej kolejności należy porównać SHA-256 i wersję uruchomionego EXE. Dla tej implementacji „brak styli WWW” nie jest możliwy, bo kreator nie zależy od warstwy webowej.
 
-Build sprawdza obecność oficjalnej ikony oraz siedmiu ilustracji wymaganych kreatorem przed wyczyszczeniem starego wyniku. Ilustracje są dołączane jako zasoby assembly o stabilnych nazwach `installer-<nazwa>.png`. Payload jest dołączany jako zasób `payload.zip`; jego SHA-256 jest wpisany do metadanych assembly i sprawdzany przed instalacją. Zawartość rozpakowuje się do katalogu wybranego przez użytkownika; ścieżki są traktowane jako ścieżki Windows, w tym zawierające spacje i polskie znaki.
+## Zasoby kreatora
 
-Log diagnostyczny instalatora znajduje się w `%LOCALAPPDATA%\Sentinel AI\Logs\installer.log`. Zawiera informacje o etapach, błędach i brakujących zasobach bez haseł ani tokenów. Jeśli nie uda się załadować ilustracji, kreator zapisuje diagnostykę, pokazuje komunikat z lokalizacją logu i blokuje kontynuację. Kreator udostępnia przycisk „Otwórz log”.
+Ilustracje stron kreatora są kompilowane jako `EmbeddedResource`: `welcome`, `prepare`, `configure`, `installing`, `complete`, `error`, `system-check` i `rollback-ready`. Brak lub uszkodzenie zasobu zapisuje diagnostykę i blokuje przejście dalej zamiast pokazywać niekompletny interfejs. `--self-test` sprawdza wszystkie zasoby oraz ikonę w opublikowanym pliku.
 
-## Ikona pliku EXE
-
-Źródłem ikony jest `desktop/assets/sentinel.ico`. Zawiera obrazy 16, 24, 32, 48, 64, 128 i 256 px. `Sentinel.Setup.csproj` przypisuje ją przez `<ApplicationIcon>`, co osadza zasób ikony w pliku wykonywalnym; nie jest to jedynie obraz w oknie ani ikona skrótu. `--self-test` odczytuje ikonę z uruchomionego EXE. Windows CI uruchamia ten test na zbudowanym pliku. Po zbudowaniu warto dodatkowo skopiować EXE w Eksploratorze do nowego katalogu i sprawdzić ikonę przy wyłączonym widoku miniaturek/cache.
-
-## Testy i ograniczenia
-
-`installer/build-installer.ps1` usuwa poprzedni `artifacts/desktop` po sprawdzeniu wymaganych lokalnych plików i przed rozpoczęciem kompilacji. `scripts/build-user.ps1` czyści również wspólny `artifacts/engine` przed publikacją obu silników. Dzięki temu brak pliku wynikowego oznacza nieudany build zamiast pozostawienia EXE ze starego przebiegu.
-
-Automatyczne testy zawartości i zachowania opisuje [INSTALLER_TESTING.md](INSTALLER_TESTING.md); dokładne komendy budowania są w [INSTALLER_RELEASE.md](INSTALLER_RELEASE.md). Linux nie może potwierdzić wyglądu WinForms, integracji z Eksploratorem, UAC ani instalacji na czystym Windows. Do takich wniosków wymagany jest wynik Windows CI i ręczna walidacja z `USER-VALIDATION.md`.
+Build sprawdza źródłowe pliki ikony i ilustracji przed usunięciem poprzednich wyników. Odrzuca niekompletną bibliotekę, a `scripts/build-user.ps1` czyści współdzielony katalog silników przed publikacją obu programów, aby pozostałości poprzedniego buildu nie trafiały do instalatora.

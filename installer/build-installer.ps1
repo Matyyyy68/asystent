@@ -25,21 +25,22 @@ foreach ($requiredAsset in @(
   'media/illustrations/installer/installing.png',
   'media/illustrations/installer/complete.png',
   'media/illustrations/installer/error.png',
-  'media/illustrations/installer/cancel.png'
+  'media/illustrations/installer/system-check.png',
+  'media/illustrations/installer/rollback-ready.png'
 )) {
   if (!(Test-Path -LiteralPath (Join-Path $repo $requiredAsset) -PathType Leaf)) {
     throw "Wymagany zasób instalatora nie istnieje: $requiredAsset"
   }
 }
+# Remove previous outputs only after all source assets are present. A failed build
+# must not leave an old installer that appears to be the result of this run.
+if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
 function Get-Sha256Hex([string]$path) {
   $sha = [System.Security.Cryptography.SHA256]::Create()
   $stream = [System.IO.File]::OpenRead($path)
   try { return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '') }
   finally { $stream.Dispose(); $sha.Dispose() }
 }
-# Delete all previous package outputs only after preflight has passed. This prevents
-# a failed build from leaving a stale EXE that looks like the result of this run.
-if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 Push-Location (Join-Path $repo 'desktop')
 try {
@@ -50,9 +51,18 @@ try {
   if ($LASTEXITCODE) { throw 'Generating npm third-party notices failed.' }
   pwsh -NoProfile -File ../scripts/build-nuget-third-party-notices.ps1
   if ($LASTEXITCODE) { throw 'Generating NuGet and .NET third-party notices failed.' }
-  foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel')) {
+  foreach ($asset in @('welcome', 'prepare', 'configure', 'installing', 'complete', 'error', 'cancel', 'system-check', 'rollback-ready')) {
     if (!(Test-Path (Join-Path $repo "desktop/dist/media/illustrations/installer/$asset.png"))) {
       throw "Brak ilustracji instalatora w paczce aplikacji: $asset.png"
+    }
+  }
+  $illustrationSource = Join-Path $repo 'media/illustrations'
+  $illustrations = @(Get-ChildItem -LiteralPath $illustrationSource -Recurse -Filter *.png)
+  if ($illustrations.Count -lt 103) { throw "Biblioteka ilustracji jest niekompletna: znaleziono $($illustrations.Count), oczekiwano co najmniej 103 plików." }
+  foreach ($illustrationFile in $illustrations) {
+    $relativeIllustration = [IO.Path]::GetRelativePath($illustrationSource, $illustrationFile.FullName)
+    if (!(Test-Path -LiteralPath (Join-Path $repo "desktop/dist/media/illustrations/$relativeIllustration") -PathType Leaf)) {
+      throw "Brak ilustracji w paczce aplikacji: $relativeIllustration"
     }
   }
   $electronBuilder = Join-Path $repo 'desktop/node_modules/.bin/electron-builder.cmd'
