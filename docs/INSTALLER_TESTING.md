@@ -18,15 +18,22 @@ Workflow `.github/workflows/ci.yml` na świeżym runnerze Windows wykonuje:
 2. test bezokienkowy instalacji, weryfikacji i usunięcia kopii tymczasowej;
 3. widoczny test stron kreatora, opcji naprawy i przepływu instalacji/deinstalacji;
 4. test E2E rozszerzenia Chrome i Edge w profilach izolowanych.
+5. przed wydaniem testuje dokładny plik z assetów: self-test, instalację/aktualizację/weryfikację/deinstalację w odizolowanym katalogu oraz widoczny przepływ kreatora na runnerze Windows.
 
 Testy GUI uruchamia runner CI, a nie komputer użytkownika. Do kontroli dostarczonego pliku porównaj sumę `Get-FileHash .\Sentinel.AI.Setup.<wersja>.exe -Algorithm SHA256` z plikiem `.sha256`.
 
-## Wyniki sprawdzone w tej zmianie
+## Wyniki sprawdzone w poprzednim wydaniu
 
 - `.NET`: 403 PASS, 2 SKIP, 0 FAIL.
 - Testy aplikacji desktopowej: 58/58 PASS.
 - Test biblioteki ilustracji, test strony i buildy produkcyjne strony/aplikacji: PASS. Buildy Vite w tym sandboxie wymagają `--configLoader runner`.
 - Kompilacja/publikacja samego projektu instalatora jako jednoplikowego `win-x64` oraz odczyt ikony z PE: PASS; nie uruchamiano EXE. Nie wykonano pełnego świeżego pipeline'u payloadu, `--self-test` ani widocznego GUI na komputerze użytkownika.
+
+## Regresja wydania 0.15.39
+
+Wydanie przenosi rekurencyjne sprawdzenie ścieżki i miejsca z GUI do pracy asynchronicznej, serializuje nawigację i zapisuje etapy. Wyniki tej wersji wpisz poniżej dopiero po zakończeniu Windows CI; wymagane są testy dokładnego artefaktu uruchomionego w jobie release. Test na runnerze CI nie jest testem na fizycznie czystym Windows bez narzędzi developerskich ani na komputerze odbiorcy.
+
+Walidacja lokalnego kodu 0.15.39: build projektu instalatora PASS, 0 ostrzeżeń i błędów; `--wizard-self-test` PASS, w tym kontrolowana blokada sprawdzania miejsca i potwierdzenie, że nawigacja oddaje sterowanie UI; desktop Node 58/58 PASS; .NET 403 PASS, 2 pominięte testy zależne od środowiska, 0 błędów; `website npm test` PASS (103 ilustracje), `website npm run lint` PASS; plik workflow release parsuje się przez lokalny `js-yaml`. Produkcyjny EXE i testy integracyjne tego samego artefaktu pozostają do sprawdzenia przez workflow tagu na hostowanym runnerze Windows.
 
 ## Ograniczenie porównania wizualnego
 

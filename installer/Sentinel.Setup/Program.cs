@@ -192,7 +192,7 @@ internal static class Program
             if (!uiFailure.Contains("type=InvalidOperationException", StringComparison.Ordinal)
                 || !uiFailure.Contains("hresult=0x", StringComparison.Ordinal))
                 throw new InvalidOperationException("UI exception diagnostic omits its type or HRESULT.");
-            Log("WIZARD_SELF_TEST_SUCCESS states=true repairMode=true settingsPreserved=true failureStopsBeforeChanges=true");
+            Log("WIZARD_SELF_TEST_SUCCESS states=true repairMode=true settingsPreserved=true failureStopsBeforeChanges=true backgroundPreflight=true");
             return 0;
         }
         catch (Exception exception)
@@ -1877,7 +1877,12 @@ internal static class Program
         try
         {
             InstallCore(target, startMenuShortcut, desktopShortcut, autoStart, progress, cancellationToken,
-                (nextStage, nextOperation) => { stage = nextStage; operation = nextOperation; }, testMode, registeredInstallOverride);
+                (nextStage, nextOperation) =>
+                {
+                    stage = nextStage;
+                    operation = nextOperation;
+                    Log($"INSTALL_STAGE stage={stage} operation={operation}");
+                }, testMode, registeredInstallOverride);
         }
         catch (OperationCanceledException)
         {
@@ -2397,6 +2402,7 @@ internal sealed class SetupWizard : Form
 {
     private enum WizardPage { Welcome, Location, Options, Summary, Installing, Verify, Complete, Error }
     private readonly bool repairMode;
+    private readonly Func<string, string> spaceSummaryProvider;
 
     private readonly Label heading = new() { AutoSize = true, Font = new Font("Segoe UI Semibold", 22), ForeColor = Color.White, Location = new Point(32, 24) };
     private readonly Label step = new() { AutoSize = true, ForeColor = Color.FromArgb(255, 166, 72), Location = new Point(34, 66) };
@@ -2419,6 +2425,9 @@ internal sealed class SetupWizard : Form
     private readonly Button openLog = new() { Text = "Otwórz log", Size = new Size(110, 38), Location = new Point(270, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
     private readonly PictureBox illustration = new() { Bounds = new Rectangle(475, 82, 180, 170), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent, Anchor = AnchorStyles.Top | AnchorStyles.Right };
     private CancellationTokenSource? installCancellation;
+    private int spaceRefreshGeneration;
+    private string spaceSummary = "Sprawdzanie dostępnego miejsca…";
+    private bool navigationRunning;
     private bool installationRunning;
     private WizardPage page = WizardPage.Welcome;
     private string lastError = string.Empty;
@@ -2432,9 +2441,11 @@ internal sealed class SetupWizard : Form
     internal bool IsRepairMode => repairMode;
 
     public SetupWizard(bool? repairModeOverride = null, (bool StartMenu, bool Desktop, bool AutoStart)? existingOptionsOverride = null,
-        Exception? repairOptionsErrorOverride = null, string? integrationTestTarget = null)
+        Exception? repairOptionsErrorOverride = null, string? integrationTestTarget = null,
+        Func<string, string>? spaceSummaryProviderOverride = null)
     {
         this.integrationTestTarget = integrationTestTarget;
+        spaceSummaryProvider = spaceSummaryProviderOverride ?? Program.GetInstallSpaceSummary;
         if (integrationTestTarget is not null)
         {
             folder.Text = integrationTestTarget;
@@ -2481,7 +2492,7 @@ internal sealed class SetupWizard : Form
         Controls.AddRange([heading, step, intro, pathLabel, folder, browse, spaceInfo, startMenu, desktop, start, launchAfter, summary, status, errorDetails, progress, illustration, back, next, cancel, openLog]);
         AcceptButton = next;
         CancelButton = cancel;
-        browse.Click += (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); RefreshSpaceInfo(); } };
+        browse.Click += async (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); await RefreshSpaceInfoAsync(); } };
         next.Click += async (_, _) => await MoveNextAsync();
         back.Click += (_, _) => MoveBack();
         openLog.Click += (_, _) => OpenLog();
@@ -2507,7 +2518,7 @@ internal sealed class SetupWizard : Form
             e.Cancel = true;
             cancel.PerformClick();
         };
-        folder.Validated += (_, _) => RefreshSpaceInfo();
+        folder.Validated += async (_, _) => await RefreshSpaceInfoAsync();
         if (integrationTestTarget is not null)
         {
             Shown += (_, _) => StartIntegrationTestDriver();
@@ -2567,32 +2578,43 @@ internal sealed class SetupWizard : Form
 
     private async Task MoveNextAsync()
     {
-        switch (page)
+        if (navigationRunning || installationRunning) return;
+        navigationRunning = true;
+        next.Enabled = false;
+        try
         {
-            case WizardPage.Welcome: ShowPage(WizardPage.Location); break;
-            case WizardPage.Location:
-                try { spaceInfo.Text = Program.GetInstallSpaceSummary(folder.Text); ShowPage(WizardPage.Options); }
-                catch (Exception ex) { spaceInfo.Text = ex.Message; spaceInfo.ForeColor = Color.FromArgb(255, 185, 185); }
-                break;
-            case WizardPage.Options: ShowPage(WizardPage.Summary); break;
-            case WizardPage.Summary: await InstallAsync(); break;
-            case WizardPage.Error:
-                if (errorCanRetry) await InstallAsync();
-                else { DialogResult = DialogResult.OK; Close(); }
-                break;
-            case WizardPage.Complete:
-                if (launchAfter.Checked)
-                {
-                    try
+            switch (page)
+            {
+                case WizardPage.Welcome: ShowPage(WizardPage.Location); break;
+                case WizardPage.Location:
+                    await RefreshSpaceInfoAsync();
+                    ShowPage(WizardPage.Options);
+                    break;
+                case WizardPage.Options: ShowPage(WizardPage.Summary); break;
+                case WizardPage.Summary: await InstallAsync(); break;
+                case WizardPage.Error:
+                    if (errorCanRetry) await InstallAsync();
+                    else { DialogResult = DialogResult.OK; Close(); }
+                    break;
+                case WizardPage.Complete:
+                    if (launchAfter.Checked)
                     {
-                        var process = Process.Start(new ProcessStartInfo(Path.Combine(folder.Text, "Sentinel AI.exe")) { UseShellExecute = true })
-                            ?? throw new IOException("Windows nie uruchomił Sentinel AI.");
-                        Program.Log($"APP_LAUNCH_STARTED pid={process.Id}");
+                        try
+                        {
+                            var process = Process.Start(new ProcessStartInfo(Path.Combine(folder.Text, "Sentinel AI.exe")) { UseShellExecute = true })
+                                ?? throw new IOException("Windows nie uruchomił Sentinel AI.");
+                            Program.Log($"APP_LAUNCH_STARTED pid={process.Id}");
+                        }
+                        catch (Exception ex) { lastError = $"Instalacja przebiegła poprawnie, ale aplikacja nie wystartowała: {ex.Message}"; Program.Log($"APP_LAUNCH_FAILED type={ex.GetType().Name} message={Program.Clean(ex.Message)}"); ShowPage(WizardPage.Error, retryable: false); return; }
                     }
-                    catch (Exception ex) { lastError = $"Instalacja przebiegła poprawnie, ale aplikacja nie wystartowała: {ex.Message}"; Program.Log($"APP_LAUNCH_FAILED type={ex.GetType().Name} message={Program.Clean(ex.Message)}"); ShowPage(WizardPage.Error, retryable: false); return; }
-                }
-                DialogResult = DialogResult.OK; Close();
-                break;
+                    DialogResult = DialogResult.OK; Close();
+                    break;
+            }
+        }
+        finally
+        {
+            navigationRunning = false;
+            if (!IsDisposed) next.Enabled = next.Visible && !installationRunning;
         }
     }
 
@@ -2616,7 +2638,8 @@ internal sealed class SetupWizard : Form
         long lastProgressUiUpdate = long.MinValue;
         try
         {
-            var selectedPath = Program.ValidateInstallSelection(folder.Text);
+            var requestedPath = folder.Text;
+            var selectedPath = await Task.Run(() => Program.ValidateInstallSelection(requestedPath), installCancellation.Token);
             await Task.Run(() => Program.Install(selectedPath, startMenu.Checked, desktop.Checked, start.Checked, (message, value) =>
             {
                 if (!Program.ShouldPublishProgressUpdate(ref lastProgressUiUpdate, Environment.TickCount64, value)) return;
@@ -2752,7 +2775,7 @@ internal sealed class SetupWizard : Form
         if (showSummary)
         {
             var path = folder.Text.Trim();
-            summary.Text = $"{(repairMode ? "Folder naprawy / aktualizacji" : "Lokalizacja")}: {path}\r\n\r\nSkrót menu Start: {(startMenu.Checked ? "tak" : "nie")}\r\nSkrót na pulpicie: {(desktop.Checked ? "tak" : "nie")}\r\nAutostart Windows: {(start.Checked ? "tak" : "nie")}\r\n{(repairMode ? "Uruchom po naprawie / aktualizacji" : "Uruchom po instalacji")}: {(launchAfter.Checked ? "tak" : "nie")}\r\n\r\n{TryGetSpaceSummary(path)}";
+            summary.Text = $"{(repairMode ? "Folder naprawy / aktualizacji" : "Lokalizacja")}: {path}\r\n\r\nSkrót menu Start: {(startMenu.Checked ? "tak" : "nie")}\r\nSkrót na pulpicie: {(desktop.Checked ? "tak" : "nie")}\r\nAutostart Windows: {(start.Checked ? "tak" : "nie")}\r\n{(repairMode ? "Uruchom po naprawie / aktualizacji" : "Uruchom po instalacji")}: {(launchAfter.Checked ? "tak" : "nie")}\r\n\r\n{spaceSummary}";
         }
         if (showError) errorDetails.Text = lastError;
         SetIllustration(target switch
@@ -2766,26 +2789,36 @@ internal sealed class SetupWizard : Form
             WizardPage.Error when lastError.Contains("anulowana", StringComparison.OrdinalIgnoreCase) => "rollback-ready",
             _ => "error"
         });
-        if (showLocation) RefreshSpaceInfo();
+        if (showLocation) _ = RefreshSpaceInfoAsync();
     }
 
-    private string TryGetSpaceSummary(string path)
+    private async Task<string> RefreshSpaceInfoAsync()
     {
-        try { return Program.GetInstallSpaceSummary(path); }
-        catch (Exception ex) { return ex.Message; }
-    }
-
-    private void RefreshSpaceInfo()
-    {
+        var requestedPath = folder.Text;
+        var generation = ++spaceRefreshGeneration;
+        spaceInfo.ForeColor = Color.FromArgb(190, 204, 222);
+        spaceInfo.Text = "Sprawdzam folder instalacji i dostępne miejsce…";
         try
         {
-            spaceInfo.ForeColor = Color.FromArgb(190, 204, 222);
-            spaceInfo.Text = Program.GetInstallSpaceSummary(folder.Text);
+            var result = await Task.Run(() => spaceSummaryProvider(requestedPath));
+            if (!IsDisposed && generation == spaceRefreshGeneration && string.Equals(folder.Text, requestedPath, StringComparison.Ordinal))
+            {
+                spaceSummary = result;
+                spaceInfo.ForeColor = Color.FromArgb(190, 204, 222);
+                spaceInfo.Text = result;
+            }
+            return result;
         }
         catch (Exception ex)
         {
-            spaceInfo.ForeColor = Color.FromArgb(255, 185, 185);
-            spaceInfo.Text = ex.Message;
+            var error = ex.Message;
+            if (!IsDisposed && generation == spaceRefreshGeneration && string.Equals(folder.Text, requestedPath, StringComparison.Ordinal))
+            {
+                spaceInfo.ForeColor = Color.FromArgb(255, 185, 185);
+                spaceInfo.Text = error;
+                spaceSummary = error;
+            }
+            return error;
         }
     }
 
@@ -2910,5 +2943,49 @@ internal sealed class SetupWizard : Form
         if (failedRepairWizard.page != WizardPage.Error || failedRepairWizard.next.Text != "Zakończ"
             || failedRepairWizard.back.Visible || !failedRepairWizard.errorDetails.Text.Contains("Nie rozpoczęto żadnych zmian", StringComparison.Ordinal))
             throw new InvalidDataException("Błąd odczytu ustawień naprawy nie blokuje bezpiecznie dalszych zmian.");
+        ValidateSpacePreflightRunsOffUiThread();
+    }
+
+    internal static void ValidateSpacePreflightRunsOffUiThread()
+    {
+        using var workStarted = new ManualResetEventSlim();
+        using var allowWorkToFinish = new ManualResetEventSlim();
+        using var wizard = new SetupWizard(repairModeOverride: false, spaceSummaryProviderOverride: _ =>
+        {
+            workStarted.Set();
+            if (!allowWorkToFinish.Wait(TimeSpan.FromSeconds(4)))
+                throw new TimeoutException("The UI thread did not release the controlled disk-space check.");
+            return "Kontrola testowa zakończona.";
+        });
+        wizard.ShowInTaskbar = false;
+        wizard.StartPosition = FormStartPosition.Manual;
+        wizard.Location = new Point(-32_000, -32_000);
+        wizard.Opacity = 0;
+        wizard.Show();
+        Application.DoEvents();
+        wizard.page = WizardPage.Location;
+        try
+        {
+            var refresh = wizard.MoveNextAsync();
+            if (!workStarted.Wait(TimeSpan.FromSeconds(2)))
+                throw new InvalidDataException("Background disk-space check did not start.");
+            if (refresh.IsCompleted)
+                throw new InvalidDataException("Location navigation blocked the UI thread during disk-space preflight.");
+            if (wizard.next.Enabled)
+                throw new InvalidDataException("Next remained enabled while location preflight was in progress.");
+            allowWorkToFinish.Set();
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (!refresh.IsCompleted && DateTime.UtcNow < deadline)
+            {
+                Application.DoEvents();
+                Thread.Sleep(5);
+            }
+            if (!refresh.IsCompleted)
+                throw new TimeoutException("Location navigation did not resume after background disk-space preflight.");
+            refresh.GetAwaiter().GetResult();
+            if (wizard.page != WizardPage.Options || wizard.spaceInfo.Text != "Kontrola testowa zakończona.")
+                throw new InvalidDataException("The background disk-space result was not applied to the wizard.");
+        }
+        finally { allowWorkToFinish.Set(); }
     }
 }

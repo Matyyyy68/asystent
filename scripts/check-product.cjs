@@ -2,6 +2,13 @@ const fs = require('node:fs'); const path = require('node:path'); const crypto =
 const root = path.resolve(__dirname, '..');
 const version = fs.readFileSync(path.join(root,'eng/ProductVersion.props'),'utf8').match(/<VersionPrefix>([^<]+)<\/VersionPrefix>/)?.[1];
 assert.match(version,/^\d+\.\d+\.\d+$/);
+for (const name of ['desktop', 'website']) {
+  const directory = path.join(root, name);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')).version, version, `${name} package version`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package-lock.json'), 'utf8')).version, version, `${name} lockfile version`);
+}
+const appSource = fs.readFileSync(path.join(root, 'desktop/src/main.tsx'), 'utf8');
+assert.ok(appSource.includes(`Sentinel AI User · ${version}`), 'visible desktop app version');
 const manifest = JSON.parse(fs.readFileSync(path.join(root,'browser-extension/manifest.json'),'utf8'));
 assert.equal(manifest.version,version); assert.equal(manifest.manifest_version,3);
 assert.equal(manifest.minimum_chrome_version,'102');

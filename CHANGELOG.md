@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.39
+- Instalator: przeniesiono sprawdzanie lokalizacji i wolnego miejsca z wątku interfejsu do zadań w tle. Usunięto synchroniczne, rekurencyjne skanowanie katalogu z ekranów lokalizacji i podsumowania; nieaktualny wynik starszego sprawdzenia nie nadpisuje nowszego. Zablokowano równoległe przejścia kreatora po wielokrotnym kliknięciu. Log zapisuje początek każdego etapu instalacji.
+- Wydanie wymaga weryfikacji dokładnego EXE w Windows CI: self-test, instalacja/aktualizacja/deinstalacja oraz widoczny przepływ kreatora przed publikacją assetów.
+
 ## Unreleased
 - Instalator: jawne DPI PerMonitorV2, spójny styl pola ścieżki, checkboxów i przycisków oraz kontrola stylu w autotestach. Brak lub błąd ilustracji zapisuje log, blokuje nawigację i wyświetla diagnostykę. EXE korzysta z ikony Sentinel AI z wariantami 16–256 px; self-test wyodrębnia ją z gotowego pliku. Build najpierw sprawdza źródłowe zasoby i czyści stare wyniki, a pipeline silników usuwa pliki z poprzednich publikacji.
 - Biblioteka ilustracji: dodano 40 nowych, koncepcyjnie różnych grafik PNG RGBA; łącznie 103 unikalne ilustracje 512 × 341/342 z prawdziwą przezroczystością. Nowe zasoby wykorzystuje strona, onboarding aplikacji i dwa stany kreatora; dodano listę koncepcji, katalog, generator podglądów na jasnym/ciemnym tle i walidację kopii do pakietu instalacyjnego. `node scripts/test-illustrations.mjs`, test witryny, buildy Vite strony i aplikacji oraz desktop 58/58 PASS.

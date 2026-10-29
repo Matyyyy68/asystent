@@ -30,6 +30,24 @@ jobs:
           if (!(Test-Path $installer)) { throw "Missing installer: $installer" }
           & $installer --self-test
           if ($LASTEXITCODE) { throw 'Installer self-test failed' }
+      - name: Test install, update and uninstall on the release artifact
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content eng/ProductVersion.props -Raw)).Project.PropertyGroup.VersionPrefix
+          $installer = Join-Path $PWD "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
+          $test = Start-Process -FilePath $installer -ArgumentList @('--integration-test') -Wait -PassThru -WindowStyle Hidden
+          if ($test.ExitCode -ne 0) { throw "Release artifact integration test failed with exit code $($test.ExitCode)." }
+      - name: Test visible installer wizard on the release artifact
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content eng/ProductVersion.props -Raw)).Project.PropertyGroup.VersionPrefix
+          $installer = Join-Path $PWD "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
+          $test = Start-Process -FilePath $installer -ArgumentList @('--wizard-integration-test') -PassThru
+          if (!$test.WaitForExit(660000)) {
+            Stop-Process -Id $test.Id -Force -ErrorAction SilentlyContinue
+            throw 'Release artifact wizard integration test exceeded its 11-minute limit.'
+          }
+          if ($test.ExitCode -ne 0) { throw "Release artifact wizard integration test failed with exit code $($test.ExitCode)." }
       - name: Publish prerelease assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -37,4 +55,12 @@ jobs:
         run: |
           $version = ([xml](Get-Content eng/ProductVersion.props)).Project.PropertyGroup.VersionPrefix
           $installer = "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
-          gh release create $env:GITHUB_REF_NAME $installer "$installer.sha256" --verify-tag --prerelease --title "Sentinel AI $version" --notes "Własny instalator Windows per-user z kontrolą integralności. Wydanie testowe; przed użyciem zapoznaj się z ograniczeniami projektu."
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          @'
+          Poprawka kreatora instalacji: sprawdzanie lokalizacji i miejsca działa w tle, a powtórne kliknięcia nie uruchamiają równoległych etapów.
+
+          Przed publikacją assety przeszły self-test oraz izolowane testy instalacji, aktualizacji, weryfikacji, deinstalacji i widocznego kreatora na runnerze Windows.
+
+          Wydanie testowe. Instalator nie jest podpisany certyfikatem Authenticode.
+          '@ | Set-Content -LiteralPath $notes -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME $installer "$installer.sha256" --verify-tag --prerelease --title "Sentinel AI $version" --notes-file $notes

@@ -26,31 +26,53 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Wait for the versioned installer assets before publishing download links
+        id: release-assets
+        shell: bash
+        run: |
+          version="$(sed -n 's/.*<VersionPrefix>\([^<]*\)<\/VersionPrefix>.*/\1/p' eng/ProductVersion.props | head -n 1)"
+          installer="https://github.com/Matyyyy68/asystent/releases/download/v${version}/Sentinel.AI.Setup.${version}.exe"
+          if [[ -n "$version" ]] && curl --fail --silent --show-error --head "$installer" >/dev/null \
+            && curl --fail --silent --show-error "${installer}.sha256" >/dev/null; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo "Skipping deployment until installer v${version} and its checksum are published."
+          fi
       - uses: actions/setup-node@v4
+        if: steps.release-assets.outputs.ready == 'true'
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: website/package-lock.json
       - uses: actions/configure-pages@v5
+        if: steps.release-assets.outputs.ready == 'true'
         id: pages
         with:
           enablement: true
       - run: npm ci
+        if: steps.release-assets.outputs.ready == 'true'
         working-directory: website
       - run: npm run lint
+        if: steps.release-assets.outputs.ready == 'true'
         working-directory: website
       - run: npm test
+        if: steps.release-assets.outputs.ready == 'true'
         working-directory: website
       - run: npm run build
+        if: steps.release-assets.outputs.ready == 'true'
         working-directory: website
         env:
           PAGES_BASE: ${{ steps.pages.outputs.base_path }}/
       - uses: actions/upload-pages-artifact@v3
+        if: steps.release-assets.outputs.ready == 'true'
         with:
           path: website/dist
       - uses: actions/deploy-pages@v4
+        if: steps.release-assets.outputs.ready == 'true'
         id: deployment
       - run: npm run check:live
+        if: steps.release-assets.outputs.ready == 'true'
         working-directory: website
         env:
           SENTINEL_LIVE_PAGE_URL: ${{ steps.deployment.outputs.page_url }}

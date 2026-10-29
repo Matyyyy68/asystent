@@ -145,19 +145,19 @@
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
           "PdfPig": "[0.1.16, )",
-          "Sentinel.Contracts": "[0.15.38, )"
+          "Sentinel.Contracts": "[0.15.39, )"
         }
       },
       "sentinel.engine": {
         "type": "Project",
         "dependencies": {
-          "Sentinel.Core": "[0.15.38, )"
+          "Sentinel.Core": "[0.15.39, )"
         }
       },
       "sentinel.urlhost": {
         "type": "Project",
         "dependencies": {
-          "Sentinel.Core": "[0.15.38, )"
+          "Sentinel.Core": "[0.15.39, )"
         }
       }
     },
