@@ -4,6 +4,7 @@ on:
     tags: ['v*.*.*']
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -64,3 +65,8 @@ jobs:
           Wydanie testowe. Instalator nie jest podpisany certyfikatem Authenticode.
           '@ | Set-Content -LiteralPath $notes -Encoding utf8
           gh release create $env:GITHUB_REF_NAME $installer "$installer.sha256" --verify-tag --prerelease --title "Sentinel AI $version" --notes-file $notes
+      - name: Deploy the website after the verified assets are public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: gh workflow run pages.yml --repo $env:GITHUB_REPOSITORY --ref main

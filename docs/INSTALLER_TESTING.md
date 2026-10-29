@@ -31,9 +31,9 @@ Testy GUI uruchamia runner CI, a nie komputer użytkownika. Do kontroli dostarcz
 
 ## Regresja wydania 0.15.39
 
-Wydanie przenosi rekurencyjne sprawdzenie ścieżki i miejsca z GUI do pracy asynchronicznej, serializuje nawigację i zapisuje etapy. Wyniki tej wersji wpisz poniżej dopiero po zakończeniu Windows CI; wymagane są testy dokładnego artefaktu uruchomionego w jobie release. Test na runnerze CI nie jest testem na fizycznie czystym Windows bez narzędzi developerskich ani na komputerze odbiorcy.
+Wydanie przenosi rekurencyjne sprawdzenie ścieżki i miejsca z GUI do pracy asynchronicznej, serializuje nawigację i zapisuje etapy. Release run [40942017352](https://github.com/Matyyyy68/asystent/actions/runs/40942017352) PASS na dokładnym artefakcie: pełny build i `--self-test`, instalacja, aktualizacja, weryfikacja, deinstalacja oraz widoczny test kreatora. Release jest prerelease. Jest to świeży hostowany runner Windows, a nie fizycznie czysty komputer odbiorcy bez narzędzi developerskich.
 
-Walidacja lokalnego kodu 0.15.39: build projektu instalatora PASS, 0 ostrzeżeń i błędów; `--wizard-self-test` PASS, w tym kontrolowana blokada sprawdzania miejsca i potwierdzenie, że nawigacja oddaje sterowanie UI; desktop Node 58/58 PASS; .NET 403 PASS, 2 pominięte testy zależne od środowiska, 0 błędów; `website npm test` PASS (103 ilustracje), `website npm run lint` PASS; plik workflow release parsuje się przez lokalny `js-yaml`. Produkcyjny EXE i testy integracyjne tego samego artefaktu pozostają do sprawdzenia przez workflow tagu na hostowanym runnerze Windows.
+Walidacja lokalnego kodu 0.15.39: build projektu instalatora PASS, 0 ostrzeżeń/błędów; `--wizard-self-test` PASS, w tym kontrolowana blokada sprawdzania miejsca i potwierdzenie, że nawigacja oddaje sterowanie UI; desktop Node 58/58 PASS; .NET 403 PASS, 2 pominięte testy zależne od środowiska, 0 błędów; `website npm test` PASS (103 ilustracje), `website npm run lint` PASS; `node scripts/check-product.cjs` oraz parsowanie workflow PASS. Release asset: `Sentinel.AI.Setup.0.15.39.exe`, 274 317 878 B, SHA-256 `894004BF4C3784917BE342A3658733C9D1383AE0DB0E9D3E522DA59B3F14A803`. Publiczny sidecar zweryfikowano względem digestu GitHub, HTTP HEAD EXE zwrócił 200. Rozszerzona walidacja całego repozytorium w workflow CI 40941791192 nadal trwa.
 
 ## Ograniczenie porównania wizualnego
 

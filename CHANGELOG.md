@@ -2,7 +2,7 @@
 
 ## 0.15.39
 - Instalator: przeniesiono sprawdzanie lokalizacji i wolnego miejsca z wątku interfejsu do zadań w tle. Usunięto synchroniczne, rekurencyjne skanowanie katalogu z ekranów lokalizacji i podsumowania; nieaktualny wynik starszego sprawdzenia nie nadpisuje nowszego. Zablokowano równoległe przejścia kreatora po wielokrotnym kliknięciu. Log zapisuje początek każdego etapu instalacji.
-- Wydanie wymaga weryfikacji dokładnego EXE w Windows CI: self-test, instalacja/aktualizacja/deinstalacja oraz widoczny przepływ kreatora przed publikacją assetów.
+- Dokładny EXE 0.15.39 przeszedł Windows release workflow 40942017352: self-test, instalację/aktualizację/weryfikację/deinstalację oraz widoczny przepływ kreatora. Opublikowany plik 274 317 878 B ma SHA-256 `894004BF4C3784917BE342A3658733C9D1383AE0DB0E9D3E522DA59B3F14A803`; publiczny plik `.sha256` zgodny, HEAD pliku EXE zwrócił HTTP 200.
 
 ## Unreleased
 - Instalator: jawne DPI PerMonitorV2, spójny styl pola ścieżki, checkboxów i przycisków oraz kontrola stylu w autotestach. Brak lub błąd ilustracji zapisuje log, blokuje nawigację i wyświetla diagnostykę. EXE korzysta z ikony Sentinel AI z wariantami 16–256 px; self-test wyodrębnia ją z gotowego pliku. Build najpierw sprawdza źródłowe zasoby i czyści stare wyniki, a pipeline silników usuwa pliki z poprzednich publikacji.
