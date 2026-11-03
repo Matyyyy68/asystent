@@ -2,6 +2,7 @@
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
 - Pozycja „Sprawdź w Sentinel AI” obsługuje wiele zaznaczonych plików (do 15): Explorer przekazuje wywołania do jednej instancji aplikacji, która łączy je, sprawdza pliki kolejno i pokazuje jeden zbiorczy wynik. Puste, opcjopodobne i nadmiernie długie ścieżki są odrzucane; wpis instalatora używa modelu `Document` i jest usuwany tylko wtedy, gdy nadal należy do Sentinel.
+- Wynik zbiorczego sprawdzania pokazuje osobno dopasowanie SHA-256 do listy użytkownika i stan Authenticode (prawidłowy, brak podpisu, niezgodny, niezaufany albo nieznany). Żaden z tych elementów sam nie jest deklaracją, że plik jest bezpieczny lub złośliwy.
 - Dodano jawną, odwracalną kwarantannę dla zdarzeń nowych plików z Downloads dopasowanych do lokalnej listy SHA-256. Użytkownik zatwierdza operację i wybiera plik; Engine ponownie liczy hash, przenosi plik bez uruchamiania, a przywrócenie weryfikuje hash i nie nadpisuje istniejącej ścieżki. Inne typy wykryć nie mogą wywołać tej akcji.
 - Zastąpiono domyślny dźwięk Windows trzema krótkimi, cichymi tonami Sentinel (informacja, ostrzeżenie, poważne ostrzeżenie), generowanymi jako lokalny PCM WAV. Aktualne sygnały agenta są klasyfikowane jako ostrzeżenia i odtwarzają ton ostrzegawczy; awaria audio nie przerywa ochrony.
 - Menu ikony zasobnika zawiera ręczne „Sprawdź aktualizacje”. Sprawdza najnowsze stabilne wydanie przez publiczne GitHub API i otwiera wyłącznie stały adres wydania repozytorium; niczego nie pobiera ani nie instaluje automatycznie.

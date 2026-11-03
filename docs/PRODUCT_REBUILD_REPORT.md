@@ -64,7 +64,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 ## 8. Menu kontekstowe
 
 - Per-user wpis „Sprawdź w Sentinel AI” obsługuje zaznaczenie do 15 plików. Explorer uruchamia komendę dla elementów zaznaczenia, a pojedyncza instancja Sentinel grupuje ścieżki, kolejno wykonuje lokalne sprawdzenie i prezentuje jeden raport zbiorczy. Duplikaty ścieżek są deduplikowane, a batch jest ograniczony do 15 plików.
-- Analiza lokalna liczy SHA-256, odczytuje Authenticode i pokazuje ograniczony komunikat. Nie uruchamia, nie usuwa ani nie blokuje pliku.
+- Analiza lokalna liczy SHA-256 i odczytuje Authenticode; komunikat pokazuje te sygnały oddzielnie dla każdego pliku. Nie uruchamia, nie usuwa ani nie blokuje pliku, a brak dopasowania lub prawidłowy podpis nie gwarantują bezpieczeństwa.
 - Instalator ustawia `MultiSelectModel=Document`, weryfikuje ten stan i przy deinstalacji usuwa go tylko wtedy, gdy wartość nadal jest własna. Microsoft opisuje model `Document` jako ograniczony do 15 elementów; widoczność menu i rzeczywista selekcja wielu plików w Explorerze na czystym Windows 10/11 nadal wymagają testu integracyjnego ([dokumentacja Microsoft](https://learn.microsoft.com/en-us/windows/win32/shell/how-to-employ-the-verb-selection-model)).
 
 ## 9. Autonomia
@@ -82,7 +82,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru, limit 3 s oczekiwania, korelację Downloads → proces po najbliższym zgodnym SHA-256 oraz warunkowy odczyt Defendera. Lokalnie: pełne .NET 447 PASS + 2 środowiskowe SKIP; desktop 83/83, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC PASS. Cmdlet Defendera zwrócił Access Denied (`0x80041003`), więc jego status jest jawnie niedostępny w tym środowisku. Pełny Windows CI najnowszego commita oczekuje.
+- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru, limit 3 s oczekiwania, korelację Downloads → proces po najbliższym zgodnym SHA-256 oraz warunkowy odczyt Defendera. Lokalnie: pełne .NET 447 PASS + 2 środowiskowe SKIP; desktop 86/86, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC PASS. Cmdlet Defendera zwrócił Access Denied (`0x80041003`), więc jego status jest jawnie niedostępny w tym środowisku. Pełny Windows CI najnowszego commita oczekuje.
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich 20 krokach: testy/build, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator i Enterprise API. Potwierdza test na izolowanym runnerze Windows, nie na komputerze użytkownika.
 - Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
 - Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.

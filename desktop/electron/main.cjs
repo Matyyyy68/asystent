@@ -7,6 +7,7 @@ const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
 const { requestedFileCheck } = require('./file-check-args.cjs');
 const { createFileCheckBatcher } = require('./file-check-batch.cjs');
+const { formatFileCheckResult } = require('./file-check-format.cjs');
 const { quarantineDownloadedFile, restoreDownloadedFile } = require('./downloaded-file-actions.cjs');
 const { isolatedElectronPaths, lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
 const path = require('node:path');
@@ -140,17 +141,18 @@ app.whenReady().then(() => {
     for (const filePath of filePaths) {
       try {
         const result = await call('file', { path: filePath });
-        results.push({ name: path.basename(filePath), matched: result.reputation?.match === true, error: null });
+        results.push({ name: path.basename(filePath), matched: result.reputation?.match === true,
+          signatureStatus: result.signature?.status, error: null });
       } catch (error) {
         results.push({ name: path.basename(filePath), matched: false, error: String(error?.message || 'Błąd silnika').slice(0, 240) });
       }
     }
     const matched = results.filter(result => result.matched).length;
     const failed = results.filter(result => result.error).length;
-    const lines = results.map(result => `${result.matched ? 'Podejrzenie' : result.error ? 'Nie sprawdzono' : 'Bez dopasowania'} — ${result.name}`);
+    const lines = results.map(formatFileCheckResult);
     const detail = results.some(result => result.matched)
       ? 'Co najmniej jeden SHA-256 pasuje do lokalnej listy. Źródło listy nie zostało niezależnie zweryfikowane; to nie jest automatyczny werdykt zagrożenia.'
-      : 'Lokalnie sprawdzono SHA-256 i podpis cyfrowy. Brak dopasowania nie potwierdza bezpieczeństwa. Sentinel nie zablokował ani nie usunął plików.';
+      : 'Lokalnie sprawdzono SHA-256 i podpis cyfrowy. Wynik podpisu nie jest gwarancją bezpieczeństwa, a brak dopasowania nie potwierdza bezpieczeństwa. Sentinel nie zablokował ani nie usunął plików.';
     await dialog.showMessageBox({ type: matched ? 'warning' : failed ? 'error' : 'info', buttons: ['OK'],
       title: 'Sentinel AI — sprawdzenie plików',
       message: `Sprawdzono ${results.length} plików${matched ? `; dopasowania: ${matched}` : ''}${failed ? `; błędy: ${failed}` : ''}.`,
