@@ -1948,6 +1948,7 @@ internal static class Program
         var agentExecutable = Path.Combine(installPath, "resources", "engine", "Sentinel.Agent.exe");
         if (!File.Exists(agentExecutable)) return false;
         if (!IsBackgroundAgentRunning(agentExecutable)) return false;
+        Log("CORE_AGENT_STOP_REQUESTED executable=" + Clean(Path.GetFileName(agentExecutable)));
         using var process = Process.Start(new ProcessStartInfo(agentExecutable)
         {
             UseShellExecute = false,
@@ -1958,13 +1959,55 @@ internal static class Program
         if (!process.WaitForExit(10_000))
         {
             try { process.Kill(entireProcessTree: true); } catch { }
+            Log("CORE_AGENT_STOP_COMMAND_TIMEOUT");
             throw new TimeoutException("Sentinel Core nie potwierdził zatrzymania; instalacja pozostaje bez zmian.");
         }
         if (process.ExitCode != 0) throw new IOException("Sentinel Core odmówił bezpiecznego zatrzymania.");
-        var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (IsBackgroundAgentRunning(agentExecutable) && DateTime.UtcNow < deadline) Thread.Sleep(100);
-        if (IsBackgroundAgentRunning(agentExecutable)) throw new TimeoutException("Sentinel Core potwierdził polecenie, ale nie zakończył działania.");
+        Log("CORE_AGENT_STOP_COMMAND_ACKNOWLEDGED");
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        var nextStatusLog = DateTime.UtcNow.AddSeconds(5);
+        var stillRunning = IsBackgroundAgentRunning(agentExecutable);
+        while (stillRunning && DateTime.UtcNow < deadline)
+        {
+            if (DateTime.UtcNow >= nextStatusLog)
+            {
+                Log("CORE_AGENT_STOP_WAIT processes=" + DescribeBackgroundAgentProcesses(agentExecutable));
+                nextStatusLog = DateTime.UtcNow.AddSeconds(5);
+            }
+            Thread.Sleep(100);
+            stillRunning = IsBackgroundAgentRunning(agentExecutable);
+        }
+        if (stillRunning)
+        {
+            var processes = DescribeBackgroundAgentProcesses(agentExecutable);
+            Log("CORE_AGENT_STOP_TIMEOUT processes=" + processes);
+            throw new TimeoutException("Sentinel Core potwierdził polecenie, ale nie zakończył działania w 30 sekund. Procesy: " + processes);
+        }
+        Log("CORE_AGENT_STOP_SUCCESS");
         return true;
+    }
+
+    private static string DescribeBackgroundAgentProcesses(string executable)
+    {
+        var expected = Path.GetFullPath(executable);
+        var descriptions = new List<string>();
+        foreach (var candidate in Process.GetProcessesByName("Sentinel.Agent"))
+        {
+            using (candidate)
+            {
+                try
+                {
+                    var path = Path.GetFullPath(candidate.MainModule?.FileName ?? string.Empty);
+                    if (string.Equals(path, expected, StringComparison.OrdinalIgnoreCase))
+                        descriptions.Add($"pid={candidate.Id},path={Clean(Path.GetFileName(path))}");
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    descriptions.Add($"pid={candidate.Id},path=unavailable");
+                }
+            }
+        }
+        return descriptions.Count == 0 ? "none" : string.Join(";", descriptions);
     }
 
     private static void StartBackgroundAgent(string installPath)
