@@ -10,6 +10,7 @@ public sealed class NotificationToneTests
     [InlineData(NotificationToneKind.Information)]
     [InlineData(NotificationToneKind.Warning)]
     [InlineData(NotificationToneKind.Critical)]
+    [InlineData(NotificationToneKind.AnalysisComplete)]
     public void CreatesValidShortMonoPcmWave(NotificationToneKind kind)
     {
         var wave = NotificationTone.CreateWave(kind);
@@ -33,6 +34,7 @@ public sealed class NotificationToneTests
     {
         Assert.NotEqual(NotificationTone.CreateWave(NotificationToneKind.Information), NotificationTone.CreateWave(NotificationToneKind.Warning));
         Assert.NotEqual(NotificationTone.CreateWave(NotificationToneKind.Warning), NotificationTone.CreateWave(NotificationToneKind.Critical));
+        Assert.NotEqual(NotificationTone.CreateWave(NotificationToneKind.Critical), NotificationTone.CreateWave(NotificationToneKind.AnalysisComplete));
         Assert.Throws<ArgumentOutOfRangeException>(() => NotificationTone.CreateWave((NotificationToneKind)99));
     }
 
@@ -45,5 +47,7 @@ public sealed class NotificationToneTests
             NotificationTonePolicy.Select([NotificationToneKind.Information, NotificationToneKind.Warning]));
         Assert.Equal(NotificationToneKind.Critical,
             NotificationTonePolicy.Select([NotificationToneKind.Warning, NotificationToneKind.Critical]));
+        Assert.Equal(NotificationToneKind.Information,
+            NotificationTonePolicy.Select([NotificationToneKind.AnalysisComplete, NotificationToneKind.Information]));
     }
 }

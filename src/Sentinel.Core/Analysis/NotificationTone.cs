@@ -6,7 +6,8 @@ public enum NotificationToneKind
 {
     Information,
     Warning,
-    Critical
+    Critical,
+    AnalysisComplete
 }
 
 public static class NotificationTonePolicy
@@ -17,8 +18,14 @@ public static class NotificationTonePolicy
         var selected = NotificationToneKind.Information;
         foreach (var tone in tones)
         {
-            if (!Enum.IsDefined(tone)) continue;
-            if (tone > selected) selected = tone;
+            var severity = tone switch
+            {
+                NotificationToneKind.Information => 0,
+                NotificationToneKind.Warning => 1,
+                NotificationToneKind.Critical => 2,
+                _ => -1
+            };
+            if (severity > (int)selected) selected = tone;
         }
         return selected;
     }
@@ -34,7 +41,8 @@ public static class NotificationTone
     [
         [(660, 75), (880, 90)],
         [(740, 110), (587, 125)],
-        [(880, 100), (740, 110), (587, 140)]
+        [(880, 100), (740, 110), (587, 140)],
+        [(523, 65), (659, 65), (784, 105)]
     ];
 
     public static byte[] CreateWave(NotificationToneKind kind)

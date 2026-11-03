@@ -696,3 +696,7 @@ Raport jawnie rozróżnia również brak zaimportowanej listy hashy od sprawdzon
 # Dźwięk powiadomienia odpowiada wadze sygnału (2026-11-03)
 
 Dopasowania do lokalnych list hashy i IP o niezweryfikowanym pochodzeniu używają tonu informacyjnego, a ostrzeżenia DNS/WSC i heurystyki pozostają ostrzegawcze. Grupowany alert wybiera najwyższą wagę; nie używa tonu krytycznego, bo Sentinel nie zablokował żadnego działania. `NotificationToneTests` 5/5 PASS; pełna .NET suite 448 PASS + 2 środowiskowe SKIP; `Sentinel.Agent` Release buduje się bez ostrzeżeń. Dźwięku na fizycznej sesji Windows nadal nie zweryfikowano.
+
+# Ton końca pierwszego sprawdzenia (2026-11-03)
+
+Dodano czwarty, odrębny lokalny ton PCM dla zakończenia analizy. Agent odtwarza go po pierwszym poprawnym cyklu monitorowania na profilu użytkownika; jeśli cykl zawiera alert, alert zachowuje pierwszeństwo. Znacznik jest zapisywany atomowo w `%LOCALAPPDATA%/Sentinel AI/State/first-analysis-completed.v1`; błąd zapisu nie przerywa działania agenta. `NotificationToneTests` 6/6 PASS; pełna .NET suite 449 PASS + 2 środowiskowe SKIP; `Sentinel.Agent` Release build 0 ostrzeżeń/błędów. Aktywna sesja fizycznego audio Windows pozostaje niezweryfikowana.

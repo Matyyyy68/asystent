@@ -139,6 +139,7 @@ internal static class Program
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
         private bool collecting;
+        private bool initialAnalysisToneHandled;
         private bool disposed;
 
         public AgentContext()
@@ -229,6 +230,7 @@ internal static class Program
         {
             if (collecting || shutdown.IsCancellationRequested) return;
             collecting = true;
+            var playAnalysisCompleteTone = false;
             try
             {
                 using var response = await engine.SendAsync(JsonSerializer.Serialize(new { id = "core-collect", version = 1, method = "collect" }), shutdown.Token);
@@ -238,6 +240,11 @@ internal static class Program
                     tray.Icon = SystemIcons.Warning;
                     alertUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
                     return;
+                }
+                if (!initialAnalysisToneHandled)
+                {
+                    initialAnalysisToneHandled = true;
+                    playAnalysisCompleteTone = TryMarkInitialAnalysisCompleted();
                 }
                 var result = response.RootElement.GetProperty("result");
                 tray.Text = "Sentinel AI — silnik działa w tle";
@@ -280,9 +287,28 @@ internal static class Program
             }
             finally
             {
+                var hadNotifications = pendingNotifications.Count != 0;
                 FlushNotifications();
+                if (playAnalysisCompleteTone && !hadNotifications)
+                    NotificationSoundPlayer.Play(NotificationToneKind.AnalysisComplete);
                 collecting = false;
             }
+        }
+
+        private static bool TryMarkInitialAnalysisCompleted()
+        {
+            var markerPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Sentinel AI", "State", "first-analysis-completed.v1");
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(markerPath)!);
+                using var marker = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+                marker.Write("completed"u8);
+                marker.Flush(flushToDisk: true);
+                return true;
+            }
+            catch (IOException) when (File.Exists(markerPath)) { return false; }
+            catch { return false; }
         }
 
         private async Task CheckWindowsSecurityCenterAsync()
