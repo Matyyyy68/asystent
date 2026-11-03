@@ -111,6 +111,7 @@ internal static class Program
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
         private bool collecting;
+        private bool disposed;
 
         public AgentContext()
         {
@@ -305,8 +306,9 @@ internal static class Program
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && !disposed)
             {
+                disposed = true;
                 AgentLog("AGENT_CONTEXT_DISPOSE_BEGIN");
                 shutdown.Cancel();
                 collector.Stop();
