@@ -34,6 +34,7 @@
 - Sieć: snapshoty TCP/UDP, bez treści ruchu.
 - DNS: lokalny cache `ipconfig /displaydns`; dziennik DNS Operational tylko jeśli jest dostępny/włączony.
 - Windows Security Center: tylko do odczytu, stan zagregowany kategorii antywirusa i zapory, cache jednej minuty. Nie identyfikuje produktu ani wersji sygnatur.
+- Microsoft Defender: odrębne, lokalne zapytanie `Get-MpComputerStatus` raportuje jego włączenie, ochronę w czasie rzeczywistym, wersję i wiek sygnatur. Odświeża się co 5 minut (po błędzie co 15 minut), ma timeout 4 s i stan niedostępny, jeśli cmdlet nie działa. Na środowisku testowym WMI odmówiło dostępu; stan ten nie jest mylony z zagregowanym WSC ani alternatywnym AV.
 
 Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, trwałości i TCP/UDP. Zapisane wcześniej preferencje nie są nadpisywane. Zbieranie tekstu aktywnego okna i autoaktualizacja zewnętrznych list pozostają wyłączone.
 
@@ -77,11 +78,11 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 - Domyślne obserwacje oraz historia są lokalne; SQLite nie jest szyfrowana.
 - Tekst okien, hasła, klawiatura, ekran, treść HTTPS i prywatne pliki nie są ukrycie przechwytywane ani wysyłane.
-- Sentinel nie zastępuje Microsoft Defender, nie identyfikuje konkretnego programu AV z samego zagregowanego WSC i nie blokuje ruchu.
+- Sentinel nie zastępuje Defendera ani innego AV, nie włącza/wyłącza ochrony i nie blokuje ruchu. Szczegóły Defendera są niedostępne tam, gdzie cmdlet nie działa; WSC nadal nie ustala nazwy alternatywnego AV.
 
 ## 11. Walidacja wykonana
 
-- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru oraz ograniczony do 3 s czas oczekiwania na jego odczyt. Lokalnie: pełne .NET 441 PASS + 2 środowiskowe SKIP; testy desktop 79/79, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC inventory PASS. Dokładna korelacja Downloads → proces ma testy .NET dla zgodnego hasha, niewłaściwego hasha i starego zdarzenia. Pełny Windows CI nowego commita oczekuje.
+- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru, limit 3 s oczekiwania, korelację Downloads → proces po najbliższym zgodnym SHA-256 oraz warunkowy odczyt Defendera. Lokalnie: pełne .NET 447 PASS + 2 środowiskowe SKIP; desktop 79/79, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC PASS. Cmdlet Defendera zwrócił Access Denied (`0x80041003`), więc jego status jest jawnie niedostępny w tym środowisku. Pełny Windows CI najnowszego commita oczekuje.
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich 20 krokach: testy/build, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator i Enterprise API. Potwierdza test na izolowanym runnerze Windows, nie na komputerze użytkownika.
 - Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
 - Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.
@@ -95,16 +96,15 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - W odpowiedzi na awarię zatrzymania Core w widocznym teście kreatora dodano ograniczone, bezpieczne ponawianie polecenia shutdown. Osobno naprawiono stan główny UI: błąd lub brak pierwszego odczytu cache DNS obniża go do „Ochrona ograniczona”, a rozwinięte szczegóły pokazują również opcjonalny kanał DNS Operational. Testy desktop: 70/70 PASS. Windows CI [41685182964](https://github.com/Matyyyy68/asystent/actions/runs/41685182964) dla commita `c0061cd` zakończył się PASS we wszystkich krokach, w tym widocznym cyklu install/repair/uninstall po retry shutdown. Test potwierdza działanie na jednorazowym Windows runnerze, nie na komputerze odbiorcy.
 - Po uproszczeniu prezentacji historii desktop ma 74/74 testy PASS, lint TypeScript/Node PASS, a `Sentinel.Agent` buduje się bez ostrzeżeń i błędów. Testy sprawdzają polskie etykiety także w grupach, oddzielenie „Sprawdzone” od „Fałszywego alarmu”, chowanie metadanych technicznych oraz trasę „Ostatnie alerty” dla zimnego startu i działającej instancji. Pełny Windows CI tych zmian oczekuje.
 - Pełny packaging offline przerwał się przed budowaniem z powodu lokalnego Electron 44.9.1 vs wymagane `^45.0.0`. Nie instalowano zależności ani niczego nie pobierano.
-- Windows CI dla `c7b56bc` został anulowany podczas budowania po wypchnięciu następnego commita; nie jest wynikiem PASS. CI dla bieżącego `a972a71` (run [41701134976](https://github.com/Matyyyy68/asystent/actions/runs/41701134976)) wystartował i jest w trakcie audytu NuGet; jego wynik pozostaje nieznany.
+- Starsze runy `c7b56bc` i `a972a71` zostały anulowane po wypchnięciu kolejnych commitów; nie są wynikami PASS.
 
 ## 12. Pozostałe prace
 
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich krokach: build i testy źródeł, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless instalacja/aktualizacja/deinstalacja, widoczny kreator oraz Enterprise API. Potwierdza izolowany runner; nie zastępuje fizycznego testu na czystym Windows 10/11.
-- Bieżące `a972a71` zawiera ograniczenie oczekiwania na rejestr, z testem lokalnym w pełnym .NET suite (439 PASS, 2 środowiskowe SKIP); pełny Windows CI tego commita nadal działa i nie ma jeszcze wyniku końcowego.
-- Korelacja obrazu procesu z pasującym hashem pobranego pliku jest lokalnie zweryfikowana w pełnym .NET suite; potrzebuje pełnego Windows CI po push.
+- Odczyt Defendera i korelacja obrazu procesu z pasującym hashem pobranego pliku są lokalnie zweryfikowane; potrzebują pełnego Windows CI najnowszego commita.
 - Agent i watchdog pozostają user-mode: nie ma usługi SCM, pracy przed logowaniem ani niezależnego recovery samego watchdoga.
 - Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
-- Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa produktu AV ani wersji sygnatur.
+- Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa nazwy alternatywnego AV; szczegółowe sygnatury Defendera są zależne od dostępu WMI.
 - Zweryfikować widoczność menu Explorer i dźwięk w aktywnej sesji na czystym fizycznym Windows. Bieżące CI testuje runner izolowany.
 - Licencję źródeł wskaże właściciel później; nie wybierać jej bez jego decyzji. Bieżąca zmiana nie tworzy podpisanego ani opublikowanego instalatora; publicznym wydaniem pozostaje v0.15.38.
 - Nie oznaczać celu jako ukończonego do czasu domknięcia pozostałych punktów lub jawnego zawężenia zlecenia przez właściciela.

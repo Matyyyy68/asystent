@@ -8,4 +8,6 @@ Sentinel nie zbiera haseł, nie rejestruje klawiatury, nie nagrywa ekranu i nie 
 
 Odczyt Windows Security Center jest lokalny i tylko do odczytu; zgłasza zagregowany stan kategorii antywirusa/zapory, nie nazwę konkretnego produktu.
 
+Engine co 5 minut wywołuje wbudowany cmdlet `Get-MpComputerStatus` bez parametrów zmieniających stan, aby odczytać własny stan Defendera i wersję/czas sygnatur; po odmowie lub błędzie ponawia najwcześniej za 15 minut. Zapytanie jest ograniczone do 4 sekund, uruchamiane bez profilu PowerShell i nie wysyła danych. Na środowisku bieżącego testu WMI zwróciło `Access denied` dla niepodniesionego procesu, więc UI poprawnie pokaże stan szczegółowy jako niedostępny. Nie żądamy podniesienia uprawnień ani nie wyciągamy z tego wniosku, że nie działa inny antywirus.
+
 Zakres, retencję i ograniczenia każdego źródła opisuje [monitorowanie Windows](WINDOWS_MONITORING.md) oraz [znane ograniczenia](KNOWN-LIMITATIONS.md).

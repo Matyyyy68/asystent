@@ -4,12 +4,12 @@
 
 - `npm test --prefix desktop`: PASS, 79/79, w tym jawna kwarantanna oraz ograniczony widok lokalnego inwentarza aplikacji.
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).
-- `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 441 testów, 2 środowiskowe SKIP. Obejmuje korelację plik Downloads → proces po identycznym SHA-256 i oknie ±10 minut, brak korelacji dla innego hasha/starego pliku, walidację inwentarza aplikacji i timeout odczytu rejestru.
+- `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 447 testów, 2 środowiskowe SKIP. Obejmuje parser stanu Defendera i nieprawidłowe wyniki, korelację plik Downloads → proces po identycznym SHA-256 i oknie ±10 minut, brak korelacji dla innego hasha/starego pliku, inwentarz aplikacji i timeout rejestru.
 - `dotnet build Sentinel.sln -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów; osobno Setup Release i autotest kreatora też PASS.
 - `dotnet build src/Sentinel.Agent/Sentinel.Agent.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `Sentinel.AI.Setup.dll --wizard-self-test`: PASS (kod 0).
-- Publikacja Engine do `artifacts/engine` oraz `node scripts/test-engine.cjs`: PASS na bieżącym kodzie; IPC weryfikuje lokalny inventory count i bounded display fields, a także procesy, kontrolowane fixture'y i prywatność.
+- Publikacja Engine do `artifacts/engine` oraz `node scripts/test-engine.cjs`: PASS na bieżącym kodzie; IPC weryfikuje lokalny inventory i kontrakt dostępności/pól Defendera, a także procesy, kontrolowane fixture'y i prywatność.
 - `npm run build --prefix desktop -- --configLoader runner`: PASS; Vite przekształcił 1584 moduły.
 - Engine IPC sprawdza również dostępność zagregowanego stanu antywirusa i zapory Windows Security Center.
 - `ProcessSnapshotMonitorTests`: 18/18 PASS, w tym Windows parent snapshot, dowody relacji, umiarkowane ryzyko i reset licznika w kolejnym cyklu.
@@ -19,7 +19,7 @@
 
 ## Niezweryfikowane / wymagają kolejnej bramki CI
 
-- Bieżąca korelacja Downloads → proces wraz z inventory readerem i pierwszym sprawdzeniem wymaga pełnego Windows CI po push; lokalna Engine IPC odczytała rzeczywisty rejestr Windows tylko w bieżącym profilu.
+- Bieżąca integracja Defendera i korelacja Downloads → proces wraz z inventory readerem wymagają pełnego Windows CI po push; lokalny cmdlet Defendera zwrócił Access Denied, a Engine IPC poprawnie przetestowała kontrakt stanu niedostępnego.
 - Rollback instalatora, zachowanie istniejących wpisów HKCU, widoczność menu Eksploratora na czystym Windows 10/11.
 - Integracyjny test awarii samego watchdoga, powiadomień/dźwięków w aktywnej sesji i wydajności na reprezentatywnych maszynach.
 - Usługa Windows SCM, automatyczne aktualizacje, blokada wykonania/ruchu, ocena CVE i rozpoznanie konkretnego AV/sygnatur nie są wdrożone.

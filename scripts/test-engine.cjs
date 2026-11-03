@@ -47,6 +47,14 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.enterprise.paired, false);
   assert.equal(typeof initialStatus.result.windowsSecurityCenter.antivirus, 'string');
   assert.equal(typeof initialStatus.result.windowsSecurityCenter.firewall, 'string');
+  assert.equal(typeof initialStatus.result.windowsDefender.available, 'boolean');
+  if (initialStatus.result.windowsDefender.available) {
+    assert.equal(typeof initialStatus.result.windowsDefender.antivirusEnabled, 'boolean');
+    assert.equal(typeof initialStatus.result.windowsDefender.realTimeProtectionEnabled, 'boolean');
+    assert.ok(initialStatus.result.windowsDefender.signatureVersion == null || initialStatus.result.windowsDefender.signatureVersion.length <= 32);
+    assert.ok(initialStatus.result.windowsDefender.signatureAgeDays == null ||
+      Number.isInteger(initialStatus.result.windowsDefender.signatureAgeDays) && initialStatus.result.windowsDefender.signatureAgeDays >= 0);
+  }
   assert.equal(initialStatus.result.settings.paused, false, 'fresh local protection must start unpaused');
   assert.equal(initialStatus.result.settings.monitorNetworkConnections, true, 'local TCP monitoring must default on');
   assert.deepEqual(initialStatus.result.ipReputation, { networkCount: 0, importedAt: null }, 'IP reputation must start empty and local');
@@ -400,7 +408,24 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.match(ollamaPayload.messages[1].content, /Fragment: \[kbfixture\] offline response procedure/);
   assert.doesNotMatch(ollamaPayload.messages[1].content, /private-knowledge-fixture\.txt/);
   assert.doesNotMatch(ollamaPayload.messages[1].content, /alice@example\.test|dont-send-me/);
-  assert.equal((await call('status')).result.settings.useLocalAI, true);
+  const finalStatus = (await call('status')).result;
+  assert.equal(finalStatus.settings.useLocalAI, true);
+  const defender = finalStatus.windowsDefender;
+  assert.equal(typeof defender.available, 'boolean');
+  assert.ok(Number.isFinite(Date.parse(defender.readAtUtc)));
+  if (defender.available) {
+    assert.equal(typeof defender.antivirusEnabled, 'boolean');
+    assert.equal(typeof defender.realTimeProtectionEnabled, 'boolean');
+    assert.ok(defender.signatureVersion == null || (typeof defender.signatureVersion === 'string' && defender.signatureVersion.length <= 32));
+    assert.ok(defender.signatureAgeDays == null || Number.isInteger(defender.signatureAgeDays));
+    assert.ok(defender.signatureLastUpdatedUtc == null || Number.isFinite(Date.parse(defender.signatureLastUpdatedUtc)));
+  } else {
+    assert.equal(defender.antivirusEnabled, null);
+    assert.equal(defender.realTimeProtectionEnabled, null);
+    assert.equal(defender.signatureVersion, null);
+    assert.equal(defender.signatureAgeDays, null);
+    assert.equal(defender.signatureLastUpdatedUtc, null);
+  }
   assert.equal((await call('knowledgeDelete', { documentId: imported.result.id })).result.deleted, true);
   assert.equal((await call('unknown')).ok, false);
   assert.equal((await call('pause', { paused: true })).ok, true);

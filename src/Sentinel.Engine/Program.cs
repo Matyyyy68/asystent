@@ -25,6 +25,8 @@ var directory = await DataDirectoryPointer.ReadAsync(pointer, Path.Combine(root,
 var store = new LocalStore(directory);
 await store.InitializeAsync();
 var installedApplicationInventoryTask = Task.Run(InstalledApplicationInventoryReader.Read);
+var windowsDefenderStatusReader = new WindowsDefenderStatusReader();
+windowsDefenderStatusReader.RefreshIfDue();
 async Task<InstalledApplicationInventorySnapshot> GetInstalledApplicationInventoryAsync()
     => await InstalledApplicationInventoryReader.ReadAvailableAsync(installedApplicationInventoryTask, TimeSpan.FromSeconds(3));
 var installationProfile = await store.GetInstallationProfileAsync();
@@ -339,6 +341,7 @@ while (await Console.In.ReadLineAsync() is { } line)
         switch (request.GetProperty("method").GetString())
         {
             case "status":
+                windowsDefenderStatusReader.RefreshIfDue();
                 var installedApplicationInventory = await GetInstalledApplicationInventoryAsync();
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
@@ -348,6 +351,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
                     windowsSecurityCenter = WindowsSecurityCenterReader.Read(),
+                    windowsDefender = windowsDefenderStatusReader.Snapshot,
                     installedApplications = new { count = installedApplicationInventory.Applications.Count,
                         complete = installedApplicationInventory.Complete, scannedAtUtc = installedApplicationInventory.ScannedAtUtc,
                         vulnerabilityAssessment = "Brak lokalnej bazy CVE; spis nie jest oceną podatności." },
