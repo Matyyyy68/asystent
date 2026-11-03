@@ -6,7 +6,7 @@
 2. Po instalacji UI uruchamia się domyślnie; instalator także próbuje uruchomić agenta od razu i rejestruje go do startu przy logowaniu.
 3. Zanim pojawi się zwykły interfejs, UI pokazuje osobny ekran pierwszego sprawdzenia i czeka na wynik `collect`; przy błędzie pozwala ponowić próbę.
 4. Agent kontynuuje cykle lokalnie niezależnie od otwartego okna.
-5. Ekran główny pokazuje stan pauzy, błędów monitorów lub działających źródeł. Nie nazywa tego pełnym skanem.
+5. Ekran główny pokazuje stan ochrony i najważniejsze wykrycia. Szczegółowe statusy monitorów i Windows Security Center są zwinięte pod „Szczegóły monitorowania”. Nie deklaruje pełnego skanu.
 6. Zdarzenia wymagające uwagi można zobaczyć w historii. Narzędzia techniczne są dostępne po rozwinięciu „Narzędzia zaawansowane”.
 
 ## Co się zmieniło

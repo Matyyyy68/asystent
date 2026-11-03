@@ -6,7 +6,7 @@
 
 - Usunięto wybór profilu DNS z pierwszego uruchomienia.
 - Pierwszy start ma osobny ekran sprawdzenia; zwykła nawigacja pojawia się po udanym `collect`.
-- Podstawowa nawigacja pokazuje przegląd i zdarzenia. Pozostałe narzędzia są zwinięte pod „Narzędzia zaawansowane”.
+- Podstawowa nawigacja pokazuje przegląd i zdarzenia. Pozostałe narzędzia są zwinięte pod „Narzędzia zaawansowane”; szczegóły monitorów na stronie przeglądu są dodatkowo zwinięte pod „Szczegóły monitorowania”.
 - Status rozróżnia brak silnika, pierwsze sprawdzenie, pauzę, ograniczenie monitora, stan Windows wymagający uwagi, stan Windows niepotwierdzony i działające źródła. Sukces oznacza „Monitorowanie działa”, nie aktywne blokowanie.
 
 ## 2. Instalator
@@ -75,7 +75,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Desktop: 67/67 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559: wszystkie 20 kroków PASS.
+- Desktop: 68/68 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559: wszystkie 20 kroków PASS.
 - .NET: 420 testów PASS, 2 pominięte z powodu środowiska po zmianie grupowania powiadomień.
 - `dotnet build Sentinel.sln -c Release --no-restore` (w tym Agent) PASS, 0 ostrzeżeń i błędów. Setup Release oraz `--wizard-self-test`: PASS.
 - Publikacja Engine/UrlHost/Agent i `scripts/test-engine.cjs`: PASS dla IPC, kontrolowanych fixture'ów i prywatności.

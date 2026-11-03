@@ -10,6 +10,7 @@
 ## Najnowszy stan przebudowy — 2026-11-03
 
 - Kolejny etap ogranicza spam alertów: Sentinel.Agent grupuje różne typy sygnałów z jednego cyklu w jeden balonik, zachowując szczegóły w lokalnej historii i deduplikację 10-minutową. Testy streszczeń obejmują duplikaty kategorii, pustą paczkę i maksymalną długość.
+- Uproszczono stronę główną: techniczne stany monitorów i Windows Security Center są domyślnie zwinięte, a rzeczywisty status ochrony i ostatnie wykrycia pozostają widoczne. Test regresji chroni podstawowy, zwinięty widok.
 
 - Wdrożono Sentinel.Agent per-user z zasobnikiem, watchdogiem z backoffem, HKCU Run, named pipe `CurrentUserOnly`, cyklicznym `collect` i silnikiem potomnym niezależnym od okna Electron. Watchdog wznawia awarię agenta, lecz sam działa w sesji użytkownika; to **nie jest usługa Windows SCM**.
 - Instalator uruchamia agenta po świeżej instalacji i aktualizacji; przed wymianą żąda zamknięcia, a przy rollbacku próbuje przywrócić poprzedni proces.
@@ -20,7 +21,7 @@
 - Monitor procesów dodaje lokalną korelację nowych PID-ów z migawką Windows Toolhelp. Reguła Office → interpreter/skrypt generuje umiarkowane ostrzeżenie z dowodami PID/nazw i licznikiem przekazywanym do agenta; testy reguł, monitora i odczytu Toolhelp na Windows PASS. Nie kończy procesu.
 - Silnik odpytuje lokalny Windows Security Center o zagregowany stan antywirusa i zapory. UI pokazuje wynik jako informację z Windows, bez przypisywania go do konkretnego produktu.
 - Kontekst menu plików obsługuje pojedynczy plik, z lokalnym SHA-256/AuthentiCode i jawnie ograniczonym werdyktem.
-- `npm test --prefix desktop` 67/67 PASS; lint i produkcyjny Vite (1582 moduły) PASS; pełna suita .NET 417 PASS + 2 środowiskowe SKIP; monitor procesów 18/18 PASS; `dotnet build Sentinel.sln -c Release --no-restore` PASS (0 ostrzeżeń/błędów) po zmianie wersji reguł; publikacja Engine i `scripts/test-engine.cjs` PASS wraz z IPC licznika.
+- `npm test --prefix desktop` 68/68 PASS; lint i produkcyjny Vite (1582 moduły) PASS; pełna suita .NET 417 PASS + 2 środowiskowe SKIP; monitor procesów 18/18 PASS; `dotnet build Sentinel.sln -c Release --no-restore` PASS (0 ostrzeżeń/błędów) po zmianie wersji reguł; publikacja Engine i `scripts/test-engine.cjs` PASS wraz z IPC licznika.
 - Skrypt instalatora dostosowano do Windows PowerShell 5.1 i dodano kontrolę wersji Electron przed czyszczeniem wyników. Lokalnie nie pobierano zależności; `desktop/node_modules` ma Electron 44.9.1, a projekt/lockfile wymagają 45.x.
 - Windows CI run [41657844276](https://github.com/Matyyyy68/asystent/actions/runs/41657844276) wykazał, że aktualizacja nie mogła zakończyć agenta mimo potwierdzenia IPC.
 - Run [41661047343](https://github.com/Matyyyy68/asystent/actions/runs/41661047343) pokazał, że `ApplicationContext` był sprzątany dwukrotnie: drugie `Dispose` rzucało wyjątek .NET, a watchdog uruchamiał nowy proces. Commit `f405e90` czyni sprzątanie agenta idempotentne. CI run [41666279158](https://github.com/Matyyyy68/asystent/actions/runs/41666279158) zakończył się PASS: pełny cykl instalacji → realny host Chrome/Edge → aktualizacja → weryfikacja → deinstalacja, widoczny kreator oraz API Enterprise. Testy odbyły się na izolowanym runnerze GitHub, nie na komputerze użytkownika. Nowa korelacja rodzic–potomek i wersja reguł `2026.11.03` zostały potwierdzone pełnym CI 41673687559.
