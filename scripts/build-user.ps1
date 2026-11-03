@@ -15,6 +15,7 @@ try {
   if ($Offline) {
     $requiredProjectAssets = @(
       'src/Sentinel.Engine/obj/project.assets.json',
+      'src/Sentinel.Service/obj/project.assets.json',
       'src/Sentinel.UrlHost/obj/project.assets.json',
       'tests/Sentinel.Tests/obj/project.assets.json',
       'tests/Sentinel.NativeMessagingEngineHost/obj/project.assets.json'
@@ -63,6 +64,10 @@ try {
   if ($LASTEXITCODE) { throw 'Product consistency check failed' }
   dotnet build src/Sentinel.Engine/Sentinel.Engine.csproj -c Debug @dotnetRestoreArgs
   if ($LASTEXITCODE) { throw 'Debug Engine build failed' }
+  dotnet build src/Sentinel.Service/Sentinel.Service.csproj -c Release @dotnetRestoreArgs
+  if ($LASTEXITCODE) { throw 'Windows service build failed' }
+  & (Join-Path $repo 'src/Sentinel.Service/bin/Release/net10.0-windows/Sentinel.Service.exe') --self-test
+  if ($LASTEXITCODE) { throw 'Windows service security self-test failed' }
   dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release @dotnetRestoreArgs
   if ($LASTEXITCODE) { throw 'Tests failed' }
   dotnet build tests/Sentinel.NativeMessagingEngineHost/Sentinel.NativeMessagingEngineHost.csproj -c Release @dotnetRestoreArgs

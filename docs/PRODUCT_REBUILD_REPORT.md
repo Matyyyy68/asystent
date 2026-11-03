@@ -72,7 +72,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - `Sentinel.Agent` i jego watchdog działają w sesji użytkownika; agent odpytuje Engine niezależnie od okna Electron.
 - Watchdog wznawia awarię procesu agenta z backoffem 1–30 s; agent odtwarza proces Engine po błędzie.
 - Zamknięcie UI nie kończy Core. Instalator zatrzymuje i próbuje wznowić Core przy zmianie plików.
-- Watchdog sam nie jest odzyskiwany po awarii; nie jest to usługa Windows SCM/LocalSystem i nie działa przed logowaniem.
+- Watchdog sam nie jest odzyskiwany po awarii. Repozytorium ma już oddzielny host SCM uruchamiający Engine pod LocalService z chronionym katalogiem ProgramData, ale instalator jeszcze go nie rejestruje, Agent/UI nie łączą się z nim i nie zweryfikowano startu przed logowaniem. Dla użytkownika zainstalowany produkt nadal działa wyłącznie w sesji użytkownika.
 
 ## 10. Prywatność i ograniczenia
 
@@ -82,7 +82,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru, limit 3 s oczekiwania, korelację Downloads → proces po najbliższym zgodnym SHA-256 oraz warunkowy odczyt Defendera. Lokalnie: pełne .NET 450 PASS + 2 środowiskowe SKIP; desktop 87/87, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC PASS. Cmdlet Defendera zwrócił Access Denied (`0x80041003`), więc jego status jest jawnie niedostępny w tym środowisku. Pełny Windows CI najnowszego commita oczekuje.
+- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru, limit 3 s oczekiwania, korelację Downloads → proces po najbliższym zgodnym SHA-256 oraz warunkowy odczyt Defendera. Lokalnie: pełne .NET 450 PASS + 2 środowiskowe SKIP; desktop 87/87, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC PASS. Dodatkowo `Sentinel.Service` buduje się w Release, a `--self-test` PASS dla projektowanego DACL. Cmdlet Defendera zwrócił Access Denied (`0x80041003`), więc jego status jest jawnie niedostępny w tym środowisku. Windows CI dla nowego hosta oczekuje.
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich 20 krokach: testy/build, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator i Enterprise API. Potwierdza test na izolowanym runnerze Windows, nie na komputerze użytkownika.
 - Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
 - Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.
@@ -102,7 +102,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich krokach: build i testy źródeł, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless instalacja/aktualizacja/deinstalacja, widoczny kreator oraz Enterprise API. Potwierdza izolowany runner; nie zastępuje fizycznego testu na czystym Windows 10/11.
 - Odczyt Defendera i korelacja obrazu procesu z pasującym hashem pobranego pliku są lokalnie zweryfikowane; potrzebują pełnego Windows CI najnowszego commita.
-- Agent i watchdog pozostają user-mode: nie ma usługi SCM, pracy przed logowaniem ani niezależnego recovery samego watchdoga.
+- Agent i watchdog zainstalowanego produktu nadal są user-mode. Host SCM jest w źródłach, ale nie jest jeszcze instalowany ani zintegrowany, więc bieżący produkt nie ma potwierdzonej pracy przed logowaniem ani niezależnego recovery.
 - Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
 - Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa nazwy alternatywnego AV; szczegółowe sygnatury Defendera są zależne od dostępu WMI.
 - Zweryfikować widoczność menu Explorer i dźwięk w aktywnej sesji na czystym fizycznym Windows. Bieżące CI testuje runner izolowany.

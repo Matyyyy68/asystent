@@ -17,8 +17,8 @@ const digest=crypto.createHash('sha256').update(Buffer.from(manifest.key,'base64
 const id=[...digest.subarray(0,16)].map(n=>String.fromCharCode(97+(n>>4),97+(n&15))).join('');
 assert.ok(fs.readFileSync(path.join(root,'src/Sentinel.UrlHost/NativeHostRegistration.cs'),'utf8').includes(`ExtensionId = "${id}"`));
 for(const file of fs.readdirSync(path.join(root,'browser-extension')).filter(f=>f.endsWith('.js'))) cp.execFileSync('node',['--check',path.join(root,'browser-extension',file)]);
-for(const dir of ['src/Sentinel.Core','src/Sentinel.Engine','src/Sentinel.UrlHost']) {
+for(const dir of ['src/Sentinel.Core','src/Sentinel.Engine','src/Sentinel.UrlHost','src/Sentinel.Service']) {
   const proj=fs.readdirSync(path.join(root,dir)).find(f=>f.endsWith('.csproj'));
   assert.ok(proj); assert.ok(!fs.readFileSync(path.join(root,dir,proj),'utf8').includes('<Version>'));
 }
-console.log(`PASS: ${version}, Chromium MV3, permissions, identity ${id}, JavaScript syntax`);
+console.log(`PASS: ${version}, Chromium MV3, permissions, identity ${id}, service project metadata, JavaScript syntax`);
