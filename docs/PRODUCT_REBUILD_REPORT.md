@@ -78,10 +78,11 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Desktop: 69/69 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559 dla `6fe951e` i 41679066451 dla `e8108ea`: pełne 20 kroków PASS; drugi przebieg zawierał także grupowanie alertów i uproszczony ekran główny.
-- .NET: 420 testów PASS, 2 pominięte z powodu środowiska po zmianie grupowania powiadomień.
-- `dotnet build Sentinel.sln -c Release --no-restore` (w tym Agent) PASS, 0 ostrzeżeń i błędów. Setup Release oraz `--wizard-self-test`: PASS.
-- Publikacja Engine/UrlHost/Agent i `scripts/test-engine.cjs`: PASS dla IPC, kontrolowanych fixture'ów i prywatności.
+- Bieżąca zmiana kwarantanny: desktop 79/79, lint/TypeScript i produkcyjny Vite (1584 moduły) PASS; pełne .NET 435 PASS + 2 środowiskowe SKIP; Engine publish/test IPC z fixture'ami i move/restore PASS; Agent Release build 0 ostrzeżeń/błędów.
+- Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich 20 krokach: testy/build, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator i Enterprise API. Potwierdza test na izolowanym runnerze Windows, nie na komputerze użytkownika.
+- Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
+- Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.
+- `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
 - `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
 - Testy polityki alertów WSC obejmują stany zdrowy, wymagający uwagi, nieobserwowany, wstrzymany i niedostępny. Testy streszczeń baloników sprawdzają deduplikację kategorii, limit długości Windows i obsługę pustej paczki.
 - Test monitora TCP potwierdza, że pojedyncze nowe dopasowanie lokalnego IP jest przekazywane do alertu, a kolejny zwykły cykl zwraca zero dopasowań. Test IPC Engine sprawdza zerową wartość dla bazowej próbki.
@@ -95,7 +96,10 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 12. Pozostałe prace
 
-- Windows CI [41685182964](https://github.com/Matyyyy68/asystent/actions/runs/41685182964) dla `c0061cd` PASS we wszystkich krokach i rozwiązuje błąd shutdown odnotowany w `41681512457`. Nadal domknąć fizyczny rollback, widoczność menu Explorer na czystych Windows 10/11, powiadomienia/dźwięki oraz awarię samego watchdoga.
-- Rozstrzygnąć architekturę prawdziwej usługi SCM lub ograniczenia user-mode watchdog.
-- Dokończyć korelację alertów, aktualizacje aplikacji/reguł, ocenę stanu konkretnego AV/sygnatur i uzasadnione bezpieczne reakcje.
-- Nie oznaczać celu jako ukończonego do czasu domknięcia tych prac i weryfikacji całego przepływu na izolowanym Windows.
+- Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich krokach: build i testy źródeł, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless instalacja/aktualizacja/deinstalacja, widoczny kreator oraz Enterprise API. Potwierdza izolowany runner; nie zastępuje fizycznego testu na czystym Windows 10/11.
+- Agent i watchdog pozostają user-mode: nie ma usługi SCM, pracy przed logowaniem ani niezależnego recovery samego watchdoga.
+- Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
+- Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa produktu AV ani wersji sygnatur.
+- Zweryfikować widoczność menu Explorer i dźwięk w aktywnej sesji na czystym fizycznym Windows. Bieżące CI testuje runner izolowany.
+- Licencję źródeł wskaże właściciel później; nie wybierać jej bez jego decyzji. Bieżąca zmiana nie tworzy podpisanego ani opublikowanego instalatora; publicznym wydaniem pozostaje v0.15.38.
+- Nie oznaczać celu jako ukończonego do czasu domknięcia pozostałych punktów lub jawnego zawężenia zlecenia przez właściciela.

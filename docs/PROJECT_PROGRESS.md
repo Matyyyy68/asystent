@@ -3,7 +3,7 @@
 ## Jawna kwarantanna dopasowanego pliku — 2026-11-03
 
 - Dodano odwracalne przenoszenie wyłącznie pliku wskazanego przez użytkownika po osobnym potwierdzeniu. Engine przyjmuje tylko zdarzenie Downloads z dowodem zgodności i hashuje ponownie wybraną ścieżkę; po przeniesieniu hash jest weryfikowany, a oryginalna nazwa/ścieżka pozostają w lokalnym `quarantine.db`. Restore ponownie sprawdza hash i odmawia nadpisania. Nie uruchamia ani nie usuwa pliku; nie ma automatycznej kwarantanny.
-- Testy klasy kwarantanny na plikach tymczasowych: 3/3 PASS; test kwalifikacji zdarzeń: PASS; desktop 79/79, TypeScript/lint PASS; pełne .NET 435 PASS + 2 środowiskowe SKIP; Engine Release publish i pełny `scripts/test-engine.cjs` PASS, w tym move/restore; Agent Release build bez ostrzeżeń/błędów; produkcyjny Vite build (1584 moduły) i `git diff --check` PASS. Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01`: zależności, build/test aplikacji, smoke Electron, redirected Downloads, soak junctionów, autostart i Chrome/Edge E2E — PASS; trwa headless install/update/uninstall instalatora, potem GUI kreator i Enterprise API.
+- Testy klasy kwarantanny na plikach tymczasowych: 3/3 PASS; test kwalifikacji zdarzeń: PASS; desktop 79/79, TypeScript/lint PASS; pełne .NET 435 PASS + 2 środowiskowe SKIP; Engine Release publish i pełny `scripts/test-engine.cjs` PASS, w tym move/restore; Agent Release build bez ostrzeżeń/błędów; produkcyjny Vite build (1584 moduły) i `git diff --check` PASS. Pełny Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` zakończył się PASS: build i testy, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator oraz Enterprise API. Dokumentacyjny commit `350627a` zapisuje wcześniejszy stan „w toku”; pełny wynik CI jest teraz potwierdzony.
 - Ograniczenia: tylko Downloads + dopasowanie do lokalnej listy SHA-256, limit 256 MiB, odrzucenie reparse points i różnych woluminów. Plik i metadata kwarantanny nie są szyfrowane ani dołączane do backupu historii.
 
 ## Własne tony powiadomień — 2026-11-03
@@ -644,17 +644,20 @@ F03 pozostaje krytyczne; nie wdrażać modelu ani nie obniżać progów bez wiar
 - `npm run build --prefix desktop`: zablokowany odmową odczytu esbuilda do katalogu nadrzędnego `../../..`; produkcyjny build nie jest zweryfikowany.
 - Nie uruchomiono GUI/instalatora/przeglądarki na komputerze użytkownika.
 
-## Pozostała praca krytyczna
+## Pozostała praca — stan po Windows CI 41696210343
 
-1. Przebudować instalator do jednego podstawowego przycisku i schowanych opcji; zachować dotychczasowe naprawy, rollback i deinstalację.
-2. Zaprojektować i wdrożyć niezależny od Electron Core jako usługę o minimalnych uprawnieniach, z bezpiecznym IPC, instalacją/aktualizacją/deinstalacją i recovery SCM.
-3. Zapewnić, że status UI odzwierciedla błędy każdego krytycznego monitora, a nie tylko gotowość procesu silnika.
-4. Wykonać pierwszą analizę o jasno określonym zakresie i pokazać wyniki systemowe bez sugerowania pełnego skanu.
-5. Ujednolicić detekcję, notyfikacje i deduplikację; nie twierdzić o blokadzie bez rzeczywistego mechanizmu.
-6. Zaimplementować bezpieczną integrację „Sprawdź w Sentinel AI” dla plików Windows oraz sprzątanie jej przy deinstalacji.
-7. Dodać izolowane testy Windows dla powyższych przepływów oraz przeprowadzić production build i smoke.
+Zaliczono uproszczenie głównego UI, pojedynczą rzeczywistą analizę startową o ograniczonym zakresie, installer z jednym głównym przyciskiem oraz izolowane GUI install/repair/update/uninstall, user-mode agenta niezależnego od okna, status ograniczonej ochrony, podstawowe monitory, powiadomienia z deduplikacją, menu kontekstowe pojedynczego pliku i pełną Windows CI dla tych ścieżek. Nadal nie są spełnione wszystkie wymagania docelowej wizji:
 
-**Status całości: NIEUKOŃCZONE.** Aktualny zakres jest użytecznym etapem UI i pierwszego sprawdzenia, nie autonomicznym systemem ochrony opisanym w zleceniu.
+1. **Usługa i odzyskiwanie:** Agent oraz watchdog działają po zalogowaniu użytkownika. Sam watchdog nie ma zewnętrznego supervisor/SCM recovery, Core nie działa przed logowaniem i nie ma usługi Windows z minimalnymi uprawnieniami.
+2. **Zakres pierwszej analizy:** wykonuje jeden cykl istniejących monitorów; nie inwentaryzuje pełnego katalogu zainstalowanych aplikacji/CVE ani pełnego dysku. Pozostaje jasno ograniczony i nie udaje kompletnego skanu.
+3. **Pokrycie monitorów i detekcja:** są snapshoty procesów/TCP/UDP, Downloads, wybranych mechanizmów trwałości i DNS. Brakuje WFP/ETW, wykrycia pełnej treści ruchu (celowo), i wiarygodnego wykrycia krótkotrwałych procesów/połączeń. Korelacja wspólnego incydentu przez źródła jest częściowa.
+4. **Reakcja:** użytkownik może ręcznie poddać kwarantannie dopasowany plik Downloads. Nie ma ogólnej kwarantanny, blokady wykonania/ruchu ani automatycznej reakcji; poważny alert nie może sugerować blokady.
+5. **Aktualizacje i reputacja:** aktualizacje aplikacji są sprawdzane ręcznie przez GitHub API; brakuje podpisanego manifestu i automatycznego aktualizatora. Lokalna reputacja zależy od listy importowanej przez użytkownika; brak przypisania do niezależnie potwierdzonego feedu nie może być przedstawiany jako weryfikacja wydawcy.
+6. **Stan ochrony Windows:** WSC zwraca stan zbiorczy antywirusa i zapory, ale Sentinel nie ustala produktu AV ani aktualności sygnatur.
+7. **Walidacja fizyczna:** UI, dźwięki i Explorer nie zostały sprawdzone na czystym fizycznym Windows 10/11. Windows CI obejmuje izolowany runner, nie komputer użytkownika.
+8. **Licencja i wydanie:** właściciel projektu zdecydował, że wskaże licencję później. Nie dodawać jej samodzielnie. Bieżąca zmiana nie tworzy nowego opublikowanego/podpisanego instalatora; publicznym wydaniem pozostaje v0.15.38.
+
+**Status całości: NIEUKOŃCZONE.** Testy dla aktualnego commita kwarantanny są zielone, ale powyższe luki pozostają częścią głównego zlecenia i wymagają dalszej pracy albo jawnej decyzji właściciela tam, gdzie wskazano.
 
 ## Aktualizacja 2026-11-03 — wyścig przy bezpiecznym zatrzymaniu instalatora
 
