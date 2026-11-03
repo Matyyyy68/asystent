@@ -34,3 +34,15 @@ test('keeps technical event metadata behind details and offers a reviewed action
   assert.match(renderer, /presentRisk\(e\.risk\)/);
   assert.match(renderer, /presentEventStatus\(e\.status\)/);
 });
+
+test('uses the same plain-language risk label for correlated event groups', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ui = fs.readFileSync(path.resolve(__dirname, '../src/main.tsx'), 'utf8');
+  const groupRenderer = /const latest = group\.events\[0\];([\s\S]*?)\n\s*\}\)/.exec(ui)?.[1];
+  assert.ok(groupRenderer, 'Correlated event group renderer exists.');
+  assert.match(groupRenderer, /presentRisk\(latest\.risk\)/);
+  assert.doesNotMatch(groupRenderer, /<h2>\{latest\.risk\}/,
+    'The raw English enum must not appear in the user-facing group heading.');
+  assert.match(groupRenderer, /SYGNAŁY POWIĄZANE W CZASIE/);
+});
