@@ -1,5 +1,12 @@
 # Postęp projektu Sentinel AI
 
+## Kanał rzeczywistego stanu usługi — 2026-11-03
+
+- `Sentinel.Service` udostępnia odczytowy named pipe `SentinelAI.Service.Status.v1`: z jawnym DACL, dodatkową weryfikacją SID klienta przez impersonację, limitem żądania/timeoutu i ścisłą walidacją protokołu. Odpowiedź pokazuje wyłącznie stan ostatniego cyklu `collect` i czas jego wykonania. Zastosowano `FirstPipeInstance`, by odrzucać przejęcie nazwy potoku przez proces lokalny.
+- Self-test usługi przechodzi rzeczywisty lokalny round-trip named pipe z SID aktualnego użytkownika. Pełny `dotnet build Sentinel.sln -c Release --no-restore`, testy ACL/protokołu/zdrowia i składnia skryptu PowerShell również przechodzą.
+- Test SCM na izolowanym Windows runnerze przekazuje SID testowego użytkownika do usługi i po pierwszym cyklu żąda statusu przez named pipe; sprawdza identyfikator/protokół, stan `running` i czas kolekcji. Nie uruchamia ani nie instaluje usługi na komputerze użytkownika. Commit `6599124` zawierający test SCM został wypchnięty na `main`; Windows CI run [41715987264](https://github.com/Matyyyy68/asystent/actions/runs/41715987264) dla wersji przed poprawką lokalnego round-trip nadal trwa i nie potwierdza jeszcze testu LocalService.
+- Ograniczenie: kanał obsługuje tylko zapytanie o status i nie jest jeszcze używany przez Agent/UI. Instalator nadal nie rejestruje usługi, a źródłowy test SCM nie dowodzi aktualizacji/deinstalacji usługi ani integracji z istniejącą historią użytkownika.
+
 ## Jawna kwarantanna dopasowanego pliku — 2026-11-03
 
 - Dodano odwracalne przenoszenie wyłącznie pliku wskazanego przez użytkownika po osobnym potwierdzeniu. Engine przyjmuje tylko zdarzenie Downloads z dowodem zgodności i hashuje ponownie wybraną ścieżkę; po przeniesieniu hash jest weryfikowany, a oryginalna nazwa/ścieżka pozostają w lokalnym `quarantine.db`. Restore ponownie sprawdza hash i odmawia nadpisania. Nie uruchamia ani nie usuwa pliku; nie ma automatycznej kwarantanny.
