@@ -110,7 +110,13 @@ try {
     if (-not $fullOutputPath.StartsWith($artifactRoot, [StringComparison]::OrdinalIgnoreCase)) {
       throw "Refusing to clear publish output outside artifacts/: $fullOutputPath"
     }
-    if (Test-Path -LiteralPath $fullOutputPath) { Remove-Item -LiteralPath $fullOutputPath -Recurse -Force }
+    if (Test-Path -LiteralPath $fullOutputPath) {
+      $outputItem = Get-Item -LiteralPath $fullOutputPath -Force
+      if (($outputItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing to clear a reparse-point publish output: $fullOutputPath"
+      }
+      Remove-Item -LiteralPath $fullOutputPath -Recurse -Force
+    }
   }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost','Sentinel.Agent')) {
     dotnet publish "src/$project/$project.csproj" -c Release -r win-x64 --self-contained true -o artifacts/engine @dotnetRestoreArgs

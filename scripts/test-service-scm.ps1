@@ -61,6 +61,9 @@ try {
 
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
   Assert-Within $tempRoot ([IO.Path]::GetTempPath())
+  if (((Get-Item -LiteralPath $tempRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+    throw 'Refusing to use a reparse-point service test directory.'
+  }
   Copy-Item -Path (Join-Path $enginePublish '*') -Destination $tempRoot -Recurse -Force
   Copy-Item -Path (Join-Path $servicePublish '*') -Destination $tempRoot -Recurse -Force
   $serviceExe = [IO.Path]::GetFullPath((Join-Path $tempRoot 'Sentinel.Service.exe'))
@@ -136,6 +139,9 @@ finally {
   }
   if ($serviceDeleted -and (Test-Path -LiteralPath $tempRoot)) {
     Assert-Within $tempRoot ([IO.Path]::GetTempPath())
+    if (((Get-Item -LiteralPath $tempRoot -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      throw "Refusing to delete reparse-point test directory '$tempRoot'."
+    }
     Remove-Item -LiteralPath $tempRoot -Recurse -Force
   }
   if ($serviceDeleted -and $mayRemoveServiceDataRoot -and (Test-Path -LiteralPath $serviceDataRoot)) {
