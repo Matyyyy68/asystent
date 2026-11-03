@@ -53,6 +53,10 @@ jobs:
       - name: Build and test application
         shell: pwsh
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
+      - name: Verify SCM service startup, identity, data ACL, and first collection
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./scripts/test-service-scm.ps1
       - name: Smoke-test active Electron app against isolated engine and database
         shell: pwsh
         run: |

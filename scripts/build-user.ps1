@@ -102,12 +102,22 @@ try {
   if ($LASTEXITCODE) { throw 'Research extractor network opt-in tests failed' }
   # Both self-contained engine publishes write here; remove stale files first so
   # artifacts removed from a project cannot survive into the packaged release.
+  $artifactRoot = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
   $engineOutput = Join-Path $repo 'artifacts/engine'
-  if (Test-Path -LiteralPath $engineOutput) { Remove-Item -LiteralPath $engineOutput -Recurse -Force }
+  $serviceOutput = Join-Path $repo 'artifacts/service'
+  foreach ($outputPath in @($engineOutput, $serviceOutput)) {
+    $fullOutputPath = [IO.Path]::GetFullPath($outputPath)
+    if (-not $fullOutputPath.StartsWith($artifactRoot, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "Refusing to clear publish output outside artifacts/: $fullOutputPath"
+    }
+    if (Test-Path -LiteralPath $fullOutputPath) { Remove-Item -LiteralPath $fullOutputPath -Recurse -Force }
+  }
   foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost','Sentinel.Agent')) {
     dotnet publish "src/$project/$project.csproj" -c Release -r win-x64 --self-contained true -o artifacts/engine @dotnetRestoreArgs
     if ($LASTEXITCODE) { throw "Build $project failed" }
   }
+  dotnet publish src/Sentinel.Service/Sentinel.Service.csproj -c Release -r win-x64 --self-contained true -o artifacts/service @dotnetRestoreArgs
+  if ($LASTEXITCODE) { throw 'Publish Windows service failed' }
   if ($Offline) { node scripts/test-engine.cjs }
   else { node scripts/test-engine.cjs --dns-live }
   if ($LASTEXITCODE) { throw 'IPC test failed' }
