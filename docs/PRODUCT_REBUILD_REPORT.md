@@ -21,6 +21,8 @@
 ## 3. Pierwsze sprawdzenie
 
 - UI wykonuje lokalny `collect`, odświeża stan i zapisuje ukończenie dopiero po powodzeniu.
+- Podczas pierwszego cyklu Engine odczytuje nazwy, wersje i wydawców z rejestru deinstalacji Windows w widokach 64/32-bit oraz HKCU. Szczegóły są dostępne wyłącznie lokalnie w rozwiniętych detalach UI; nie czyta się poleceń/ścieżek instalacji i nie zapisuje inwentarza do historii.
+- Odczyt listy zainstalowanych aplikacji nie mapuje wersji do CVE ani nie potwierdza aktualności programów lub Defendera.
 - Przy błędzie nie pokazuje udanej analizy; pozwala ponowić próbę.
 - To nie jest pełny skan dysku ani werdykt o bezpieczeństwie komputera.
 

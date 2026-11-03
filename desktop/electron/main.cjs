@@ -23,7 +23,7 @@ const isAutostartEnabled = () => {
   return settings.executableWillLaunchAtLogin === true &&
     settings.launchItems?.some(item => item.name === 'Sentinel AI' && item.scope === 'user' && item.enabled && item.args?.includes('--minimized')) === true;
 };
-const allowed = new Set(['status', 'history', 'quarantineList', 'collect', 'eventStatus', 'quarantineDownloadedFile', 'restoreDownloadedFile', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
+const allowed = new Set(['status', 'history', 'quarantineList', 'installedApplications', 'collect', 'eventStatus', 'quarantineDownloadedFile', 'restoreDownloadedFile', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {

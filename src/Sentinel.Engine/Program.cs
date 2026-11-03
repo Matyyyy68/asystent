@@ -24,6 +24,7 @@ var pointer = Path.Combine(root, "data-path.txt");
 var directory = await DataDirectoryPointer.ReadAsync(pointer, Path.Combine(root, "data"));
 var store = new LocalStore(directory);
 await store.InitializeAsync();
+var installedApplicationInventoryTask = Task.Run(InstalledApplicationInventoryReader.Read);
 var installationProfile = await store.GetInstallationProfileAsync();
 var deviceCredentials = new WindowsDpapiCredentialStore(directory);
 var malwareBazaarCredentials = new WindowsDpapiCredentialStore(directory, "malwarebazaar-auth-key.bin", 1, 256,
@@ -336,6 +337,7 @@ while (await Console.In.ReadLineAsync() is { } line)
         switch (request.GetProperty("method").GetString())
         {
             case "status":
+                var installedApplicationInventory = await installedApplicationInventoryTask;
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     lastCollectionAtUtc,
@@ -344,6 +346,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
                     windowsSecurityCenter = WindowsSecurityCenterReader.Read(),
+                    installedApplications = new { count = installedApplicationInventory.Applications.Count,
+                        complete = installedApplicationInventory.Complete, scannedAtUtc = installedApplicationInventory.ScannedAtUtc,
+                        vulnerabilityAssessment = "Brak lokalnej bazy CVE; spis nie jest oceną podatności." },
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
@@ -353,6 +358,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                     downloadedFileQuarantine = downloadedFileQuarantineState,
                     browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
+                break;
+            case "installedApplications":
+                result = await installedApplicationInventoryTask;
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "rollbackFeed": reputation.Rollback(); result = reputation.Status(DateTimeOffset.UtcNow); break;

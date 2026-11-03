@@ -22,6 +22,21 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
 (async () => {
  try {
   const initialStatus = await call('status'); assert.equal(initialStatus.result.engine, 'ready');
+  assert.ok(Number.isInteger(initialStatus.result.installedApplications?.count) && initialStatus.result.installedApplications.count >= 0,
+    'status must expose the count and completion state of the local installed-app inventory');
+  assert.equal(typeof initialStatus.result.installedApplications.complete, 'boolean');
+  assert.match(initialStatus.result.installedApplications.vulnerabilityAssessment, /CVE/,
+    'inventory status must not imply that vulnerabilities were checked');
+  const installedApplicationInventory = await call('installedApplications');
+  assert.equal(installedApplicationInventory.ok, true, installedApplicationInventory.error);
+  assert.ok(Array.isArray(installedApplicationInventory.result.applications));
+  assert.equal(installedApplicationInventory.result.applications.length, initialStatus.result.installedApplications.count);
+  assert.ok(installedApplicationInventory.result.applications.every(application =>
+    typeof application.name === 'string' && application.name.length > 0 && application.name.length <= 200 &&
+    (application.version == null || application.version.length <= 200) &&
+    (application.publisher == null || application.publisher.length <= 200) &&
+    !Object.hasOwn(application, 'installPath') && !Object.hasOwn(application, 'uninstallCommand')),
+  'inventory IPC may expose bounded display metadata only, never paths or uninstall commands');
   assert.equal(initialStatus.result.lastDnsReadUtc, null);
   assert.equal(initialStatus.result.lastDnsErrorUtc, null);
   assert.ok(initialStatus.result.storage.history.totalBytes > 0, 'status must include history database size');

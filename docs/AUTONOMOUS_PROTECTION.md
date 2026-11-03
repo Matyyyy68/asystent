@@ -12,6 +12,7 @@
 - Raz na minutę agent sprawdza zagregowany stan antywirusa i zapory Windows Security Center. Zgłasza brak monitorowania, wstrzymanie lub stan wymagający uwagi jako informację systemową, a nie wykrycie malware. Nie zmienia konfiguracji Windows.
 - Aktualizacja/deinstalacja prosi działającego agenta o zamknięcie i nie zastępuje jego plików, jeśli proces nie zatrzymał się w limicie.
 - Pierwsze otwarcie UI automatycznie wykonuje `collect` po uzyskaniu gotowości silnika i pokazuje ograniczony, rzeczywisty zakres pierwszego sprawdzenia. Status udostępnia czas zakończenia ostatniego poprawnego cyklu; jest on pamiętany tylko przez bieżący proces Engine i odtwarza się po jego następnym udanym cyklu po restarcie.
+- Przy starcie Engine odczytuje lokalnie nazwy, wersje i wydawców z rejestru deinstalacji aplikacji. UI pokazuje tę listę dopiero na żądanie; nie są czytane ścieżki ani komendy deinstalacji. Nie jest to skan CVE ani ocena bezpieczeństwa zainstalowanych programów.
 
 ## Granice autonomii
 
