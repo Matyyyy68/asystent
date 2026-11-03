@@ -3,7 +3,7 @@
 ## Działa obecnie
 
 - `Sentinel.Agent` jest procesem użytkownika Windows z ikoną w zasobniku. Po instalacji instalator uruchamia agenta i rejestruje jego start przy logowaniu w HKCU Run.
-- Repozytorium zawiera teraz `Sentinel.Service`: host SCM uruchamia `Sentinel.Engine` jako `LocalService`, wykonuje cykl `collect` co sekundę, zapisuje dane w katalogu ProgramData z chronionym DACL i używa własnego katalogu pobrań profilu usługi. Host i kontrola DACL budują się; self-test sprawdza jawnie trzy SID-y (LocalService, SYSTEM, Administratorzy). To komponent źródłowy, jeszcze nie część instalowanego produktu.
+- Repozytorium zawiera teraz `Sentinel.Service`: host SCM uruchamia `Sentinel.Engine` jako `LocalService`, wykonuje cykl `collect` co sekundę, zapisuje dane w katalogu ProgramData z chronionym DACL i używa własnego katalogu pobrań profilu usługi. Powtarzające się awarie zwiększają odstęp restartu od 1 do 30 s; opóźnienie resetuje się po co najmniej 60 s działania silnika. To komponent źródłowy, jeszcze nie część instalowanego produktu.
 - Osobny watchdog w tej samej sesji uruchamia proces agenta i wznawia go po awarii z rosnącym odstępem 1–30 s. Watchdog ma nazwany semafor, żeby nie uruchamiać wielu kopii. Nie jest to supervisor systemowy.
 - Agent uruchamia `Sentinel.Engine` niezależnie od okna Electron, wykonuje `collect` co sekundę i udostępnia lokalne IPC przez named pipe ograniczony do bieżącego użytkownika Windows.
 - Zamknięcie samego okna Electron nie zatrzymuje agenta ani silnika. Menu zasobnika pozwala ponownie otworzyć UI i sprawdzić stan.

@@ -11,7 +11,8 @@ internal sealed class SentinelMonitoringWorker : IDisposable
     private readonly string dataRoot = Path.Combine(SecureServiceDataDirectory.GetPath(), "Data");
     private string downloadsPath = string.Empty;
     private EngineProcess? engine;
-    private int restartDelaySeconds = 1;
+    private readonly ServiceRestartBackoff restartBackoff = new();
+    private DateTimeOffset engineStartedAt;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -33,17 +34,17 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             {
                 engine ??= StartEngine();
                 await CollectAsync(cancellationToken);
-                restartDelaySeconds = 1;
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (Exception exception)
             {
-                ServiceLog.Write($"CORE_COLLECTION_FAILED type={exception.GetType().Name} retrySeconds={restartDelaySeconds}");
+                var uptime = engineStartedAt == default ? TimeSpan.Zero : DateTimeOffset.UtcNow - engineStartedAt;
+                var retrySeconds = restartBackoff.DelayForFailure(uptime);
+                ServiceLog.Write($"CORE_COLLECTION_FAILED type={exception.GetType().Name} retrySeconds={retrySeconds}");
                 StopEngine();
-                try { await Task.Delay(TimeSpan.FromSeconds(restartDelaySeconds), cancellationToken); }
+                try { await Task.Delay(TimeSpan.FromSeconds(retrySeconds), cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-                restartDelaySeconds = Math.Min(restartDelaySeconds * 2, 30);
             }
         }
         StopEngine();
@@ -54,6 +55,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         var executable = Path.Combine(AppContext.BaseDirectory, "Sentinel.Engine.exe");
         if (!File.Exists(executable)) throw new FileNotFoundException("Sentinel.Engine.exe is missing from the service directory.");
         var process = new EngineProcess(executable, dataRoot, downloadsPath);
+        engineStartedAt = DateTimeOffset.UtcNow;
         ServiceLog.Write("ENGINE_STARTED under service account");
         return process;
     }
@@ -73,6 +75,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
     {
         engine?.Dispose();
         engine = null;
+        engineStartedAt = default;
     }
 
     public void Dispose() => StopEngine();

@@ -6,7 +6,7 @@
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).
 - `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 450 testów, 2 środowiskowe SKIP. Obejmuje parser stanu Defendera i nieprawidłowe wyniki, korelację Downloads → proces, inwentarz aplikacji, timeout rejestru, wybór najwyższej wagi dźwięku dla grupowanych powiadomień, cztery odmienne tony PCM i trwały, jednokrotny znacznik pierwszego zakończenia analizy.
 - `dotnet build Sentinel.sln -c Release --no-restore`: PASS po dodaniu `Sentinel.Service`, 0 ostrzeżeń/błędów.
-- `Sentinel.Service.exe --self-test`: PASS; sprawdza ochronę DACL katalogu usługi i dokładne SID-y LocalService, SYSTEM i Administratorów bez tworzenia katalogu ani rejestrowania usługi.
+- `Sentinel.Service.exe --self-test`: sprawdza dokładne SID-y deskryptora DACL i regresję backoffu 1–30 s z resetem po stabilnych 60 s; nie tworzy katalogu ani nie rejestruje usługi.
 - `dotnet build src/Sentinel.Agent/Sentinel.Agent.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `Sentinel.AI.Setup.dll --wizard-self-test`: PASS (kod 0).

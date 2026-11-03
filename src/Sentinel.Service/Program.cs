@@ -6,7 +6,7 @@ internal static class Program
     {
         if (!OperatingSystem.IsWindows()) return 2;
         if (args.Length == 1 && args[0].Equals("--self-test", StringComparison.OrdinalIgnoreCase))
-            return SecureServiceDataDirectory.ValidateDirectorySecurity() ? 0 : 1;
+            return SecureServiceDataDirectory.ValidateDirectorySecurity() && new ServiceRestartBackoff().SelfTest() ? 0 : 1;
         if (args.Length == 1 && args[0].Equals("--console", StringComparison.OrdinalIgnoreCase))
         {
             using var cancellation = new CancellationTokenSource();
