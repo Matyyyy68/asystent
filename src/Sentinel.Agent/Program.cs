@@ -134,12 +134,13 @@ internal static class Program
         private readonly Task server;
         private readonly System.Windows.Forms.Timer collector = new() { Interval = 1000 };
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
+        private readonly InitialAnalysisCompletionMarker initialAnalysisCompletion = new(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "first-analysis-completed.v1"));
         private readonly List<(string Key, string Title, string Message, ToolTipIcon Icon, NotificationToneKind Tone)> pendingNotifications = [];
         private readonly Icon normalIcon;
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
         private bool collecting;
-        private bool initialAnalysisToneHandled;
         private bool disposed;
 
         public AgentContext()
@@ -241,11 +242,7 @@ internal static class Program
                     alertUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
                     return;
                 }
-                if (!initialAnalysisToneHandled)
-                {
-                    initialAnalysisToneHandled = true;
-                    playAnalysisCompleteTone = TryMarkInitialAnalysisCompleted();
-                }
+                playAnalysisCompleteTone = initialAnalysisCompletion.TryMarkCompleted();
                 var result = response.RootElement.GetProperty("result");
                 tray.Text = "Sentinel AI — silnik działa w tle";
                 var notifications = result.TryGetProperty("notifications", out var enabled) && enabled.GetBoolean();
@@ -293,22 +290,6 @@ internal static class Program
                     NotificationSoundPlayer.Play(NotificationToneKind.AnalysisComplete);
                 collecting = false;
             }
-        }
-
-        private static bool TryMarkInitialAnalysisCompleted()
-        {
-            var markerPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Sentinel AI", "State", "first-analysis-completed.v1");
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(markerPath)!);
-                using var marker = new FileStream(markerPath, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-                marker.Write("completed"u8);
-                marker.Flush(flushToDisk: true);
-                return true;
-            }
-            catch (IOException) when (File.Exists(markerPath)) { return false; }
-            catch { return false; }
         }
 
         private async Task CheckWindowsSecurityCenterAsync()

@@ -50,4 +50,26 @@ public sealed class NotificationToneTests
         Assert.Equal(NotificationToneKind.Information,
             NotificationTonePolicy.Select([NotificationToneKind.AnalysisComplete, NotificationToneKind.Information]));
     }
+
+    [Fact]
+    public void InitialAnalysisCompletionMarkerIsWrittenOnlyOnce()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "SentinelTests", Guid.NewGuid().ToString("N"));
+        var markerPath = Path.Combine(directory, "first-analysis-completed.v1");
+        try
+        {
+            var marker = new InitialAnalysisCompletionMarker(markerPath);
+
+            Assert.True(marker.TryMarkCompleted());
+            Assert.False(marker.TryMarkCompleted());
+            Assert.Equal("completed", File.ReadAllText(markerPath));
+
+            Assert.False(new InitialAnalysisCompletionMarker(markerPath).TryMarkCompleted());
+            Assert.Equal("completed", File.ReadAllText(markerPath));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
 }
