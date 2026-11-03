@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+- Poprawiono opisy ustawień monitorów: nowe profile mają domyślnie włączone monitorowanie sieci, Downloads i zmian trwałości; zachowane ustawienia nie są nadpisywane.
 - Główny ekran ukrywa szczegóły poszczególnych monitorów pod zwijanym „Szczegóły monitorowania”, pozostawiając status ochrony i wykrycia w widoku podstawowym.
 - Agent grupuje różne alerty wykryte w jednym cyklu do jednego krótkiego balonika; pojedyncze alerty zachowują dotychczasowe treści. Szczegóły zdarzeń pozostają w lokalnej historii, a limit deduplikacji per typ nadal obowiązuje.
 - Dodano ograniczoną regułę korelacji uruchomień Office z interpreterami/hostami skryptów, z parent/child PID i nazwami w lokalnych dowodach. Heurystyka ma umiarkowane ryzyko, ostrzega bez blokowania i jawnie zaznacza możliwość legalnego użycia oraz pominięcia krótkich procesów.

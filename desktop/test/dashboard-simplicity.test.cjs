@@ -14,3 +14,15 @@ test('main dashboard keeps detailed monitor status collapsed by default', () => 
   assert.match(overview, /<h2>STAN SENTINEL AI|STAN SENTINEL AI|protectionStatus\.title/,
     'The main screen must retain the real protection status.');
 });
+
+test('settings describe enabled defaults for network, Downloads, and persistence monitoring', () => {
+  const ui = fs.readFileSync(path.resolve(__dirname, '../src/main.tsx'), 'utf8');
+  const models = fs.readFileSync(path.resolve(__dirname, '../../src/Sentinel.Core/Models.cs'), 'utf8');
+  const expectedDefaultText = 'Domyślnie włączone dla nowych profili. Zapisane ustawienia pozostają bez zmian.';
+
+  for (const setting of ['MonitorNetworkConnections', 'MonitorDownloadedFiles', 'MonitorPersistenceChanges']) {
+    assert.match(models, new RegExp(`bool ${setting} = true`), `${setting} must default to enabled for new profiles.`);
+  }
+  assert.equal(ui.split(expectedDefaultText).length - 1, 3,
+    'Each monitoring setting must explain its new-profile default and preserved saved value.');
+});

@@ -9,6 +9,8 @@
 
 ## Najnowszy stan przebudowy — 2026-11-03
 
+- Ujednolicono opisy trzech monitorów ustawień z rzeczywistymi domyślnymi wartościami: nowe profile włączają sieć, Downloads i trwałość, a dotychczasowe preferencje pozostają zachowane; test statyczny porównuje UI z modelami Core.
+
 - Kolejny etap ogranicza spam alertów: Sentinel.Agent grupuje różne typy sygnałów z jednego cyklu w jeden balonik, zachowując szczegóły w lokalnej historii i deduplikację 10-minutową. Testy streszczeń obejmują duplikaty kategorii, pustą paczkę i maksymalną długość.
 - Uproszczono stronę główną: techniczne stany monitorów i Windows Security Center są domyślnie zwinięte, a rzeczywisty status ochrony i ostatnie wykrycia pozostają widoczne. Test regresji chroni podstawowy, zwinięty widok.
 
