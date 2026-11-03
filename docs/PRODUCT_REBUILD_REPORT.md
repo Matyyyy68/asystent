@@ -54,6 +54,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - Odtwarza krótkie standardowe dźwięki systemowe. Własny zestaw dźwięków produktu nie został przygotowany.
 - Ikona zasobnika zmienia się przy alertach i błędzie silnika.
 - Menu zasobnika ma skrót „Ostatnie alerty”, który otwiera historię zdarzeń w Electron.
+- Menu zasobnika oferuje ręczne sprawdzenie najnowszego stabilnego wydania przez GitHub API. Użytkownik sam otwiera stronę wydania; brak automatycznego pobierania, weryfikowanego manifestu i instalacji aktualizacji.
 - Korelacja obserwacji dotyczących tego samego incydentu między źródłami oraz test dźwięku w aktywnej sesji Windows pozostają do wykonania.
 
 ## 8. Menu kontekstowe

@@ -1,5 +1,11 @@
 # Postęp projektu Sentinel AI
 
+## Sprawdzenie aktualizacji i skróty zasobnika — 2026-11-03
+
+- Dodano ręczną pozycję „Sprawdź aktualizacje” do menu zasobnika. Klient odpytuje wyłącznie endpoint najnowszego stabilnego wydania repozytorium, ogranicza rozmiar odpowiedzi, odrzuca przekierowania/tagi niezgodne z wersją i buduje adres zaufanej strony z lokalnie stałego hosta/repo. Nie pobiera ani nie uruchamia instalatora.
+- Walidacja: testy checker 7/7 PASS; `Sentinel.Agent` Release build 0 ostrzeżeń/błędów. Pełna walidacja Windows CI oczekuje na push.
+- Ograniczenie pozostaje: to powiadomienie o wydaniu z ręcznym przejściem, nie podpisany ani automatyczny updater.
+
 ## Weryfikacja poprawki ujawnionej przez CI — 2026-11-03
 
 - CI run [41671769059](https://github.com/Matyyyy68/asystent/actions/runs/41671769059) dla `f42108a` przeszedł 419/419 testów .NET, ale zatrzymał się w teście wersji ujawnianej w ekranie ręcznej analizy: UI wskazywał `2026.10.13`, a aktywne reguły mają `2026.11.03`.

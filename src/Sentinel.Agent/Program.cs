@@ -123,6 +123,7 @@ internal static class Program
             menu.Items.Add("Otwórz Sentinel AI", null, (_, _) => OpenUi(appRoot));
             menu.Items.Add("Stan ochrony", null, async (_, _) => await ShowStatusAsync());
             menu.Items.Add("Ostatnie alerty", null, (_, _) => OpenUi(appRoot, "--alerts"));
+            menu.Items.Add("Sprawdź aktualizacje", null, async (_, _) => await CheckForUpdatesAsync());
             menu.Items.Add("Zamknij interfejs (ochrona działa dalej)", null, (_, _) => CloseUi(appRoot));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Sentinel działa w tle", null, (_, _) => { });
@@ -165,6 +166,36 @@ internal static class Program
             var appPath = Path.Combine(appRoot, "Sentinel AI.exe");
             try { Process.Start(new ProcessStartInfo(appPath) { UseShellExecute = true, Arguments = "--quit-ui" }); }
             catch (Exception exception) { MessageBox.Show($"Nie można zamknąć interfejsu ({exception.GetType().Name}).", "Sentinel AI", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            try
+            {
+                using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+                using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
+                var version = typeof(Program).Assembly.GetName().Version
+                    ?? throw new InvalidOperationException("Nie można ustalić wersji Sentinel AI.");
+                var result = await GitHubReleaseUpdateChecker.CheckAsync(client, version, shutdown.Token);
+                if (result.UpdateAvailable)
+                {
+                    var choice = MessageBox.Show(
+                        $"Dostępna jest wersja {result.LatestVersion}; używasz {result.InstalledVersion}.\n\nOtworzyć oficjalną stronę wydania? Aktualizacja nie zostanie pobrana ani zainstalowana automatycznie.",
+                        "Aktualizacja Sentinel AI", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                    if (choice == DialogResult.Yes)
+                        Process.Start(new ProcessStartInfo(result.ReleaseUrl) { UseShellExecute = true });
+                }
+                else
+                {
+                    MessageBox.Show($"Masz aktualną wersję Sentinel AI ({result.InstalledVersion}).", "Aktualizacja Sentinel AI", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (OperationCanceledException) when (shutdown.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                MessageBox.Show($"Nie udało się sprawdzić aktualizacji ({exception.GetType().Name}). Sprawdź połączenie i spróbuj ponownie.",
+                    "Aktualizacja Sentinel AI", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private async Task CollectAsync()
