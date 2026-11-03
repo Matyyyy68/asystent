@@ -82,11 +82,6 @@ internal static class MachineServiceInstaller
         using var identity = WindowsIdentity.GetCurrent();
         var sid = identity.User ?? throw new InvalidOperationException("Nie można ustalić konta użytkownika instalacji.");
         RunElevated("install", sid.Value);
-        if (!VerifyCurrentUserServiceHealth())
-        {
-            try { RunElevated("uninstall", null); } catch { }
-            throw new IOException("Usługa Sentinel AI nie potwierdziła poprawnego pierwszego cyklu ochrony.");
-        }
     }
 
     public static void UninstallElevated()
@@ -101,11 +96,11 @@ internal static class MachineServiceInstaller
         {
             using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut,
                 PipeOptions.None, TokenImpersonationLevel.Impersonation);
-            pipe.Connect(5000);
+            pipe.Connect(1000);
             using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 1024, leaveOpen: true);
             using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
             writer.WriteLine("{\"id\":\"setup-health\",\"version\":1,\"method\":\"status\"}");
-            var line = reader.ReadLine();
+            var line = reader.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
             if (string.IsNullOrWhiteSpace(line)) return false;
             using var response = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 4 });
             var root = response.RootElement;
@@ -228,6 +223,8 @@ internal static class MachineServiceInstaller
             RunSc("start", ServiceName);
             WaitForServiceState(4, TimeSpan.FromSeconds(60));
             WaitForFirstCollection(TimeSpan.FromSeconds(90));
+            if (!WaitForCurrentUserServiceHealth(TimeSpan.FromSeconds(15)))
+                throw new IOException("Usługa nie odpowiedziała przez uwierzytelniony status pipe po pierwszym cyklu.");
             Program.Log($"MACHINE_SERVICE_INSTALL_SUCCESS service={ServiceName} serviceExisted={serviceExisted} account=LocalService");
             if (oldMoved) Directory.Delete(backup, recursive: true);
             return 0;
@@ -442,6 +439,17 @@ internal static class MachineServiceInstaller
             Thread.Sleep(500);
         }
         throw new TimeoutException("Silnik Sentinel AI nie zakończył pierwszego cyklu w wyznaczonym czasie.");
+    }
+
+    private static bool WaitForCurrentUserServiceHealth(TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        do
+        {
+            if (VerifyCurrentUserServiceHealth()) return true;
+            Thread.Sleep(200);
+        } while (DateTimeOffset.UtcNow < deadline);
+        return false;
     }
 
     private static int ParseServiceState(string output)
