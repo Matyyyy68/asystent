@@ -46,7 +46,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 - Istniejące reguły, lokalne listy reputacji i obserwacje systemowe zapisują ustrukturyzowane zdarzenia z ryzykiem, źródłem, uzasadnieniem, zaleceniem i statusem.
 - Lokalny model AI pozostaje opcjonalny; brak modelu nie wyłącza reguł.
-- Automatyczna kwarantanna, usuwanie i blokada wykonania nie są wdrożone.
+- Ręczna kwarantanna jest dostępna tylko dla nowego pliku z Downloads, którego SHA-256 dopasowano do lokalnej listy. Electron wymaga osobnego potwierdzenia, a Engine sprawdza hash przy wybranym pliku, bez uruchamiania i bez nadpisywania. Przywrócenie jest jawne i ponownie kontroluje hash. Automatyczna kwarantanna, usuwanie i blokada wykonania nie są wdrożone.
 
 ## 7. Powiadomienia i dźwięk
 

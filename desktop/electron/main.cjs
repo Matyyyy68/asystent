@@ -6,6 +6,7 @@ const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-l
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
 const { requestedFileCheck } = require('./file-check-args.cjs');
+const { quarantineDownloadedFile, restoreDownloadedFile } = require('./downloaded-file-actions.cjs');
 const { isolatedElectronPaths, lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
@@ -22,7 +23,7 @@ const isAutostartEnabled = () => {
   return settings.executableWillLaunchAtLogin === true &&
     settings.launchItems?.some(item => item.name === 'Sentinel AI' && item.scope === 'user' && item.enabled && item.args?.includes('--minimized')) === true;
 };
-const allowed = new Set(['status', 'history', 'collect', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
+const allowed = new Set(['status', 'history', 'quarantineList', 'collect', 'eventStatus', 'quarantineDownloadedFile', 'restoreDownloadedFile', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -98,6 +99,12 @@ app.whenReady().then(() => {
       if (choice.canceled || !choice.filePath) return null;
       if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać diagnostyki.');
       return call(method, { path: choice.filePath, hostLifecycle: engine.diagnostics(), hostFailures: readFailures(lifecycleLogDirectory) });
+    }
+    if (method === 'quarantineDownloadedFile') {
+      return quarantineDownloadedFile({ dialog, window: win, call, downloadsPath: app.getPath('downloads'), eventId: data?.eventId });
+    }
+    if (method === 'restoreDownloadedFile') {
+      return restoreDownloadedFile({ dialog, window: win, call, eventId: data?.eventId });
     }
     if (!allowed.has(method) || JSON.stringify(data).length > 23000) throw new Error('Nieprawidłowe żądanie');
     if (method === 'analyze' && data?.shareWithEnterprise === true) {

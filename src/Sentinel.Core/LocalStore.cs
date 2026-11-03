@@ -11,6 +11,7 @@ using Sentinel.Core.Enterprise;
 namespace Sentinel.Core;
 public sealed record ProcessChangeQueueItem(long QueueId, Guid EventId, DateTimeOffset ObservedAt, string Action,
     int ProcessId, string ProcessName, Guid? CorrelationId);
+public sealed record DownloadedFileQuarantineCandidate(Guid EventId, string Sha256);
 public sealed record ProcessChangeQueueSnapshot(int Count, IReadOnlyList<ProcessChangeQueueItem> Items);
 
 public sealed class LocalStore : IEventRepository, ISettingsRepository
@@ -1477,6 +1478,25 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(cancellationToken); using var command = c.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM events";
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
+    public async Task<DownloadedFileQuarantineCandidate> ReadDownloadedFileQuarantineCandidateAsync(long eventRowId, CancellationToken cancellationToken = default)
+    {
+        if (eventRowId <= 0) throw new ArgumentOutOfRangeException(nameof(eventRowId));
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT event_id,source,evidence_codes,signal_hash,EXISTS(SELECT 1 FROM event_observations WHERE event_row_id=events.id AND source='downloads-local-hash') FROM events WHERE id=$id";
+        command.Parameters.AddWithValue("$id", eventRowId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken) || reader.IsDBNull(0) || !Guid.TryParse(reader.GetString(0), out var eventId) ||
+            eventId == Guid.Empty || reader.IsDBNull(1) ||
+            (!string.Equals(reader.GetString(1), "downloads-local-hash", StringComparison.Ordinal) && reader.GetInt64(4) != 1))
+            throw new InvalidOperationException("Tylko zdarzenie z dopasowaniem lokalnej reputacji nowego pliku może zostać przeniesione do kwarantanny.");
+        var evidence = ParseEvidenceCodes(reader.IsDBNull(2) ? null : reader.GetString(2));
+        var hash = reader.IsDBNull(3) ? null : reader.GetString(3);
+        if (!evidence.Contains("file.sha256.matches-local-list", StringComparer.Ordinal) ||
+            hash is null || hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
+            throw new InvalidOperationException("Zdarzenie nie zawiera prawidłowego potwierdzenia lokalnego hasha pliku.");
+        return new(eventId, hash.ToUpperInvariant());
+    }
     public async Task UpdateProcessImageInspectionAsync(Guid eventId, string? sha256, string signatureStatus, bool? localHashMatch, CancellationToken cancellationToken = default)
     {
         if (eventId == Guid.Empty || signatureStatus is not ("Valid" or "NotSigned" or "HashMismatch" or "NotTrusted" or "Unknown" or "Unavailable" or "TooLarge" or "QueueFull"))
@@ -1526,6 +1546,13 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (!Enum.IsDefined(status)) throw new ArgumentException("Nieprawidłowy status.");
         await using var c = await Open(cancellationToken);
         await Execute(c, "UPDATE events SET status=$s WHERE id=$id", cancellationToken, ("$s", (int)status), ("$id", id));
+    }
+    public async Task SetStatusByEventIdAsync(Guid eventId, EventStatus status, CancellationToken cancellationToken = default)
+    {
+        if (eventId == Guid.Empty || !Enum.IsDefined(status)) throw new ArgumentException("Nieprawidłowy identyfikator lub status zdarzenia.");
+        await using var connection = await Open(cancellationToken);
+        await Execute(connection, "UPDATE events SET status=$s WHERE event_id=$eventId", cancellationToken,
+            ("$s", (int)status), ("$eventId", eventId.ToString("D")));
     }
     public async Task DeleteHistoryAsync(CancellationToken cancellationToken = default)
     { await using var c = await Open(cancellationToken); await Execute(c, "DELETE FROM events; DELETE FROM enterprise_event_queue; DELETE FROM enterprise_event_deferred; DELETE FROM domain_correlation; VACUUM;", cancellationToken); }

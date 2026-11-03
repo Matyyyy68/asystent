@@ -13,7 +13,8 @@ public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel 
     string? ProcessImagePath = null, string? ProcessImageSha256 = null,
     string? ProcessImageSignatureStatus = null, bool? ProcessImageLocalHashMatch = null,
     DateTimeOffset? ProcessedAt = null,
-    IReadOnlyList<string>? AnalysisLimitations = null);
+    IReadOnlyList<string>? AnalysisLimitations = null,
+    bool Quarantined = false);
 public sealed record EventObservation(Guid EventId, DateTimeOffset ObservedAt, string Source,
     IReadOnlyList<string> EvidenceCodes, DateTimeOffset? ProcessedAt = null,
     IReadOnlyList<string>? AnalysisLimitations = null);

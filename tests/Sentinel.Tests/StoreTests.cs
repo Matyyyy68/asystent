@@ -406,6 +406,22 @@ public sealed class StoreTests : IDisposable
         Assert.DoesNotContain("A1B2C3D4E5F60718293A4B5C6D7E8F90123456789ABCDEF0123456789ABCDEF0", System.Text.Json.JsonSerializer.Serialize(saved), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(saved.Id, canonical);
     }
+    [Fact] public async Task DownloadedFileQuarantineAcceptsOnlyStoredLocalHashReputationEvidence()
+    {
+        var store = await Store();
+        const string hash = "A1B2C3D4E5F60718293A4B5C6D7E8F90123456789ABCDEF0123456789ABCDEF0";
+        var valid = new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information, "Pobrany plik", "Downloads", "Match", "Review", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "downloads-local-hash", EvidenceCodes: ["file.sha256.matches-local-list"], SignalHash: hash);
+        var validId = await store.AddLocalOnlyAsync(valid);
+        var candidate = await store.ReadDownloadedFileQuarantineCandidateAsync(validId);
+        Assert.Equal(valid.EventId, candidate.EventId);
+        Assert.Equal(hash, candidate.Sha256);
+
+        var unrelatedId = await store.AddLocalOnlyAsync(valid with { Id = 0, EventId = Guid.NewGuid(), Source = "manual-file-analysis", SignalHash = new string('B', 64) });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.ReadDownloadedFileQuarantineCandidateAsync(unrelatedId));
+        var missingEvidenceId = await store.AddLocalOnlyAsync(valid with { Id = 0, EventId = Guid.NewGuid(), EvidenceCodes = ["file.sha256.available"], SignalHash = new string('C', 64) });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.ReadDownloadedFileQuarantineCandidateAsync(missingEvidenceId));
+    }
     [Fact] public async Task BackupRestorePreservesMergedCERTObservations()
     {
         var store = await Store();

@@ -4,7 +4,7 @@ const { createServer } = require('node:http');
 const net = require('node:net');
 const os = require('node:os');
 const { createSocket } = require('node:dgram');
-const { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, truncateSync, copyFileSync } = require('node:fs');
+const { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, truncateSync, copyFileSync, existsSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -153,6 +153,21 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.ok(downloadedHistory.some(event => event.observations?.some(observation => observation.source === 'downloads-local-hash') &&
       !JSON.stringify(event).includes('synthetic-download.ps1')),
     'opt-in Downloads monitor must merge matching local file signals without storing the filename or sending data to a service');
+  const matchingDownloadedEvent = downloadedHistory.find(event => (event.source === 'downloads-local-hash' || event.observations?.some(observation => observation.source === 'downloads-local-hash')) &&
+    event.evidenceCodes?.includes('file.sha256.matches-local-list'));
+  assert.ok(matchingDownloadedEvent, 'the matching Downloads signal must be eligible for an explicitly requested quarantine action');
+  const quarantined = await call('quarantineDownloadedFile', { eventId: matchingDownloadedEvent.id, path: downloadedFixture });
+  assert.equal(quarantined.ok, true, quarantined.error);
+  assert.equal(quarantined.result.state, 'Quarantined');
+  assert.equal(existsSync(downloadedFixture), false, 'quarantine must move the selected file out of Downloads');
+  let quarantineHistory = (await call('history')).result;
+  assert.equal(quarantineHistory.find(event => event.id === matchingDownloadedEvent.id).quarantined, true);
+  assert.deepEqual(Object.keys(quarantined.result).sort(), ['eventId', 'fileName', 'state'], 'quarantine result must not expose a filesystem path');
+  const restoredQuarantine = await call('restoreDownloadedFile', { eventId: matchingDownloadedEvent.eventId });
+  assert.equal(restoredQuarantine.ok, true, restoredQuarantine.error);
+  assert.equal(restoredQuarantine.result.state, 'Restored');
+  assert.equal(existsSync(downloadedFixture), true, 'restore must return the original file');
+  assert.equal((await call('history')).result.find(event => event.id === matchingDownloadedEvent.id).quarantined, false);
   const oversizedDownload = path.join(downloadsDirectory, 'synthetic-oversized-download.bin'); writeFileSync(oversizedDownload, 'x');
   truncateSync(oversizedDownload, 256 * 1024 * 1024 + 1);
   mkdirSync(path.join(downloadsDirectory, 'nested'));

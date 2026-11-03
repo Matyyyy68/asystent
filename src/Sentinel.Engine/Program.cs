@@ -36,6 +36,11 @@ if (!File.Exists(pointer)) await File.WriteAllTextAsync(pointer, directory);
 var downloadsDirectory = Environment.GetEnvironmentVariable("SENTINEL_DOWNLOADS_PATH") ??
     DownloadedFileMonitor.GetKnownDownloadsDirectory();
 using var downloadedFileMonitor = new DownloadedFileMonitor(downloadsDirectory);
+var downloadedFileQuarantine = new DownloadedFileQuarantine(directory, downloadsDirectory);
+var downloadedFileQuarantineState = "Kwarantanna lokalna jest gotowa.";
+try { await downloadedFileQuarantine.InitializeAsync(); }
+catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SqliteException or InvalidDataException)
+{ downloadedFileQuarantineState = "Kwarantanna niedostępna: " + exception.GetType().Name; }
 var settings = await store.LoadSettingsAsync();
 await downloadedFileMonitor.SetEnabledAsync(store, settings.MonitorDownloadedFiles && !settings.Paused);
 var defaultExcludedApplications = settings.ExcludedApplications;
@@ -345,6 +350,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     certFeedRefresh = certFeedRefreshScheduler.Status,
                     ipReputation = ipReputation.Status(), urlReputation = urlReputation.Status(DateTimeOffset.UtcNow),
                     downloadedFiles = downloadedFileMonitor.State,
+                    downloadedFileQuarantine = downloadedFileQuarantineState,
                     browsers = BrowserDiagnostics.Read(root), database = store.DatabasePath,
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
@@ -434,12 +440,37 @@ while (await Console.In.ReadLineAsync() is { } line)
                     persistenceChanges, persistenceSuspiciousChanges = persistenceMonitor.LastSuspiciousChanges,
                     persistence = persistenceMonitor.State, enterpriseSync };
                 break;
-            case "history": result = await store.ReadAsync(); break;
+            case "history":
+                var history = await store.ReadAsync();
+                var quarantinedEventIds = downloadedFileQuarantineState.StartsWith("Kwarantanna lokalna", StringComparison.Ordinal)
+                    ? await downloadedFileQuarantine.ReadQuarantinedEventIdsAsync() : new HashSet<Guid>();
+                result = history.Select(item => item with { Quarantined = item.EventId is { } eventId && quarantinedEventIds.Contains(eventId) }).ToArray();
+                break;
             case "eventStatus":
                 if (!Enum.TryParse<EventStatus>(request.GetProperty("status").GetString(), ignoreCase: true, out var eventStatus) || !Enum.IsDefined(eventStatus))
                     throw new InvalidDataException("Nieprawidłowy status zdarzenia.");
                 await store.SetStatusAsync(request.GetProperty("eventId").GetInt64(), eventStatus);
                 result = new { updated = true };
+                break;
+            case "quarantineDownloadedFile":
+                var quarantineEventRowId = request.GetProperty("eventId").GetInt64();
+                var quarantinePath = request.GetProperty("path").GetString() ?? throw new InvalidDataException("Nie wskazano pliku do kwarantanny.");
+                var quarantineCandidate = await store.ReadDownloadedFileQuarantineCandidateAsync(quarantineEventRowId);
+                if (!downloadedFileQuarantineState.StartsWith("Kwarantanna lokalna", StringComparison.Ordinal))
+                    throw new IOException(downloadedFileQuarantineState);
+                result = await downloadedFileQuarantine.QuarantineAsync(quarantineCandidate.EventId, quarantinePath, quarantineCandidate.Sha256);
+                await store.SetStatusByEventIdAsync(quarantineCandidate.EventId, EventStatus.Reviewed);
+                break;
+            case "restoreDownloadedFile":
+                var restoreEventId = request.GetProperty("eventId").GetGuid();
+                if (!downloadedFileQuarantineState.StartsWith("Kwarantanna lokalna", StringComparison.Ordinal))
+                    throw new IOException(downloadedFileQuarantineState);
+                result = await downloadedFileQuarantine.RestoreAsync(restoreEventId);
+                break;
+            case "quarantineList":
+                if (!downloadedFileQuarantineState.StartsWith("Kwarantanna lokalna", StringComparison.Ordinal))
+                    throw new IOException(downloadedFileQuarantineState);
+                result = await downloadedFileQuarantine.ReadOutstandingAsync();
                 break;
             case "knowledgeList": result = await knowledge.ListAsync(); break;
             case "knowledgeImport":

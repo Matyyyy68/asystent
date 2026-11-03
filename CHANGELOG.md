@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+- Dodano jawną, odwracalną kwarantannę dla zdarzeń nowych plików z Downloads dopasowanych do lokalnej listy SHA-256. Użytkownik zatwierdza operację i wybiera plik; Engine ponownie liczy hash, przenosi plik bez uruchamiania, a przywrócenie weryfikuje hash i nie nadpisuje istniejącej ścieżki. Inne typy wykryć nie mogą wywołać tej akcji.
 - Zastąpiono domyślny dźwięk Windows trzema krótkimi, cichymi tonami Sentinel (informacja, ostrzeżenie, poważne ostrzeżenie), generowanymi jako lokalny PCM WAV. Aktualne sygnały agenta są klasyfikowane jako ostrzeżenia i odtwarzają ton ostrzegawczy; awaria audio nie przerywa ochrony.
 - Menu ikony zasobnika zawiera ręczne „Sprawdź aktualizacje”. Sprawdza najnowsze stabilne wydanie przez publiczne GitHub API i otwiera wyłącznie stały adres wydania repozytorium; niczego nie pobiera ani nie instaluje automatycznie.
 - Historia zdarzeń pokazuje polskie, zrozumiałe etykiety ryzyka i statusu; źródło, wersja reguł, schemat i kody dowodowe są schowane w rozwijanych szczegółach. Dodano osobną akcję „Oznacz jako sprawdzone”, aby nie mylić potwierdzenia z fałszywym alarmem.
