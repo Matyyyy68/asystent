@@ -12,7 +12,8 @@ function createFileCheckBatcher(onBatch, { delayMs = 350 } = {}) {
   let closed = false;
 
   const schedule = delay => {
-    if (closed || timer || pending.size === 0) return;
+    if (closed || pending.size === 0) return;
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => { timer = null; void flush(); }, delay);
   };
 
