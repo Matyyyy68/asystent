@@ -39,4 +39,19 @@ public sealed class InstalledApplicationInventoryTests
     {
         Assert.Throws<ArgumentNullException>(() => InstalledApplicationInventoryReader.Normalize(null!));
     }
+
+    [Fact]
+    public async Task SlowRegistryReadReturnsExplicitlyIncompleteSnapshotWithoutBlockingEngineStatus()
+    {
+        var pendingRead = new TaskCompletionSource<InstalledApplicationInventorySnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var result = await InstalledApplicationInventoryReader.ReadAvailableAsync(pendingRead.Task, TimeSpan.FromMilliseconds(10));
+
+        Assert.Empty(result.Applications);
+        Assert.False(result.Complete);
+        pendingRead.SetResult(new([new InstalledApplication("Later", null, null)], true, DateTimeOffset.UtcNow));
+        var completed = await InstalledApplicationInventoryReader.ReadAvailableAsync(pendingRead.Task, TimeSpan.FromSeconds(1));
+        Assert.True(completed.Complete);
+        Assert.Equal("Later", Assert.Single(completed.Applications).Name);
+    }
 }

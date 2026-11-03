@@ -25,6 +25,8 @@ var directory = await DataDirectoryPointer.ReadAsync(pointer, Path.Combine(root,
 var store = new LocalStore(directory);
 await store.InitializeAsync();
 var installedApplicationInventoryTask = Task.Run(InstalledApplicationInventoryReader.Read);
+async Task<InstalledApplicationInventorySnapshot> GetInstalledApplicationInventoryAsync()
+    => await InstalledApplicationInventoryReader.ReadAvailableAsync(installedApplicationInventoryTask, TimeSpan.FromSeconds(3));
 var installationProfile = await store.GetInstallationProfileAsync();
 var deviceCredentials = new WindowsDpapiCredentialStore(directory);
 var malwareBazaarCredentials = new WindowsDpapiCredentialStore(directory, "malwarebazaar-auth-key.bin", 1, 256,
@@ -337,7 +339,7 @@ while (await Console.In.ReadLineAsync() is { } line)
         switch (request.GetProperty("method").GetString())
         {
             case "status":
-                var installedApplicationInventory = await installedApplicationInventoryTask;
+                var installedApplicationInventory = await GetInstalledApplicationInventoryAsync();
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     lastCollectionAtUtc,
@@ -360,7 +362,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     storage = new { history = await store.GetStorageMetricsAsync(), knowledge = await knowledge.GetStorageMetricsAsync() } };
                 break;
             case "installedApplications":
-                result = await installedApplicationInventoryTask;
+                result = await GetInstalledApplicationInventoryAsync();
                 break;
             case "updateFeed": await reputation.UpdateAsync(); result = reputation.Status(DateTimeOffset.UtcNow); break;
             case "rollbackFeed": reputation.Rollback(); result = reputation.Status(DateTimeOffset.UtcNow); break;

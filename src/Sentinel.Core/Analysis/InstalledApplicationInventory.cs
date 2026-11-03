@@ -40,6 +40,16 @@ public static class InstalledApplicationInventoryReader
         return new(normalized, complete, DateTimeOffset.UtcNow);
     }
 
+    public static async Task<InstalledApplicationInventorySnapshot> ReadAvailableAsync(
+        Task<InstalledApplicationInventorySnapshot> inventoryTask, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(inventoryTask);
+        if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMinutes(1))
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        try { return await inventoryTask.WaitAsync(timeout, cancellationToken).ConfigureAwait(false); }
+        catch (TimeoutException) { return new([], false, DateTimeOffset.UtcNow); }
+    }
+
     public static IReadOnlyList<InstalledApplication> Normalize(IEnumerable<InstalledApplication> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);

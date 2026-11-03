@@ -10,6 +10,8 @@
 - Odczyt cache DNS z błędem albo bez pierwszej próbki obniża główny status do „Ochrona ograniczona”; status nie może już pomijać wymaganego źródła DNS.
 - Instalator ponawia ograniczoną liczbę razy niepotwierdzone polecenie bezpiecznego zatrzymania Core, gdy agent nadal działa; trwała odmowa nadal blokuje zmianę plików.
 - Główny ekran pokazuje czas ostatniego udanego cyklu monitorowania przekazany przez silnik; po restarcie silnika czas pojawi się ponownie po następnym udanym cyklu. Kliknięcie balonika alertu otwiera główne okno.
+- Pierwsze sprawdzenie pokazuje lokalną listę nazw, wersji i wydawców aplikacji z rejestru dopiero na żądanie; spis nie obejmuje oceny CVE.
+- Odczyt inwentarza rejestru nie blokuje statusu monitorów dłużej niż 3 sekundy; opóźniony wynik jest oznaczany jako niekompletny i może zostać pobrany przy kolejnym żądaniu.
 - Poprawiono opisy ustawień monitorów: nowe profile mają domyślnie włączone monitorowanie sieci, Downloads i zmian trwałości; zachowane ustawienia nie są nadpisywane.
 - Główny ekran ukrywa szczegóły poszczególnych monitorów pod zwijanym „Szczegóły monitorowania”, pozostawiając status ochrony i wykrycia w widoku podstawowym.
 - Agent grupuje różne alerty wykryte w jednym cyklu do jednego krótkiego balonika; pojedyncze alerty zachowują dotychczasowe treści. Szczegóły zdarzeń pozostają w lokalnej historii, a limit deduplikacji per typ nadal obowiązuje.
