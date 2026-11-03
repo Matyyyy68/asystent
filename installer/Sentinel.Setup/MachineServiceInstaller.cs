@@ -223,8 +223,20 @@ internal static class MachineServiceInstaller
             RunSc("start", ServiceName);
             WaitForServiceState(4, TimeSpan.FromSeconds(60));
             WaitForFirstCollection(TimeSpan.FromSeconds(90));
-            if (!WaitForCurrentUserServiceHealth(TimeSpan.FromSeconds(15)))
-                throw new IOException("Usługa nie odpowiedziała przez uwierzytelniony status pipe po pierwszym cyklu.");
+            using (var helperIdentity = WindowsIdentity.GetCurrent())
+            {
+                if (StringComparer.OrdinalIgnoreCase.Equals(helperIdentity.User?.Value, userSid.Value))
+                {
+                    if (!WaitForCurrentUserServiceHealth(TimeSpan.FromSeconds(15)))
+                        throw new IOException("Usługa nie odpowiedziała przez uwierzytelniony status pipe po pierwszym cyklu.");
+                }
+                else
+                {
+                    // UAC may run under separate administrator credentials. The target user's SID is
+                    // already bound into the pipe ACL; only that user's unelevated UI can authenticate it.
+                    Program.Log("MACHINE_SERVICE_HEALTH_DEFERRED reason=elevated_account_differs");
+                }
+            }
             Program.Log($"MACHINE_SERVICE_INSTALL_SUCCESS service={ServiceName} serviceExisted={serviceExisted} account=LocalService");
             if (oldMoved) Directory.Delete(backup, recursive: true);
             return 0;
