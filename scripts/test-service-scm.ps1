@@ -70,6 +70,12 @@ try {
     throw 'Isolated service directory does not contain both executable payloads.'
   }
 
+  # LocalService cannot execute a user-private %TEMP% directory by default.
+  # Grant it read/execute only on this unique test payload; service data keeps
+  # its separate protected ProgramData DACL.
+  & icacls.exe $tempRoot /grant '*S-1-5-19:(OI)(CI)(RX)' /T /C | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not grant LocalService read/execute access to the isolated service payload (icacls exit $LASTEXITCODE)." }
+
   $quotedBinPath = '"' + $serviceExe + '" --allowed-user-sid=' + $interactiveUserSid
   Invoke-Sc @('create', $serviceName, 'binPath=', $quotedBinPath, 'start=', 'demand', 'obj=', 'NT AUTHORITY\LocalService') | Out-Null
   $serviceCreated = $true
