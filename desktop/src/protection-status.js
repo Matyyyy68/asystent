@@ -1,4 +1,4 @@
-const unavailable = /niedostępny|niedostępna|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione/i;
+const unavailable = /niedostępny|niedostępna|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione|jeszcze nie wykonano/i;
 
 export function getProtectionStatus(status, firstRun, firstAssessment) {
   if (!status) return { title: 'Ochrona niedostępna', description: 'Silnik nie odpowiada. Nie można potwierdzić działania monitorowania.' };
@@ -15,6 +15,7 @@ export function getProtectionStatus(status, firstRun, firstAssessment) {
     ['Zmiany autostartu', status.persistence, status.settings?.monitorPersistenceChanges],
     ['Połączenia sieciowe', status.tcpConnections, status.settings?.monitorNetworkConnections]
   ];
+  if (typeof status.dns === 'string') monitors.push(['Cache DNS', status.dns, true]);
   const problems = monitors.filter(([, value, enabled]) => enabled !== true || typeof value !== 'string' || unavailable.test(value));
   if (problems.length)
     return { title: 'Ochrona ograniczona', description: `Nie działa lub jest wyłączone: ${problems.map(([name]) => name).join(', ')}. Pozostałe źródła mogą nadal działać.` };

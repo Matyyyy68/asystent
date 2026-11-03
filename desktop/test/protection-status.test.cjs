@@ -41,6 +41,26 @@ test('claims background monitoring only when all required sources report healthy
   assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
 });
 
+test('reports DNS cache failures and uncollected DNS state as limited protection', async () => {
+  const status = {
+    settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },
+    processes: 'Snapshot procesów działa; 80 PID',
+    downloadedFiles: 'Monitoring Downloads działa; brak lokalnej listy hashy.',
+    persistence: 'Monitor zmian autostartu działa; baseline ustawiony.',
+    tcpConnections: 'Ciągła migawka TCP/UDP działa; 4 połączenia.',
+    dns: 'Odczyt cache DNS niedostępny: IOException',
+    dnsOperational: 'Kanał DNS Operational jest wyłączony; nie zmieniono konfiguracji systemu'
+  };
+  const failed = await getStatus(status, false, 'complete');
+  assert.equal(failed.title, 'Ochrona ograniczona');
+  assert.match(failed.description, /Cache DNS/);
+
+  status.dns = 'Jeszcze nie wykonano odczytu cache DNS';
+  assert.match((await getStatus(status, false, 'complete')).description, /Cache DNS/);
+  status.dns = 'Odczyt cache DNS działa; bez DoH, pełnych URL i PID';
+  assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
+});
+
 test('reflects Windows Security Center attention and unknown health in the main status', async () => {
   const status = {
     settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },
