@@ -80,11 +80,10 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Bieżąca zmiana kwarantanny: desktop 79/79, lint/TypeScript i produkcyjny Vite (1584 moduły) PASS; pełne .NET 435 PASS + 2 środowiskowe SKIP; Engine publish/test IPC z fixture'ami i move/restore PASS; Agent Release build 0 ostrzeżeń/błędów.
+- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru oraz ograniczony do 3 s czas oczekiwania na jego odczyt. Lokalnie: pełne .NET 439 PASS + 2 środowiskowe SKIP; testy desktop 79/79, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC inventory PASS. Ten commit nie zmieniał UI testowanego wcześniej.
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich 20 krokach: testy/build, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator i Enterprise API. Potwierdza test na izolowanym runnerze Windows, nie na komputerze użytkownika.
 - Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
 - Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.
-- `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
 - `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
 - Testy polityki alertów WSC obejmują stany zdrowy, wymagający uwagi, nieobserwowany, wstrzymany i niedostępny. Testy streszczeń baloników sprawdzają deduplikację kategorii, limit długości Windows i obsługę pustej paczki.
 - Test monitora TCP potwierdza, że pojedyncze nowe dopasowanie lokalnego IP jest przekazywane do alertu, a kolejny zwykły cykl zwraca zero dopasowań. Test IPC Engine sprawdza zerową wartość dla bazowej próbki.
@@ -95,10 +94,12 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - W odpowiedzi na awarię zatrzymania Core w widocznym teście kreatora dodano ograniczone, bezpieczne ponawianie polecenia shutdown. Osobno naprawiono stan główny UI: błąd lub brak pierwszego odczytu cache DNS obniża go do „Ochrona ograniczona”, a rozwinięte szczegóły pokazują również opcjonalny kanał DNS Operational. Testy desktop: 70/70 PASS. Windows CI [41685182964](https://github.com/Matyyyy68/asystent/actions/runs/41685182964) dla commita `c0061cd` zakończył się PASS we wszystkich krokach, w tym widocznym cyklu install/repair/uninstall po retry shutdown. Test potwierdza działanie na jednorazowym Windows runnerze, nie na komputerze odbiorcy.
 - Po uproszczeniu prezentacji historii desktop ma 74/74 testy PASS, lint TypeScript/Node PASS, a `Sentinel.Agent` buduje się bez ostrzeżeń i błędów. Testy sprawdzają polskie etykiety także w grupach, oddzielenie „Sprawdzone” od „Fałszywego alarmu”, chowanie metadanych technicznych oraz trasę „Ostatnie alerty” dla zimnego startu i działającej instancji. Pełny Windows CI tych zmian oczekuje.
 - Pełny packaging offline przerwał się przed budowaniem z powodu lokalnego Electron 44.9.1 vs wymagane `^45.0.0`. Nie instalowano zależności ani niczego nie pobierano.
+- Windows CI dla `c7b56bc` został anulowany podczas budowania po wypchnięciu następnego commita; nie jest wynikiem PASS. CI dla bieżącego `a972a71` (run [41701134976](https://github.com/Matyyyy68/asystent/actions/runs/41701134976)) wystartował i jest w trakcie audytu NuGet; jego wynik pozostaje nieznany.
 
 ## 12. Pozostałe prace
 
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich krokach: build i testy źródeł, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless instalacja/aktualizacja/deinstalacja, widoczny kreator oraz Enterprise API. Potwierdza izolowany runner; nie zastępuje fizycznego testu na czystym Windows 10/11.
+- Bieżące `a972a71` zawiera ograniczenie oczekiwania na rejestr, z testem lokalnym w pełnym .NET suite (439 PASS, 2 środowiskowe SKIP); pełny Windows CI tego commita nadal działa i nie ma jeszcze wyniku końcowego.
 - Agent i watchdog pozostają user-mode: nie ma usługi SCM, pracy przed logowaniem ani niezależnego recovery samego watchdoga.
 - Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
 - Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa produktu AV ani wersji sygnatur.
