@@ -89,13 +89,22 @@ jobs:
           if ($LASTEXITCODE) { throw 'Edge extension E2E failed' }
       - name: Run isolated installer install-verify-uninstall integration test
         shell: pwsh
+        timeout-minutes: 18
         run: |
           $version = ([xml](Get-Content eng/ProductVersion.props -Raw)).Project.PropertyGroup.VersionPrefix
           if (!$version) { throw 'Could not read the installer version.' }
           $installer = Join-Path $PWD "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
           if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'Built installer was not found.' }
           $repoRoot = $PWD.Path
-          $test = Start-Process -FilePath $installer -ArgumentList @('--integration-test', "--browser-e2e-repo=$repoRoot") -Wait -PassThru -WindowStyle Hidden
+          $test = Start-Process -FilePath $installer -ArgumentList @('--integration-test', "--browser-e2e-repo=$repoRoot") -PassThru -WindowStyle Hidden
+          if (!$test.WaitForExit(900000)) {
+            taskkill.exe /PID $test.Id /T /F | Out-Null
+            $log = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/installer.log'
+            if (Test-Path -LiteralPath $log -PathType Leaf) {
+              Get-Content -LiteralPath $log -Tail 120 | Select-String 'INTEGRATION_TEST_|BROWSER_E2E|INSTALL_|UNINSTALL_|Native Messaging'
+            }
+            throw 'Isolated installer integration test exceeded its 15-minute limit.'
+          }
           if ($test.ExitCode -ne 0) {
             $log = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/installer.log'
             if (Test-Path -LiteralPath $log -PathType Leaf) {
