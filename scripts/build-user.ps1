@@ -126,6 +126,19 @@ try {
   if ($LASTEXITCODE) { throw 'Publish Windows service failed' }
   & (Join-Path $serviceOutput 'Sentinel.Service.exe') --self-test
   if ($LASTEXITCODE) { throw 'Published Windows service security self-test failed' }
+  # The service launches Sentinel.Engine.exe beside its own executable. Copy
+  # the Engine runtime/dependencies into the separate service payload, without
+  # duplicating the user agent or browser-native-messaging host.
+  $serviceExcludedFiles = @(
+    'Sentinel.Agent.exe', 'Sentinel.Agent.dll', 'Sentinel.Agent.deps.json', 'Sentinel.Agent.runtimeconfig.json', 'Sentinel.Agent.pdb',
+    'Sentinel.UrlHost.exe', 'Sentinel.UrlHost.dll', 'Sentinel.UrlHost.deps.json', 'Sentinel.UrlHost.runtimeconfig.json', 'Sentinel.UrlHost.pdb',
+    'com.sentinelai.urlcheck.json'
+  )
+  Get-ChildItem -LiteralPath $engineOutput -Force | Where-Object { $_.Name -notin $serviceExcludedFiles } |
+    ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $serviceOutput -Recurse -Force }
+  if (!(Test-Path -LiteralPath (Join-Path $serviceOutput 'Sentinel.Engine.exe') -PathType Leaf)) {
+    throw 'Service package is missing the Engine executable it launches.'
+  }
   if ($Offline) { node scripts/test-engine.cjs }
   else { node scripts/test-engine.cjs --dns-live }
   if ($LASTEXITCODE) { throw 'IPC test failed' }

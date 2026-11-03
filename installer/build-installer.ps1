@@ -19,6 +19,12 @@ $electronPackage = Get-Content -LiteralPath $electronPackagePath -Raw | ConvertF
 if ($electronPackage.version -notmatch '^45\.') {
   throw "The local Electron runtime is $($electronPackage.version), but this project requires Electron 45.x. Install the locked desktop dependencies before packaging."
 }
+$servicePayload = Join-Path $repo 'artifacts/service'
+foreach ($serviceFile in @('Sentinel.Service.exe', 'Sentinel.Engine.exe')) {
+  if (!(Test-Path -LiteralPath (Join-Path $servicePayload $serviceFile) -PathType Leaf)) {
+    throw "The isolated Windows service payload is incomplete: $serviceFile is missing from artifacts/service. Build it with scripts/build-user.ps1 first."
+  }
+}
 # electron-builder 26.15.3 edits the Windows executable using its installed
 # `resedit` dependency; the `dir` target does not need the optional rcedit toolset.
 $version = ([xml](Get-Content (Join-Path $repo 'eng/ProductVersion.props'))).Project.PropertyGroup.VersionPrefix
@@ -81,6 +87,11 @@ try {
   }
   & $electronBuilder --win dir
   if ($LASTEXITCODE) { throw 'Electron packaging failed.' }
+  $serviceExecutable = Join-Path $unpacked 'resources/service/Sentinel.Service.exe'
+  $serviceEngineExecutable = Join-Path $unpacked 'resources/service/Sentinel.Engine.exe'
+  if (!(Test-Path -LiteralPath $serviceExecutable -PathType Leaf) -or !(Test-Path -LiteralPath $serviceEngineExecutable -PathType Leaf)) {
+    throw 'The isolated Windows service or its Engine dependency is missing from the packaged application.'
+  }
   $npmNotices = Join-Path $unpacked 'resources/ThirdPartyNotices/npm-runtime.txt'
   if (!(Test-Path $npmNotices)) { throw 'npm runtime license notices are missing from the packaged application.' }
   node.exe ../scripts/audit-packaged-npm-licenses.mjs (Join-Path $unpacked 'resources/app.asar') $npmNotices

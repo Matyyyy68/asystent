@@ -27,9 +27,10 @@ internal sealed class ServiceHealthSnapshot
     {
         lock (gate)
         {
+            var age = lastCollectionAtUtc is null ? (TimeSpan?)null : now.ToUniversalTime() - lastCollectionAtUtc.Value;
             var state = lastCollectionAtUtc is null
                 ? "starting"
-                : lastCollectionSucceeded && now - lastCollectionAtUtc.Value <= StaleAfter
+                : lastCollectionSucceeded && age is { } elapsed && elapsed >= TimeSpan.Zero && elapsed <= StaleAfter
                     ? "running"
                     : "degraded";
             return new ServiceHealthResponse(state, lastCollectionAtUtc);
@@ -41,6 +42,9 @@ internal sealed class ServiceHealthSnapshot
         if (GetResponse(DateTimeOffset.UtcNow).State != "starting") return false;
         MarkCollectionSucceeded(DateTimeOffset.UtcNow);
         if (GetResponse(DateTimeOffset.UtcNow).State != "running") return false;
+        if (GetResponse(DateTimeOffset.UtcNow.AddSeconds(31)).State != "degraded") return false;
+        MarkCollectionSucceeded(DateTimeOffset.UtcNow.AddMinutes(1));
+        if (GetResponse(DateTimeOffset.UtcNow).State != "degraded") return false;
         MarkCollectionFailed();
         return GetResponse(DateTimeOffset.UtcNow).State == "degraded";
     }

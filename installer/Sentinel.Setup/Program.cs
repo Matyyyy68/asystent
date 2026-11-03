@@ -755,6 +755,8 @@ internal static class Program
             if (!archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("Sentinel AI.exe", StringComparison.OrdinalIgnoreCase))
                 || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Engine.exe", StringComparison.OrdinalIgnoreCase))
                 || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Agent.exe", StringComparison.OrdinalIgnoreCase))
+                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/service/Sentinel.Service.exe", StringComparison.OrdinalIgnoreCase))
+                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/service/Sentinel.Engine.exe", StringComparison.OrdinalIgnoreCase))
                 || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Core.dll", StringComparison.OrdinalIgnoreCase))
                 || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Contracts.dll", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("Pakiet jest niekompletny.");
@@ -1808,7 +1810,7 @@ internal static class Program
         bool verifyFileContextMenu = true, bool verifyCoreAutoStart = true)
     {
         target = Path.GetFullPath(target);
-        foreach (var relative in new[] { "Sentinel AI.exe", "Uninstall Sentinel AI.exe", "resources/engine/Sentinel.Engine.exe", "resources/engine/Sentinel.Agent.exe", "resources/engine/Sentinel.Core.dll", "resources/engine/Sentinel.Contracts.dll", "resources/engine/Sentinel.UrlHost.exe", "resources/engine/com.sentinelai.urlcheck.json" })
+        foreach (var relative in new[] { "Sentinel AI.exe", "Uninstall Sentinel AI.exe", "resources/engine/Sentinel.Engine.exe", "resources/engine/Sentinel.Agent.exe", "resources/service/Sentinel.Service.exe", "resources/service/Sentinel.Engine.exe", "resources/engine/Sentinel.Core.dll", "resources/engine/Sentinel.Contracts.dll", "resources/engine/Sentinel.UrlHost.exe", "resources/engine/com.sentinelai.urlcheck.json" })
             if (!File.Exists(Path.Combine(target, relative.Replace('/', Path.DirectorySeparatorChar))))
                 throw new InvalidDataException($"Weryfikacja nie znalazła wymaganego pliku: {relative}.");
 

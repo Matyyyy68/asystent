@@ -48,6 +48,10 @@
         "to": "engine"
       },
       {
+        "from": "../artifacts/service",
+        "to": "service"
+      },
+      {
         "from": "../browser-extension",
         "to": "BrowserExtension"
       },
