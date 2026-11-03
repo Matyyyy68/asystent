@@ -107,6 +107,7 @@ internal static class Program
         private readonly Task server;
         private readonly System.Windows.Forms.Timer collector = new() { Interval = 1000 };
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
+        private readonly List<(string Key, string Title, string Message, ToolTipIcon Icon, SystemSound Sound)> pendingNotifications = [];
         private readonly Icon normalIcon;
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
@@ -212,7 +213,11 @@ internal static class Program
                 tray.Icon = SystemIcons.Warning;
                 alertUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
             }
-            finally { collecting = false; }
+            finally
+            {
+                FlushNotifications();
+                collecting = false;
+            }
         }
 
         private async Task CheckWindowsSecurityCenterAsync()
@@ -242,9 +247,47 @@ internal static class Program
             if (!notificationDeduplicator.TryMark(key, DateTimeOffset.UtcNow)) return;
             alertUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
             tray.Icon = SystemIcons.Warning;
-            tray.ShowBalloonTip(6000, title, message, icon);
-            try { sound.Play(); } catch { /* Windows may have system sounds disabled. */ }
+            pendingNotifications.Add((key, title, message, icon, sound));
         }
+
+        private void FlushNotifications()
+        {
+            if (pendingNotifications.Count == 0) return;
+            var notifications = pendingNotifications.ToArray();
+            pendingNotifications.Clear();
+            if (notifications.Length == 1)
+            {
+                var notification = notifications[0];
+                try
+                {
+                    tray.ShowBalloonTip(6000, notification.Title, notification.Message, notification.Icon);
+                    notification.Sound.Play();
+                }
+                catch { /* Notification UI or system audio can be unavailable without stopping collection. */ }
+                return;
+            }
+
+            var categories = notifications.Select(notification => NotificationCategory(notification.Key)).ToArray();
+            try
+            {
+                tray.ShowBalloonTip(6000, "Sentinel AI — kilka sygnałów", NotificationBatchSummary.Compose(categories), ToolTipIcon.Warning);
+                SystemSounds.Exclamation.Play();
+            }
+            catch { /* Notification UI or system audio can be unavailable without stopping collection. */ }
+        }
+
+        private static string NotificationCategory(string key) => key switch
+        {
+            "dns-reputation" => "domena z lokalnej listy reputacji",
+            "file-reputation" => "nowy plik z dopasowanym hashem",
+            "tcp-ip-reputation" => "połączenie TCP z dopasowanym adresem IP",
+            "running-process-image-reputation" => "uruchomiony plik z dopasowanym hashem",
+            "suspicious-parent-child-process" => "nietypowe uruchomienie procesu",
+            "persistence-writable-location" => "zmiana autostartu Windows",
+            "windows-security-center-antivirus" => "stan antywirusa Windows",
+            "windows-security-center-firewall" => "stan zapory Windows",
+            _ => "sygnał wymagający sprawdzenia"
+        };
 
         private async Task ShowStatusAsync()
         {

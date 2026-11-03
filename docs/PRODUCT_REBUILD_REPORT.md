@@ -49,10 +49,10 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 7. Powiadomienia i dźwięk
 
-- Agent pokazuje baloniki dla lokalnych dopasowań DNS i hashy plików pobranych oraz nowych procesów, połączeń TCP do zaimportowanych adresów IP, zmian autostartu w lokalizacjach zapisywalnych przez użytkownika oraz dla antywirusa/zapory, gdy Windows Security Center zgłasza stan wymagający uwagi lub brak monitorowania. Alerty mają limit 10 minut per typ.
+- Agent pokazuje baloniki dla lokalnych dopasowań DNS i hashy plików pobranych oraz nowych procesów, połączeń TCP do zaimportowanych adresów IP, zmian autostartu w lokalizacjach zapisywalnych przez użytkownika oraz dla antywirusa/zapory, gdy Windows Security Center zgłasza stan wymagający uwagi lub brak monitorowania. Alerty mają limit 10 minut per typ; różne sygnały wykryte w jednym cyklu są grupowane do jednego krótkiego balonika.
 - Odtwarza krótkie standardowe dźwięki systemowe. Własny zestaw dźwięków produktu nie został przygotowany.
 - Ikona zasobnika zmienia się przy alertach i błędzie silnika.
-- Korelacja alertów z każdym źródłem, grupowanie wieloźródłowe i test dźwięku w aktywnej sesji Windows pozostają do wykonania.
+- Korelacja obserwacji dotyczących tego samego incydentu między źródłami oraz test dźwięku w aktywnej sesji Windows pozostają do wykonania.
 
 ## 8. Menu kontekstowe
 
@@ -76,11 +76,11 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 ## 11. Walidacja wykonana
 
 - Desktop: 67/67 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559: wszystkie 20 kroków PASS.
-- .NET: 417 testów PASS, 2 pominięte z powodu środowiska.
+- .NET: 420 testów PASS, 2 pominięte z powodu środowiska po zmianie grupowania powiadomień.
 - `dotnet build Sentinel.sln -c Release --no-restore` (w tym Agent) PASS, 0 ostrzeżeń i błędów. Setup Release oraz `--wizard-self-test`: PASS.
 - Publikacja Engine/UrlHost/Agent i `scripts/test-engine.cjs`: PASS dla IPC, kontrolowanych fixture'ów i prywatności.
 - `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
-- Testy polityki alertów WSC obejmują stany zdrowy, wymagający uwagi, nieobserwowany, wstrzymany i niedostępny.
+- Testy polityki alertów WSC obejmują stany zdrowy, wymagający uwagi, nieobserwowany, wstrzymany i niedostępny. Testy streszczeń baloników sprawdzają deduplikację kategorii, limit długości Windows i obsługę pustej paczki.
 - Test monitora TCP potwierdza, że pojedyncze nowe dopasowanie lokalnego IP jest przekazywane do alertu, a kolejny zwykły cykl zwraca zero dopasowań. Test IPC Engine sprawdza zerową wartość dla bazowej próbki.
 - Test monitora trwałości potwierdza alertowalny licznik wyłącznie dla zapisanej zmiany w lokalizacji zapisywalnej przez użytkownika i zeruje go w kolejnym niezmienionym cyklu.
 - Test kolejki inspekcji obrazu procesu potwierdza dedykowany licznik po udanym dopasowaniu lokalnego SHA-256 i jego jednorazowy odbiór przez agenta.

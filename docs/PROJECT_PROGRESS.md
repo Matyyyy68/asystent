@@ -9,6 +9,8 @@
 
 ## Najnowszy stan przebudowy — 2026-11-03
 
+- Kolejny etap ogranicza spam alertów: Sentinel.Agent grupuje różne typy sygnałów z jednego cyklu w jeden balonik, zachowując szczegóły w lokalnej historii i deduplikację 10-minutową. Testy streszczeń obejmują duplikaty kategorii, pustą paczkę i maksymalną długość.
+
 - Wdrożono Sentinel.Agent per-user z zasobnikiem, watchdogiem z backoffem, HKCU Run, named pipe `CurrentUserOnly`, cyklicznym `collect` i silnikiem potomnym niezależnym od okna Electron. Watchdog wznawia awarię agenta, lecz sam działa w sesji użytkownika; to **nie jest usługa Windows SCM**.
 - Instalator uruchamia agenta po świeżej instalacji i aktualizacji; przed wymianą żąda zamknięcia, a przy rollbacku próbuje przywrócić poprzedni proces.
 - Nowe profile włączają domyślnie lokalne monitorowanie procesów, Downloads, zmian trwałości i TCP/UDP oraz nie są wstrzymane; tekst aktywnego okna i automatyczne pobieranie list pozostają wyłączone. Ustawienia już zapisane nie są nadpisywane.
