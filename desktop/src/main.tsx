@@ -4,6 +4,7 @@ import { Shield, Activity, Search, Database, Plug, Cpu, Lock, Bell, Settings, In
 import { Illustration } from './Illustration';
 import { groupHistoryEvents } from './history-groups.js';
 import { presentEventStatus, presentRisk } from './event-presentation.js';
+import { sectionFromHash } from './initial-section.js';
 import { formatExitCode } from './diagnostics-format.js';
 import { getProtectionStatus } from './protection-status.js';
 import './style.css';
@@ -34,7 +35,7 @@ function formatBytes(value?: number) {
   return `${amount.toFixed(1)} ${units[index]}`;
 }
 function App() {
-  const [section, setSection] = useState(0), [status, setStatus] = useState<any>(null), [engineLifecycle, setEngineLifecycle] = useState<any>(null), [events, setEvents] = useState<any[]>([]);
+  const [section, setSection] = useState(() => sectionFromHash(window.location.hash)), [status, setStatus] = useState<any>(null), [engineLifecycle, setEngineLifecycle] = useState<any>(null), [events, setEvents] = useState<any[]>([]);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [text, setText] = useState(''), [url, setUrl] = useState('');
   const [result, setResult] = useState<any>(null), [query, setQuery] = useState(''), [connections, setConnections] = useState<any[]>([]);
   const [knowledgeDocuments, setKnowledgeDocuments] = useState<any[]>([]), [knowledgeQuery, setKnowledgeQuery] = useState(''), [knowledgeHits, setKnowledgeHits] = useState<any[]>([]);

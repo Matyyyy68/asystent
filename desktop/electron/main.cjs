@@ -30,6 +30,7 @@ app.on('second-instance', (_event, commandLine) => {
   if (commandLine.includes('--quit-ui')) { quitting = true; app.quit(); return; }
   const filePath = requestedFileCheck(commandLine);
   if (filePath && fileCheckHandler) { void fileCheckHandler(filePath, false); return; }
+  if (commandLine.includes('--alerts')) { win?.loadURL(`${page}#alerts`); win?.show(); return; }
   win?.show();
 });
 app.whenReady().then(() => {
@@ -129,7 +130,7 @@ app.whenReady().then(() => {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
-  win.loadURL(page);
+  win.loadURL(process.argv.includes('--alerts') ? `${page}#alerts` : page);
   fileCheckHandler = async (filePath, oneShot) => {
     try {
       const result = await call('file', { path: filePath });

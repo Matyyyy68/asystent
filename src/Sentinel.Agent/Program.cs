@@ -122,6 +122,7 @@ internal static class Program
             var menu = new ContextMenuStrip();
             menu.Items.Add("Otwórz Sentinel AI", null, (_, _) => OpenUi(appRoot));
             menu.Items.Add("Stan ochrony", null, async (_, _) => await ShowStatusAsync());
+            menu.Items.Add("Ostatnie alerty", null, (_, _) => OpenUi(appRoot, "--alerts"));
             menu.Items.Add("Zamknij interfejs (ochrona działa dalej)", null, (_, _) => CloseUi(appRoot));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Sentinel działa w tle", null, (_, _) => { });
@@ -147,10 +148,15 @@ internal static class Program
             catch { return SystemIcons.Shield; }
         }
 
-        private static void OpenUi(string appRoot)
+        private static void OpenUi(string appRoot, string? argument = null)
         {
             var appPath = Path.Combine(appRoot, "Sentinel AI.exe");
-            try { Process.Start(new ProcessStartInfo(appPath) { UseShellExecute = true }); }
+            try
+            {
+                var startInfo = new ProcessStartInfo(appPath) { UseShellExecute = true };
+                if (argument is not null) startInfo.ArgumentList.Add(argument);
+                Process.Start(startInfo);
+            }
             catch (Exception exception) { MessageBox.Show($"Nie można otworzyć Sentinel AI ({exception.GetType().Name}).", "Sentinel AI", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }
 

@@ -9,6 +9,7 @@
 5. Ekran główny pokazuje stan ochrony, najważniejsze wykrycia i czas ostatniego udanego cyklu monitorowania z silnika. Szczegółowe statusy monitorów i Windows Security Center są zwinięte pod „Szczegóły monitorowania”. Nie deklaruje pełnego skanu.
 6. Zdarzenia wymagające uwagi można zobaczyć w historii. Narzędzia techniczne są dostępne po rozwinięciu „Narzędzia zaawansowane”.
 7. Lista zdarzeń używa polskich etykiet ryzyka i statusu. Szczegóły źródła, wersji reguł i dowodów są domyślnie zwinięte; nowe zdarzenie można oznaczyć jako sprawdzone lub fałszywy alarm.
+8. Menu ikony Sentinel przy zegarze zawiera skrót „Ostatnie alerty”, który przenosi bezpośrednio do tej listy.
 
 ## Co się zmieniło
 

@@ -2,6 +2,7 @@
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
 - Historia zdarzeń pokazuje polskie, zrozumiałe etykiety ryzyka i statusu; źródło, wersja reguł, schemat i kody dowodowe są schowane w rozwijanych szczegółach. Dodano osobną akcję „Oznacz jako sprawdzone”, aby nie mylić potwierdzenia z fałszywym alarmem.
+- Menu ikony zasobnika zawiera „Ostatnie alerty”; otwiera historię zdarzeń zarówno przy działającym, jak i nowo uruchamianym oknie Sentinel.
 - Odczyt cache DNS z błędem albo bez pierwszej próbki obniża główny status do „Ochrona ograniczona”; status nie może już pomijać wymaganego źródła DNS.
 - Instalator ponawia ograniczoną liczbę razy niepotwierdzone polecenie bezpiecznego zatrzymania Core, gdy agent nadal działa; trwała odmowa nadal blokuje zmianę plików.
 - Główny ekran pokazuje czas ostatniego udanego cyklu monitorowania przekazany przez silnik; po restarcie silnika czas pojawi się ponownie po następnym udanym cyklu. Kliknięcie balonika alertu otwiera główne okno.
