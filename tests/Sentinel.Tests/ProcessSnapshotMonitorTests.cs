@@ -1,4 +1,5 @@
 using Sentinel.Core;
+using Sentinel.Engine;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
@@ -7,6 +8,52 @@ namespace Sentinel.Tests;
 public sealed class ProcessSnapshotMonitorTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), "sentinel-process-monitor-" + Guid.NewGuid());
+
+    [Fact]
+    public void OfficeLaunchingScriptHostIsReportedAsSuspicionNotConfirmation()
+    {
+        var behavior = ProcessLaunchBehaviorRules.Evaluate("WINWORD.EXE", "PowerShell.exe");
+        Assert.NotNull(behavior);
+        Assert.Equal("process.behavior.office-spawned-script-host", behavior.RuleCode);
+        Assert.Null(ProcessLaunchBehaviorRules.Evaluate("explorer.exe", "powershell.exe"));
+        Assert.Null(ProcessLaunchBehaviorRules.Evaluate("winword.exe", "notepad.exe"));
+    }
+
+    [Fact]
+    public void WindowsProcessSnapshotResolvesCurrentProcessParentWhenAvailable()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var current = System.Diagnostics.Process.GetCurrentProcess();
+        var parents = WindowsProcessParentReader.ReadMany([(current.Id, current.ProcessName)]);
+        Assert.True(parents.TryGetValue(current.Id, out var parent));
+        Assert.True(parent.ProcessId > 0);
+        Assert.False(string.IsNullOrWhiteSpace(parent.ProcessName));
+    }
+
+    [Fact]
+    public async Task NewOfficeChildProcessStoresParentEvidenceAndEmitsOneLimitedAlertCount()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string> { [7] = "winword", [41] = "existing-process" };
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot), null, null, starts =>
+            starts.Where(start => start.ProcessId == 42)
+                .ToDictionary(start => start.ProcessId, _ => new ProcessParentObservation(7, "winword")));
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        snapshot[42] = "powershell";
+
+        Assert.Equal(1, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal(RiskLevel.Moderate, item.Risk);
+        Assert.Equal("Nietypowe uruchomienie procesu", item.Category);
+        Assert.Contains("winword (PID 7) → powershell (PID 42)", item.Explanation);
+        Assert.Contains("process.parent-child.relationship-observed", item.EvidenceCodes!);
+        Assert.Contains("process.behavior.office-spawned-script-host", item.EvidenceCodes!);
+        Assert.Equal(1, monitor.LastSuspiciousLaunchMatches);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, paused: false, excludedApplications: ""));
+        Assert.Equal(0, monitor.LastSuspiciousLaunchMatches);
+        Assert.Single(await store.ReadAsync());
+    }
 
     [Fact]
     public async Task ProcessBaselineSurvivesRestartAndCapturesChangesSinceLastRun()

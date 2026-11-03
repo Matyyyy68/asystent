@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
+using Sentinel.Engine;
 
 public sealed class ProcessSnapshotMonitor
 {
@@ -21,26 +22,30 @@ public sealed class ProcessSnapshotMonitor
     private readonly Func<Dictionary<int, string>> capture;
     private readonly Func<int, string, string?>? resolveExecutablePath;
     private readonly Func<Guid, string, bool>? enqueueImageInspection;
+    private readonly Func<IReadOnlyCollection<(int ProcessId, string ProcessName)>, IReadOnlyDictionary<int, ProcessParentObservation>>? readParentProcesses;
+    public int LastSuspiciousLaunchMatches { get; private set; }
 
     public string State { get; private set; } = "Próbkowanie procesów nie zostało uruchomione.";
 
-    public ProcessSnapshotMonitor() : this(Capture, null, null, true) { }
+    public ProcessSnapshotMonitor() : this(Capture, null, null, WindowsProcessParentReader.ReadMany) { }
 
     public ProcessSnapshotMonitor(Func<int, string, string?> resolveExecutablePath,
-        Func<Guid, string, bool> enqueueImageInspection) : this(Capture, resolveExecutablePath, enqueueImageInspection, true) { }
+        Func<Guid, string, bool> enqueueImageInspection) : this(Capture, resolveExecutablePath, enqueueImageInspection, WindowsProcessParentReader.ReadMany) { }
 
-    public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture) : this(capture, null, null, true) { }
+    public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture) : this(capture, null, null, null) { }
 
     public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture,
         Func<int, string, string?>? resolveExecutablePath, Func<Guid, string, bool>? enqueueImageInspection)
-        : this(capture, resolveExecutablePath, enqueueImageInspection, true) { }
+        : this(capture, resolveExecutablePath, enqueueImageInspection, null) { }
 
-    private ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture,
-        Func<int, string, string?>? resolveExecutablePath, Func<Guid, string, bool>? enqueueImageInspection, bool _ = false)
+    public ProcessSnapshotMonitor(Func<Dictionary<int, string>> capture,
+        Func<int, string, string?>? resolveExecutablePath, Func<Guid, string, bool>? enqueueImageInspection,
+        Func<IReadOnlyCollection<(int ProcessId, string ProcessName)>, IReadOnlyDictionary<int, ProcessParentObservation>>? readParentProcesses)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.resolveExecutablePath = resolveExecutablePath;
         this.enqueueImageInspection = enqueueImageInspection;
+        this.readParentProcesses = readParentProcesses;
         try
         {
             (knownProcesses, knownSnapshotTruncated) = CaptureSnapshot();
@@ -71,6 +76,7 @@ public sealed class ProcessSnapshotMonitor
 
     public async Task<int> CollectAsync(LocalStore store, bool paused, string excludedApplications, CancellationToken cancellationToken = default)
     {
+        LastSuspiciousLaunchMatches = 0;
         Dictionary<int, string> current;
         bool currentTruncated;
         try { (current, currentTruncated) = CaptureSnapshot(); }
@@ -159,10 +165,22 @@ public sealed class ProcessSnapshotMonitor
         var toStore = pendingChanges.Items.Concat(backlogToAdd).Take(MaximumEventsPerSample).ToArray();
         var backlogToRemove = toStore.Select(item => item.EventId).ToArray();
         var imageInspections = new List<(Guid EventId, string Path)>();
+        var liveStarts = toStore.Where(change => change.Action == "Proces zaobserwowany" && change.QueueId == 0 &&
+                current.TryGetValue(change.ProcessId, out var name) && string.Equals(name, change.ProcessName, StringComparison.OrdinalIgnoreCase))
+            .Select(change => (change.ProcessId, change.ProcessName)).Distinct().ToArray();
+        IReadOnlyDictionary<int, ProcessParentObservation> parentObservations = new Dictionary<int, ProcessParentObservation>();
+        var parentSnapshotFailed = false;
+        if (readParentProcesses is not null && liveStarts.Length > 0)
+        {
+            try { parentObservations = readParentProcesses(liveStarts); }
+            catch { parentSnapshotFailed = true; }
+        }
         var events = toStore.Select(change =>
         {
             var eventId = change.EventId;
             string? imagePath = null;
+            ProcessParentObservation? parent = null;
+            ProcessLaunchBehavior? behavior = null;
             if (change.Action == "Proces zaobserwowany" && change.QueueId == 0 && resolveExecutablePath is not null &&
                 current.TryGetValue(change.ProcessId, out var currentName) && string.Equals(currentName, change.ProcessName, StringComparison.OrdinalIgnoreCase))
             {
@@ -172,9 +190,19 @@ public sealed class ProcessSnapshotMonitor
                     imagePath = null;
                 if (imagePath is not null && enqueueImageInspection is not null) imageInspections.Add((eventId, imagePath));
             }
+            if (change.Action == "Proces zaobserwowany" && change.QueueId == 0 &&
+                parentObservations.TryGetValue(change.ProcessId, out var observedParent) &&
+                current.TryGetValue(change.ProcessId, out var observedName) && string.Equals(observedName, change.ProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                parent = observedParent;
+                behavior = ProcessLaunchBehaviorRules.Evaluate(parent.ProcessName, change.ProcessName);
+            }
+            if (behavior is not null) LastSuspiciousLaunchMatches++;
             var delayed = now - change.ObservedAt > TimeSpan.FromSeconds(2);
             var explanation = change.Action == "Proces zaobserwowany"
-                ? delayed
+                ? behavior is not null && parent is not null
+                    ? $"{behavior.Summary} Relacja zaobserwowana: {parent.ProcessName} (PID {parent.ProcessId}) → {change.ProcessName} (PID {change.ProcessId}). Taka relacja może mieć legalne przyczyny; krótkie procesy i część rodziców mogą zostać pominięte."
+                    : delayed
                     ? $"Windows zaobserwował nowy PID {change.ProcessId} ({change.ProcessName}) wcześniej; zapis zdarzenia opóźniło oczekiwanie w kolejce. Krótkie procesy mogą zostać pominięte."
                     : $"Windows pokazał nowy PID {change.ProcessId} o nazwie {change.ProcessName} od poprzedniej próbki. Krótkie procesy mogą zostać pominięte."
                 : delayed
@@ -182,9 +210,13 @@ public sealed class ProcessSnapshotMonitor
                     : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
             var evidenceCodes = new List<string> { change.Action == "Proces zaobserwowany" ? "process.snapshot.new-pid" : "process.snapshot.pid-absent" };
             if (change.Action == "Proces zaobserwowany") evidenceCodes.Add(imagePath is null ? "process.image.path-unavailable" : "process.image.path-available");
-            return new SecurityEvent(0, change.ObservedAt, RiskLevel.Information,
-                change.Action, change.ProcessName, explanation,
-                "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
+            if (parent is not null) evidenceCodes.Add("process.parent-child.relationship-observed");
+            if (behavior is not null) evidenceCodes.Add(behavior.RuleCode);
+            return new SecurityEvent(0, change.ObservedAt, behavior is not null ? RiskLevel.Moderate : RiskLevel.Information,
+                behavior is not null ? "Nietypowe uruchomienie procesu" : change.Action, change.ProcessName, explanation,
+                behavior is not null
+                    ? "Sprawdź, czy użytkownik oczekiwał uruchomienia interpretera przez aplikację Office. Sentinel AI nie zablokował ani nie zatrzymał procesu."
+                    : "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
                 EventId: eventId,
                 Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: change.ProcessId, ProcessName: change.ProcessName,
@@ -220,7 +252,8 @@ public sealed class ProcessSnapshotMonitor
             previousSnapshotTruncated ? " Poprzednia próbka była obcięta; zdarzenia nowych procesów pominięto w tym kroku." : "";
         droppedEvents += newlyDroppedEvents;
         var backlogState = pendingChanges.Count + backlogToAdd.Length - backlogToRemove.Length;
-        State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, kolejka {backlogState}, odrzucono ponad limit łącznie {droppedEvents}.{capped}";
+        State = $"Snapshot procesów działa; {current.Count} PID, {toStore.Length} zmian, kolejka {backlogState}, odrzucono ponad limit łącznie {droppedEvents}.{capped}" +
+            (parentSnapshotFailed ? " Migawka relacji rodzic–proces potomny była niedostępna; ten cykl nie ocenił tych relacji." : "");
         return toStore.Length;
     }
 

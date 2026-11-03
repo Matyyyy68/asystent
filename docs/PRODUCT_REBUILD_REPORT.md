@@ -25,7 +25,7 @@
 
 ## 4. Mechanizmy Windows
 
-- Procesy: cykliczne snapshoty PID/nazw i ograniczona kontrola obrazów procesu.
+- Procesy: cykliczne snapshoty PID/nazw, kontrola obrazów i ograniczona korelacja relacji rodzic–potomek z Toolhelp. Reguła Office → interpreter/skrypt daje umiarkowane ostrzeżenie, nie blokadę ani werdykt malware.
 - Downloads: FileSystemWatcher i uzgadnianie katalogu Downloads.
 - Trwałość: snapshoty rejestru Run/RunOnce, Startup, zadań harmonogramu oraz wybranych usług/sterowników.
 - Sieć: snapshoty TCP/UDP, bez treści ruchu.
@@ -76,7 +76,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 ## 11. Walidacja wykonana
 
 - Desktop: 67/67 testów, lint i produkcyjny Vite (1582 moduły) PASS.
-- .NET: 414 testów PASS, 2 pominięte z powodu środowiska.
+- .NET: 417 testów PASS, 2 pominięte z powodu środowiska.
 - `dotnet build Sentinel.sln -c Release --no-restore` (w tym Agent) PASS, 0 ostrzeżeń i błędów. Setup Release oraz `--wizard-self-test`: PASS.
 - Publikacja Engine/UrlHost/Agent i `scripts/test-engine.cjs`: PASS dla IPC, kontrolowanych fixture'ów i prywatności.
 - `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
@@ -84,13 +84,13 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - Test monitora TCP potwierdza, że pojedyncze nowe dopasowanie lokalnego IP jest przekazywane do alertu, a kolejny zwykły cykl zwraca zero dopasowań. Test IPC Engine sprawdza zerową wartość dla bazowej próbki.
 - Test monitora trwałości potwierdza alertowalny licznik wyłącznie dla zapisanej zmiany w lokalizacji zapisywalnej przez użytkownika i zeruje go w kolejnym niezmienionym cyklu.
 - Test kolejki inspekcji obrazu procesu potwierdza dedykowany licznik po udanym dopasowaniu lokalnego SHA-256 i jego jednorazowy odbiór przez agenta.
+- Testy relacji procesów pokrywają regułę Office → interpreter, umiarkowane ryzyko, dowody rodzic/child, limit alertu do bieżącego cyklu i działanie odczytu Toolhelp na Windows.
 - Windows CI run [41657844276](https://github.com/Matyyyy68/asystent/actions/runs/41657844276): build aplikacji/pakietu, testy źródeł, smoke Electron, Downloads, autostart, Chrome/Edge E2E i E2E z zainstalowanym hostem — PASS. Aktualizacja ujawniła błąd podwójnego `Dispose` w `ApplicationContext`: wyjątek .NET powodował ponowne uruchamianie agenta przez watchdog. Po naprawie idempotentnego sprzątania pełny Windows CI [41666279158](https://github.com/Matyyyy68/asystent/actions/runs/41666279158) zakończył się PASS, łącznie z buildem, wszystkimi testami, rzeczywistym hostem Chrome/Edge w instalacji, aktualizacją/deinstalacją, widocznym kreatorem i API Enterprise.
 - Pełny packaging offline przerwał się przed budowaniem z powodu lokalnego Electron 44.9.1 vs wymagane `^45.0.0`. Nie instalowano zależności ani niczego nie pobierano.
 
 ## 12. Pozostałe prace
 
-- Wyjaśnić zawieszenie integracyjnego install-verify-uninstall i uzyskać końcowy wynik pełnego Windows CI, w tym testu kreatora i Enterprise API.
-- Przeprowadzić izolowane testy instalacji, aktualizacji, rollbacku, deinstalacji, Explorer, powiadomień i awarii/restartu agenta.
+- Ostatni Windows CI [41666279158](https://github.com/Matyyyy68/asystent/actions/runs/41666279158) zaliczył pełny install/update/uninstall, host Chrome/Edge, kreator i API Enterprise. Uruchomić nowy CI dla bieżącej reguły rodzic–potomek, a następnie domknąć rollback, Explorer w Windows 10/11, powiadomienia/dźwięki oraz awarię samego watchdoga.
 - Rozstrzygnąć architekturę prawdziwej usługi SCM lub ograniczenia user-mode watchdog.
 - Dokończyć korelację alertów, aktualizacje aplikacji/reguł, ocenę stanu konkretnego AV/sygnatur i uzasadnione bezpieczne reakcje.
 - Nie oznaczać celu jako ukończonego do czasu domknięcia tych prac i weryfikacji całego przepływu na izolowanym Windows.

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+- Dodano ograniczoną regułę korelacji uruchomień Office z interpreterami/hostami skryptów, z parent/child PID i nazwami w lokalnych dowodach. Heurystyka ma umiarkowane ryzyko, ostrzega bez blokowania i jawnie zaznacza możliwość legalnego użycia oraz pominięcia krótkich procesów.
+- Zmieniono wersję reguł detekcji na `2026.11.03` i dodano testy Toolhelp, relacji rodzic–potomek oraz licznika IPC dla agenta.
 - Ekran pierwszego uruchomienia nie wymaga już wyboru profilu DNS; po uzyskaniu stanu `engine=ready` automatycznie uruchamia jeden cykl istniejącego zbierania i pokazuje rzeczywisty zakres monitorów. Opis jawnie zaznacza, że nie jest to pełny skan dysku.
 - W świeżej instalacji standardowa nawigacja pozostaje ukryta do zakończenia pierwszego cyklu zbierania; błąd pozostawia oddzielny ekran stanu z możliwością ponowienia.
 - Ekran główny upraszcza stan do dostępności silnika/ograniczenia DNS i widoczności statusów procesów, pobranych plików, trwałości, sieci i DNS. Nie deklaruje blokowania ruchu.

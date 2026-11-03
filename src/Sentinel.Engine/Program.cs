@@ -424,6 +424,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     ? await SyncEnterpriseAsync(force: false) : null;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
                     processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
+                    suspiciousProcessLaunches = processMonitor.LastSuspiciousLaunchMatches,
                     tcpIpReputationMatches = tcpConnectionMonitor.LastIpReputationMatches,
                     processImageReputationMatches = processImageInspectionQueue.TakeLocalReputationMatches(),
                     downloadedFileMatches, downloadedFiles = downloadedFileMonitor.State,

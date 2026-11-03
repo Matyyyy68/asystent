@@ -216,6 +216,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(tcpBaseline.result.tcpIpReputationMatches, 0, 'a baseline or ordinary connection must not trigger an IP reputation notification');
   assert.equal(tcpBaseline.result.persistenceSuspiciousChanges, 0, 'an unchanged persistence baseline must not trigger a notification');
   assert.ok(Number.isInteger(tcpBaseline.result.processImageReputationMatches), 'the collect response must expose completed local process-image matches');
+  assert.ok(Number.isInteger(tcpBaseline.result.suspiciousProcessLaunches), 'the collect response must expose current suspicious parent-child process matches');
   assert.match(tcpBaseline.result.tcpConnections, /baza początkowa|działa/);
   assert.equal((await call('status')).result.settings.monitorNetworkConnections, true);
   if (process.argv.includes('--tcp-live')) {

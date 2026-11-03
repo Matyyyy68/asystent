@@ -192,6 +192,11 @@ internal static class Program
                     NotifyOnce("running-process-image-reputation", "Sentinel AI — sprawdź uruchomiony plik",
                         "SHA-256 obrazu uruchomionego procesu dopasował się do lokalnej listy. Źródło listy nie jest niezależnie zweryfikowane; Sentinel nie zatrzymał procesu.",
                         ToolTipIcon.Warning, SystemSounds.Exclamation);
+                var suspiciousLaunches = result.TryGetProperty("suspiciousProcessLaunches", out var launchCount) && launchCount.TryGetInt32(out var matchedLaunches) ? matchedLaunches : 0;
+                if (notifications && suspiciousLaunches > 0)
+                    NotifyOnce("suspicious-parent-child-process", "Sentinel AI — sprawdź uruchomiony program",
+                        "Aplikacja Office uruchomiła interpreter poleceń lub host skryptów. Może to być legalne; Sentinel nie zatrzymał procesu.",
+                        ToolTipIcon.Warning, SystemSounds.Exclamation);
                 var persistenceMatches = result.TryGetProperty("persistenceSuspiciousChanges", out var persistenceCount) && persistenceCount.TryGetInt32(out var matchedPersistence) ? matchedPersistence : 0;
                 if (notifications && persistenceMatches > 0)
                     NotifyOnce("persistence-writable-location", "Sentinel AI — sprawdź autostart Windows",
