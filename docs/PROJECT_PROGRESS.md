@@ -3,7 +3,7 @@
 ## Jawna kwarantanna dopasowanego pliku — 2026-11-03
 
 - Dodano odwracalne przenoszenie wyłącznie pliku wskazanego przez użytkownika po osobnym potwierdzeniu. Engine przyjmuje tylko zdarzenie Downloads z dowodem zgodności i hashuje ponownie wybraną ścieżkę; po przeniesieniu hash jest weryfikowany, a oryginalna nazwa/ścieżka pozostają w lokalnym `quarantine.db`. Restore ponownie sprawdza hash i odmawia nadpisania. Nie uruchamia ani nie usuwa pliku; nie ma automatycznej kwarantanny.
-- Testy klasy kwarantanny na plikach tymczasowych: 3/3 PASS; test kwalifikacji zdarzeń: PASS; desktop 79/79, TypeScript/lint PASS; Engine Release build 0 ostrzeżeń/błędów. Pełna Engine IPC, całe testy .NET i Windows CI dla bieżącej zmiany nadal są wymagane.
+- Testy klasy kwarantanny na plikach tymczasowych: 3/3 PASS; test kwalifikacji zdarzeń: PASS; desktop 79/79, TypeScript/lint PASS; pełne .NET 435 PASS + 2 środowiskowe SKIP; Engine Release publish i pełny `scripts/test-engine.cjs` PASS, w tym move/restore; Agent Release build bez ostrzeżeń/błędów; produkcyjny Vite build (1584 moduły) i `git diff --check` PASS. Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01`: zależności, build/test aplikacji, smoke Electron, redirected Downloads, soak junctionów, autostart i Chrome/Edge E2E — PASS; trwa headless install/update/uninstall instalatora, potem GUI kreator i Enterprise API.
 - Ograniczenia: tylko Downloads + dopasowanie do lokalnej listy SHA-256, limit 256 MiB, odrzucenie reparse points i różnych woluminów. Plik i metadata kwarantanny nie są szyfrowane ani dołączane do backupu historii.
 
 ## Własne tony powiadomień — 2026-11-03
