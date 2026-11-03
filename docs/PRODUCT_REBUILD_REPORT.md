@@ -72,7 +72,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - `Sentinel.Agent` i jego watchdog działają w sesji użytkownika; agent odpytuje Engine niezależnie od okna Electron.
 - Watchdog wznawia awarię procesu agenta z backoffem 1–30 s; agent odtwarza proces Engine po błędzie.
 - Zamknięcie UI nie kończy Core. Instalator zatrzymuje i próbuje wznowić Core przy zmianie plików.
-- Watchdog sam nie jest odzyskiwany po awarii. Repozytorium ma już oddzielny host SCM uruchamiający Engine pod LocalService z chronionym katalogiem ProgramData, ale instalator jeszcze go nie rejestruje, Agent/UI nie łączą się z nim i nie zweryfikowano startu przed logowaniem. Dla użytkownika zainstalowany produkt nadal działa wyłącznie w sesji użytkownika.
+- Watchdog sam nie jest odzyskiwany po awarii. Bieżący kod dodaje instalację hosta SCM jako LocalService z chronionym Program Files/ProgramData oraz oddzielny heartbeat usługi w UI. Instalator żąda jawnego UAC; UI odczytuje jedynie wersjonowany status pipe, nie przekazuje zdarzeń. Kod tej integracji nie był jeszcze zweryfikowany na Windows CI ani czystym systemie; bieżące zainstalowane wydanie nadal nie potwierdza działania przed logowaniem. Agent i usługa prowadzą oddzielne silniki i bazy, więc wspólne monitorowanie może się dublować.
 
 ## 10. Prywatność i ograniczenia
 
@@ -87,6 +87,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
 - Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.
 - `git diff --check`: bez błędów whitespace; Git zgłasza tylko przewidywaną konwersję LF/CRLF.
+- Aktualizacja 2026-11-03: Windows CI [41719248498](https://github.com/Matyyyy68/asystent/actions/runs/41719248498) potwierdził host SCM, rzeczywisty `collect`, ACL ProgramData i status pipe na jednorazowym runnerze. Nowe zmiany instalatora SCM/UI są w commicie `14c6bcdc`; run [41726130088](https://github.com/Matyyyy68/asystent/actions/runs/41726130088) jest uruchomiony i nie obejmuje dodanej później sondy Node do named pipe. Lokalnie desktop ma 90/90 testów i lint PASS; Setup Release 0 ostrzeżeń/błędów; produkcyjny Vite build PASS z `--configLoader runner`. Nie uruchomiono instalatora na komputerze użytkownika.
 - Testy polityki alertów WSC obejmują stany zdrowy, wymagający uwagi, nieobserwowany, wstrzymany i niedostępny. Testy streszczeń baloników sprawdzają deduplikację kategorii, limit długości Windows i obsługę pustej paczki.
 - Test monitora TCP potwierdza, że pojedyncze nowe dopasowanie lokalnego IP jest przekazywane do alertu, a kolejny zwykły cykl zwraca zero dopasowań. Test IPC Engine sprawdza zerową wartość dla bazowej próbki.
 - Test monitora trwałości potwierdza alertowalny licznik wyłącznie dla zapisanej zmiany w lokalizacji zapisywalnej przez użytkownika i zeruje go w kolejnym niezmienionym cyklu.
@@ -102,7 +103,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich krokach: build i testy źródeł, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless instalacja/aktualizacja/deinstalacja, widoczny kreator oraz Enterprise API. Potwierdza izolowany runner; nie zastępuje fizycznego testu na czystym Windows 10/11.
 - Odczyt Defendera i korelacja obrazu procesu z pasującym hashem pobranego pliku są lokalnie zweryfikowane; potrzebują pełnego Windows CI najnowszego commita.
-- Agent i watchdog zainstalowanego produktu nadal są user-mode. Host SCM jest w źródłach, ale nie jest jeszcze instalowany ani zintegrowany, więc bieżący produkt nie ma potwierdzonej pracy przed logowaniem ani niezależnego recovery.
+- Instalator SCM i status heartbeat w UI są zaimplementowane, ale ich nowy kod czeka na Windows CI. Dopiero udany cykl instalacji/aktualizacji/rollbacku/deinstalacji potwierdzi rejestrację hosta; test SCM hosta na runnerze nie dowodzi tego przepływu ani startu przed logowaniem. Service i Agent nadal uruchamiają oddzielne Engine/bazy; nie ma przekazywania zdarzeń do wspólnego silnika ani historii, więc dublowanie monitorów nie jest rozwiązane.
 - Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
 - Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa nazwy alternatywnego AV; szczegółowe sygnatury Defendera są zależne od dostępu WMI.
 - Zweryfikować widoczność menu Explorer i dźwięk w aktywnej sesji na czystym fizycznym Windows. Bieżące CI testuje runner izolowany.

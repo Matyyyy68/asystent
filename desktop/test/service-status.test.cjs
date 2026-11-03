@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { EventEmitter } = require('node:events');
 const { PIPE_PATH, parseServiceStatusLine, readServiceStatus } = require('../electron/service-status.cjs');
 
 test('service status parser requires a versioned running response with a fresh collection', () => {
@@ -18,4 +19,17 @@ test('service query does not attempt a pipe connection outside Windows', async (
   assert.deepEqual(status, { available: false, reason: 'unsupported-platform' });
   assert.equal(connected, false);
   assert.equal(PIPE_PATH, String.raw`\\.\pipe\SentinelAI.Service.Status.v1`);
+});
+
+test('Windows service query sends only the versioned status request and returns a fresh response', async () => {
+  const socket = new EventEmitter();
+  socket.setEncoding = encoding => assert.equal(encoding, 'utf8');
+  socket.destroy = () => {};
+  socket.write = request => {
+    assert.equal(request, '{"id":"desktop-health","version":1,"method":"status"}\n');
+    process.nextTick(() => socket.emit('data', JSON.stringify({ id: 'desktop-health', version: 1, ok: true, result: { state: 'running', lastCollectionAtUtc: new Date().toISOString() } }) + '\n'));
+  };
+  const status = await readServiceStatus({ platform: 'win32', connect: pipe => { assert.equal(pipe, PIPE_PATH); process.nextTick(() => socket.emit('connect')); return socket; } });
+  assert.equal(status.available, true);
+  assert.equal(status.state, 'running');
 });

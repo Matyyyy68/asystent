@@ -141,6 +141,11 @@ try {
     $pipe.Dispose()
   }
 
+  $electronPipeTest = Join-Path $PSScriptRoot 'test-service-status-pipe.cjs'
+  $electronPipeOutput = & node $electronPipeTest 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "Electron named-pipe health client failed: $($electronPipeOutput -join ' ')" }
+  Write-Host ($electronPipeOutput -join ' ')
+
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
   Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status pipe.'

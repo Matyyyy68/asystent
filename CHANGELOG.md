@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+- Instalator dodaje chronioną usługę Windows SCM działającą jako LocalService przez jawnie potwierdzany UAC; sprawdza hash payloadu, ACL, świeży pierwszy cykl, upgrade z rollbackiem oraz usuwa usługę przy deinstalacji, zachowując lokalne dane. Implementacja nie jest jeszcze zweryfikowana w pełnym Windows CI.
+- UI pobiera osobny heartbeat usługi przez wersjonowany named pipe i pokazuje go obok cyklu agenta użytkownika. Stan usługi nie jest mylony ze stanem wszystkich monitorów; nie ma jeszcze przekazywania zdarzeń Service/Agent ani wspólnej historii.
 - Pozycja „Sprawdź w Sentinel AI” obsługuje wiele zaznaczonych plików (do 15): Explorer przekazuje wywołania do jednej instancji aplikacji, która łączy je, sprawdza pliki kolejno i pokazuje jeden zbiorczy wynik. Puste, opcjopodobne i nadmiernie długie ścieżki są odrzucane; wpis instalatora używa modelu `Document` i jest usuwany tylko wtedy, gdy nadal należy do Sentinel.
 - Wynik zbiorczego sprawdzania pokazuje osobno dopasowanie SHA-256 do listy użytkownika i stan Authenticode (prawidłowy, brak podpisu, niezgodny, niezaufany albo nieznany). Żaden z tych elementów sam nie jest deklaracją, że plik jest bezpieczny lub złośliwy.
 - Gdy nie zaimportowano listy SHA-256, raport mówi wprost, że listy nie ma; nie przedstawia pustego wyniku jako negatywnego dopasowania.
