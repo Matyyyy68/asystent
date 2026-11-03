@@ -4,7 +4,7 @@
 
 - CI run [41671769059](https://github.com/Matyyyy68/asystent/actions/runs/41671769059) dla `f42108a` przeszedł 419/419 testów .NET, ale zatrzymał się w teście wersji ujawnianej w ekranie ręcznej analizy: UI wskazywał `2026.10.13`, a aktywne reguły mają `2026.11.03`.
 - Zaktualizowano objaśnienie UI, by wskazywało bieżący numer i poprawnie opisywało korelację procesów potomnych Office.
-- Weryfikacja lokalna: desktop 67/67 PASS, lint PASS, produkcyjny Vite build PASS (1582 moduły), .NET 417 PASS + 2 pominięte środowiskowo. Commit `6fe951e` wypchnięto na `main`; Windows CI [41673687559](https://github.com/Matyyyy68/asystent/actions/runs/41673687559) zakończył się PASS we wszystkich 20 krokach, także Electron smoke, Downloads soak, autostart, Chrome/Edge, cykl instalatora headless i widoczny kreator oraz API Enterprise.
+- Weryfikacja lokalna: desktop 67/67 PASS, lint PASS, produkcyjny Vite build PASS (1582 moduły), .NET 417 PASS + 2 pominięte środowiskowo. Commit `6fe951e` wypchnięto na `main`; Windows CI [41673687559](https://github.com/Matyyyy68/asystent/actions/runs/41673687559) dla `6fe951e` i [41679066451](https://github.com/Matyyyy68/asystent/actions/runs/41679066451) dla `e8108ea` zakończyły się PASS we wszystkich 20 krokach, także Electron smoke, Downloads soak, autostart, Chrome/Edge, cykl instalatora headless i widoczny kreator oraz API Enterprise.
 - Poprzedni wynik CI nie przeprowadził późniejszych smoke testów, przeglądarkowego E2E ani integracji instalatora, ponieważ krok budowania aplikacji zatrzymał workflow. Nie traktować ich jako zaliczonych dla `f42108a`.
 
 ## Najnowszy stan przebudowy — 2026-11-03
@@ -13,6 +13,7 @@
 
 - Kolejny etap ogranicza spam alertów: Sentinel.Agent grupuje różne typy sygnałów z jednego cyklu w jeden balonik, zachowując szczegóły w lokalnej historii i deduplikację 10-minutową. Testy streszczeń obejmują duplikaty kategorii, pustą paczkę i maksymalną długość.
 - Uproszczono stronę główną: techniczne stany monitorów i Windows Security Center są domyślnie zwinięte, a rzeczywisty status ochrony i ostatnie wykrycia pozostają widoczne. Test regresji chroni podstawowy, zwinięty widok.
+- Silnik udostępnia `lastCollectionAtUtc` po udanym cyklu; strona główna pokazuje ten czas i nie zmyśla wyniku. Znacznik jest w pamięci procesu Engine, więc wraca po restarcie dopiero po kolejnym udanym cyklu; test IPC sprawdza istnienie timestampu.
 
 - Wdrożono Sentinel.Agent per-user z zasobnikiem, watchdogiem z backoffem, HKCU Run, named pipe `CurrentUserOnly`, cyklicznym `collect` i silnikiem potomnym niezależnym od okna Electron. Watchdog wznawia awarię agenta, lecz sam działa w sesji użytkownika; to **nie jest usługa Windows SCM**.
 - Instalator uruchamia agenta po świeżej instalacji i aktualizacji; przed wymianą żąda zamknięcia, a przy rollbacku próbuje przywrócić poprzedni proces.

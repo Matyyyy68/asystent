@@ -213,6 +213,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const enabledSettings = await call('settings', { retentionDays: 30, notifications: true, dnsPollIntervalSeconds: 15, monitorNetworkConnections: true });
   assert.equal(enabledSettings.ok, true, enabledSettings.error);
   const tcpBaseline = await call('collect'); assert.equal(tcpBaseline.ok, true, tcpBaseline.error);
+  const lastCollectionAtUtc = (await call('status')).result.lastCollectionAtUtc;
+  assert.ok(Number.isFinite(Date.parse(lastCollectionAtUtc)), 'status must expose the timestamp of the last successful monitoring cycle');
   assert.equal(tcpBaseline.result.tcpIpReputationMatches, 0, 'a baseline or ordinary connection must not trigger an IP reputation notification');
   assert.equal(tcpBaseline.result.persistenceSuspiciousChanges, 0, 'an unchanged persistence baseline must not trigger a notification');
   assert.ok(Number.isInteger(tcpBaseline.result.processImageReputationMatches), 'the collect response must expose completed local process-image matches');

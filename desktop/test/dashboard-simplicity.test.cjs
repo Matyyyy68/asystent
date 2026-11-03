@@ -11,8 +11,10 @@ test('main dashboard keeps detailed monitor status collapsed by default', () => 
   assert.ok(overview, 'The main overview section must exist.');
   assert.match(overview, /<details className="protection-details"><summary>Szczegóły monitorowania<\/summary>/,
     'Monitor diagnostics must be hidden behind an accessible disclosure.');
-  assert.match(overview, /<h2>STAN SENTINEL AI|STAN SENTINEL AI|protectionStatus\.title/,
+  assert.match(overview, /protectionStatus\.title/,
     'The main screen must retain the real protection status.');
+  assert.match(overview, /Ostatni cykl monitorowania:.*lastCollectionAtUtc/,
+    'The main screen must show the timestamp reported by the Engine, not a fabricated scan time.');
 });
 
 test('settings describe enabled defaults for network, Downloads, and persistence monitoring', () => {

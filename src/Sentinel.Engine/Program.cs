@@ -203,6 +203,7 @@ async Task<bool> RecordDetectionAsync(SecurityEvent item, string category, strin
 }
 DateTimeOffset? lastDnsRead = null;
 DateTimeOffset? lastDnsError = null;
+DateTimeOffset? lastCollectionAtUtc = null;
 DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
 DateTimeOffset? lastDnsOperationalAttempt = null;
@@ -332,6 +333,7 @@ while (await Console.In.ReadLineAsync() is { } line)
             case "status":
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
+                    lastCollectionAtUtc,
                     processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
                     persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
@@ -422,6 +424,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                 }
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
                     ? await SyncEnterpriseAsync(force: false) : null;
+                lastCollectionAtUtc = DateTimeOffset.UtcNow;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
                     processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
                     suspiciousProcessLaunches = processMonitor.LastSuspiciousLaunchMatches,

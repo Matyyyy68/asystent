@@ -134,6 +134,7 @@ internal static class Program
                 Visible = true
             };
             tray.DoubleClick += (_, _) => OpenUi(appRoot);
+            tray.BalloonTipClicked += (_, _) => OpenUi(appRoot);
             collector.Tick += async (_, _) => await CollectAsync();
             collector.Start();
             server = Task.Run(() => ServeClientsAsync(shutdown.Token));

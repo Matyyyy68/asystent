@@ -7,7 +7,7 @@
 - Usunięto wybór profilu DNS z pierwszego uruchomienia.
 - Pierwszy start ma osobny ekran sprawdzenia; zwykła nawigacja pojawia się po udanym `collect`.
 - Podstawowa nawigacja pokazuje przegląd i zdarzenia. Pozostałe narzędzia są zwinięte pod „Narzędzia zaawansowane”; szczegóły monitorów na stronie przeglądu są dodatkowo zwinięte pod „Szczegóły monitorowania”.
-- Status rozróżnia brak silnika, pierwsze sprawdzenie, pauzę, ograniczenie monitora, stan Windows wymagający uwagi, stan Windows niepotwierdzony i działające źródła. Sukces oznacza „Monitorowanie działa”, nie aktywne blokowanie.
+- Status rozróżnia brak silnika, pierwsze sprawdzenie, pauzę, ograniczenie monitora, stan Windows wymagający uwagi, stan Windows niepotwierdzony i działające źródła. Główny widok pokazuje czas zakończenia ostatniego poprawnego cyklu przekazany przez Engine; po restarcie Engine pole wraca po następnym udanym cyklu. Sukces oznacza „Monitorowanie działa”, nie aktywne blokowanie.
 
 ## 2. Instalator
 
@@ -49,7 +49,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 7. Powiadomienia i dźwięk
 
-- Agent pokazuje baloniki dla lokalnych dopasowań DNS i hashy plików pobranych oraz nowych procesów, połączeń TCP do zaimportowanych adresów IP, zmian autostartu w lokalizacjach zapisywalnych przez użytkownika oraz dla antywirusa/zapory, gdy Windows Security Center zgłasza stan wymagający uwagi lub brak monitorowania. Alerty mają limit 10 minut per typ; różne sygnały wykryte w jednym cyklu są grupowane do jednego krótkiego balonika.
+- Agent pokazuje baloniki dla lokalnych dopasowań DNS i hashy plików pobranych oraz nowych procesów, połączeń TCP do zaimportowanych adresów IP, zmian autostartu w lokalizacjach zapisywalnych przez użytkownika oraz dla antywirusa/zapory, gdy Windows Security Center zgłasza stan wymagający uwagi lub brak monitorowania. Alerty mają limit 10 minut per typ; różne sygnały wykryte w jednym cyklu są grupowane do jednego krótkiego balonika, którego kliknięcie otwiera aplikację.
 - Odtwarza krótkie standardowe dźwięki systemowe. Własny zestaw dźwięków produktu nie został przygotowany.
 - Ikona zasobnika zmienia się przy alertach i błędzie silnika.
 - Korelacja obserwacji dotyczących tego samego incydentu między źródłami oraz test dźwięku w aktywnej sesji Windows pozostają do wykonania.
@@ -75,7 +75,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Desktop: 69/69 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559: wszystkie 20 kroków PASS.
+- Desktop: 69/69 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559 dla `6fe951e` i 41679066451 dla `e8108ea`: pełne 20 kroków PASS; drugi przebieg zawierał także grupowanie alertów i uproszczony ekran główny.
 - .NET: 420 testów PASS, 2 pominięte z powodu środowiska po zmianie grupowania powiadomień.
 - `dotnet build Sentinel.sln -c Release --no-restore` (w tym Agent) PASS, 0 ostrzeżeń i błędów. Setup Release oraz `--wizard-self-test`: PASS.
 - Publikacja Engine/UrlHost/Agent i `scripts/test-engine.cjs`: PASS dla IPC, kontrolowanych fixture'ów i prywatności.
