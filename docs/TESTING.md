@@ -7,7 +7,7 @@
 - `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 450 testów, 2 środowiskowe SKIP. Obejmuje parser stanu Defendera i nieprawidłowe wyniki, korelację Downloads → proces, inwentarz aplikacji, timeout rejestru, wybór najwyższej wagi dźwięku dla grupowanych powiadomień, cztery odmienne tony PCM i trwały, jednokrotny znacznik pierwszego zakończenia analizy.
 - `dotnet build Sentinel.sln -c Release --no-restore`: PASS po dodaniu `Sentinel.Service`, 0 ostrzeżeń/błędów.
 - `Sentinel.Service.exe --self-test`: sprawdza dokładne SID-y deskryptora DACL i regresję backoffu 1–30 s z resetem po stabilnych 60 s; nie tworzy katalogu ani nie rejestruje usługi.
-- `scripts/test-service-scm.ps1`: workflow Windows CI publikuje osobny, samowystarczalny host w `artifacts/service`, a następnie testuje na jednorazowym runnerze SCM start/stop, tożsamość LocalService, dokładny ACL ProgramData i ukończenie pierwszego rzeczywistego cyklu Engine. Skrypt odmawia kolizji z istniejącą usługą/katalogiem i usuwa wyłącznie własny serwis, dane i katalog tymczasowy; lokalnie wykonano tylko parser PowerShell i build/publish/self-test, bez rejestracji usługi.
+- `scripts/test-service-scm.ps1`: workflow Windows CI publikuje osobny, samowystarczalny host w `artifacts/service`, a następnie testuje na jednorazowym runnerze SCM start/stop, tożsamość LocalService, dokładny ACL ProgramData i ukończenie pierwszego rzeczywistego cyklu Engine. Skrypt odmawia kolizji z istniejącą usługą/katalogiem i usuwa wyłącznie własny serwis, dane i katalog tymczasowy; lokalnie wykonano tylko parser PowerShell i build/publish/self-test, bez rejestracji usługi. Pierwszy Windows CI build/test passował, lecz service smoke przerwał się przed utworzeniem usługi na `sc.exe create` 1639; poprawka składni argumentów czeka na kolejną próbę.
 - `dotnet build src/Sentinel.Agent/Sentinel.Agent.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `Sentinel.AI.Setup.dll --wizard-self-test`: PASS (kod 0).
@@ -24,7 +24,7 @@
 - Bieżąca integracja Defendera i korelacja Downloads → proces wraz z inventory readerem wymagają pełnego Windows CI po push; lokalny cmdlet Defendera zwrócił Access Denied, a Engine IPC poprawnie przetestowała kontrakt stanu niedostępnego.
 - Rollback instalatora, zachowanie istniejących wpisów HKCU, widoczność menu Eksploratora na czystym Windows 10/11.
 - Integracyjny test awarii samego watchdoga, powiadomień/dźwięków w aktywnej sesji i wydajności na reprezentatywnych maszynach.
-- Usługa Windows SCM, automatyczne aktualizacje, blokada wykonania/ruchu, ocena CVE i rozpoznanie konkretnego AV/sygnatur nie są wdrożone.
+- Usługa Windows SCM nie jest jeszcze wdrożona w instalowanym produkcie; automatyczne aktualizacje, blokada wykonania/ruchu, ocena CVE i rozpoznanie konkretnego AV/sygnatur również nie są gotowe.
 
 Nie uruchamiano instalatora, przeglądarki ani GUI produktu na komputerze użytkownika; nie instalowano certyfikatów i nie uruchamiano rzeczywistego malware. Nie należy zaliczać wymienionych testów integracyjnych jako PASS.
 

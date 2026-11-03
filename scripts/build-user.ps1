@@ -124,6 +124,8 @@ try {
   }
   dotnet publish src/Sentinel.Service/Sentinel.Service.csproj -c Release -r win-x64 --self-contained true -o artifacts/service @dotnetRestoreArgs
   if ($LASTEXITCODE) { throw 'Publish Windows service failed' }
+  & (Join-Path $serviceOutput 'Sentinel.Service.exe') --self-test
+  if ($LASTEXITCODE) { throw 'Published Windows service security self-test failed' }
   if ($Offline) { node scripts/test-engine.cjs }
   else { node scripts/test-engine.cjs --dns-live }
   if ($LASTEXITCODE) { throw 'IPC test failed' }

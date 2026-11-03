@@ -49,14 +49,11 @@ try {
   if (Test-Path -LiteralPath $serviceDataRoot) {
     throw "Refusing to use existing service data directory '$serviceDataRoot'."
   }
-  $mayRemoveServiceDataRoot = $true
-  foreach ($publishPath in @($enginePublish, $servicePublish)) {
-    if (-not (Test-Path -LiteralPath (Join-Path $publishPath 'Sentinel.Engine.exe') -PathType Leaf) -and $publishPath -eq $enginePublish) {
-      throw "Engine publish is missing Sentinel.Engine.exe: $publishPath"
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $publishPath 'Sentinel.Service.exe') -PathType Leaf) -and $publishPath -eq $servicePublish) {
-      throw "Service publish is missing Sentinel.Service.exe: $publishPath"
-    }
+  if (-not (Test-Path -LiteralPath (Join-Path $enginePublish 'Sentinel.Engine.exe') -PathType Leaf)) {
+    throw "Engine publish is missing Sentinel.Engine.exe: $enginePublish"
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $servicePublish 'Sentinel.Service.exe') -PathType Leaf)) {
+    throw "Service publish is missing Sentinel.Service.exe: $servicePublish"
   }
 
   New-Item -ItemType Directory -Path $tempRoot | Out-Null
@@ -72,9 +69,10 @@ try {
     throw 'Isolated service directory does not contain both executable payloads.'
   }
 
-  $binPath = 'binPath= "' + $serviceExe + '"'
-  Invoke-Sc @('create', $serviceName, $binPath, 'start= demand', 'obj= "NT AUTHORITY\LocalService"') | Out-Null
+  $quotedBinPath = '"' + $serviceExe + '"'
+  Invoke-Sc @('create', $serviceName, 'binPath=', $quotedBinPath, 'start=', 'demand', 'obj=', 'NT AUTHORITY\LocalService') | Out-Null
   $serviceCreated = $true
+  $mayRemoveServiceDataRoot = $true
   Invoke-Sc @('start', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Running' 90 | Out-Null
 
