@@ -336,6 +336,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
+                    windowsSecurityCenter = WindowsSecurityCenterReader.Read(),
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
                     reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
@@ -423,8 +424,11 @@ while (await Console.In.ReadLineAsync() is { } line)
                     ? await SyncEnterpriseAsync(force: false) : null;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
                     processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
+                    tcpIpReputationMatches = tcpConnectionMonitor.LastIpReputationMatches,
+                    processImageReputationMatches = processImageInspectionQueue.TakeLocalReputationMatches(),
                     downloadedFileMatches, downloadedFiles = downloadedFileMonitor.State,
-                    persistenceChanges, persistence = persistenceMonitor.State, enterpriseSync };
+                    persistenceChanges, persistenceSuspiciousChanges = persistenceMonitor.LastSuspiciousChanges,
+                    persistence = persistenceMonitor.State, enterpriseSync };
                 break;
             case "history": result = await store.ReadAsync(); break;
             case "eventStatus":

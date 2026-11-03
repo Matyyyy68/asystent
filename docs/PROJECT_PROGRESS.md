@@ -1,5 +1,55 @@
 # Postęp projektu Sentinel AI
 
+## Najnowszy stan przebudowy — 2026-11-03
+
+- Wdrożono Sentinel.Agent per-user z zasobnikiem, watchdogiem z backoffem, HKCU Run, named pipe `CurrentUserOnly`, cyklicznym `collect` i silnikiem potomnym niezależnym od okna Electron. Watchdog wznawia awarię agenta, lecz sam działa w sesji użytkownika; to **nie jest usługa Windows SCM**.
+- Instalator uruchamia agenta po świeżej instalacji i aktualizacji; przed wymianą żąda zamknięcia, a przy rollbacku próbuje przywrócić poprzedni proces.
+- Nowe profile włączają domyślnie lokalne monitorowanie procesów, Downloads, zmian trwałości i TCP/UDP oraz nie są wstrzymane; tekst aktywnego okna i automatyczne pobieranie list pozostają wyłączone. Ustawienia już zapisane nie są nadpisywane.
+- Główny status bazuje na ukończeniu pierwszego sprawdzenia, pauzie i stanach wymaganych monitorów. Pokaże „Ochrona ograniczona”, gdy źródło nie działa lub jest wyłączone.
+- Aktualizacja/deinstalacja zatrzymuje agenta przez IPC przed wymianą plików. Electron odłącza się od agenta przy zamykaniu UI. Asynchroniczny błąd startu agenta jest obsługiwany.
+- Alerty lokalnych dopasowań DNS/hashy, obrazów nowych procesów, nowych połączeń TCP do lokalnej listy IP oraz zmian autostartu w lokalizacji zapisywalnej przez użytkownika mają 10-minutową deduplikację per typ i krótki dźwięk systemowy. Agent ostrzega też o stanach antywirusa/zapory oznaczonych przez Windows Security Center jako nieobserwowane, wstrzymane, wymagające uwagi lub niedostępne.
+- Silnik odpytuje lokalny Windows Security Center o zagregowany stan antywirusa i zapory. UI pokazuje wynik jako informację z Windows, bez przypisywania go do konkretnego produktu.
+- Kontekst menu plików obsługuje pojedynczy plik, z lokalnym SHA-256/AuthentiCode i jawnie ograniczonym werdyktem.
+- `npm test --prefix desktop` 67/67 PASS; lint i produkcyjny Vite (1582 moduły) PASS; .NET 414 PASS + 2 środowiskowe SKIP; procesowy IPC Engine PASS po publikacji bieżącego Engine/Agent; Agent, rozwiązanie i Setup Release build PASS (0 ostrzeżeń/błędów); wizard self-test PASS.
+- Skrypt instalatora dostosowano do Windows PowerShell 5.1 i dodano kontrolę wersji Electron przed czyszczeniem wyników. Build offline zatrzymuje się, bo lokalne `desktop/node_modules` ma Electron 44.9.1, a projekt/lockfile wymagają 45.x. Lokalna pamięć npm nie ma archiwum Electron 45. Nie uruchamiałem `npm ci` ani niczego nie pobierałem. Po wcześniejszym nieudanym buildzie katalog wygenerowanego `artifacts/desktop` nie zawiera gotowego instalatora; aktualny payload nie został zbudowany.
+- Aktualny payload EXE, self-test pakietu, instalacja na czystym runnerze, widoczny Explorer, end-to-end niezależności agenta i zachowanie alertów/dźwięków wymagają jeszcze izolowanego Windows runnera.
+- Pozostają też istotne funkcje celu: niezależne odzyskiwanie samego watchdoga/SCM, głębsze i zweryfikowane aktywne monitorowanie, spójna korelacja alertów ze wszystkich źródeł, bezpieczne działania reakcyjne, identyfikacja konkretnego AV/Defendera i stan sygnatur, aktualizacje oraz testy pełnego cyklu. Nie należy przedstawiać produktu jako pełnej ochrony ani celu jako ukończonego.
+
+Sekcje poniżej obejmują wcześniejszy raport etapów; aktualny status tej przebudowy jest określony powyżej.
+
+Pełne podsumowanie 12 punktów zlecenia i pozostałych prac: [PRODUCT_REBUILD_REPORT.md](PRODUCT_REBUILD_REPORT.md).
+
+## Przebudowa produktu — 2026-11-03
+
+### Zrealizowany etap
+
+- Usunięto wybór profilu DNS z pierwszego uruchomienia. Po gotowości silnika UI uruchamia jeden rzeczywisty `collect`, odświeża dane i zapisuje lokalny znacznik ukończenia tylko po sukcesie. Po błędzie stan pozostaje jawnie niepotwierdzony i można ponowić próbę.
+- Główny ekran pokazuje dostępność silnika oraz statusy monitorów, z zastrzeżeniem, że cykl nie skanuje całego dysku. Ukryto szczegóły techniczne pod zwijanym menu zaawansowanym.
+- Ekran startowy instalatora ma jeden duży przycisk „ZAINSTALUJ”; opcje lokalizacji i skrótów otwiera dyskretny link. Domyślna ścieżka nadal przechodzi przez walidację, instalację i weryfikację.
+- Instalator rejestruje menu „Sprawdź w Sentinel AI” dla pojedynczego pliku. Shell uruchamia analizę SHA-256/Authenticode i pokazuje wynik; deinstalacja usuwa wyłącznie własny wpis.
+- Smoke Electron dostosowano do nowego przepływu. Dodano dokumenty filozofii, UX, autonomii, monitorowania Windows, silnika detekcji, prywatności i testów.
+
+### Walidacja
+
+- `npm test --prefix desktop`: 58/58 PASS.
+- `npm run lint --prefix desktop`: PASS.
+- `npm run build --prefix desktop`: PASS po zatwierdzonym dostępie odczytu do katalogu nadrzędnego; Vite przekształcił 1581 modułów.
+- `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj --no-restore -c Release`: PASS, 0 ostrzeżeń/błędów.
+- `Sentinel.AI.Setup.dll --wizard-self-test`: PASS (kod 0); test tworzy ukryte okna kontrolne, nie wykonuje instalacji ani zmian systemowych.
+- `--self-test-no-app` nie przeszedł, bo zwykły build źródeł nie zawiera osadzonego `payload.zip`; pełny pakietowy self-test wymaga świeżego payloadu.
+- Nie uruchamiano instalatora jako instalacji systemowej na komputerze użytkownika.
+
+### Pozostała praca krytyczna
+
+1. Zaprojektować i wdrożyć niezależny od Electron Core jako usługę o minimalnych uprawnieniach, z bezpiecznym IPC, instalacją/aktualizacją/deinstalacją i recovery SCM.
+2. Zapewnić, że status UI odzwierciedla błędy każdego krytycznego monitora, a nie tylko gotowość procesu silnika.
+3. Rozszerzyć pierwszą analizę o jasno określone, rzeczywiście dostępne źródła bez sugerowania pełnego skanu.
+4. Ujednolicić detekcję, notyfikacje i deduplikację; nie twierdzić o blokadzie bez rzeczywistego mechanizmu.
+5. Dodać izolowany Windows integration test rejestracji/menu/deinstalacji; dotychczas sprawdzono kompilację i kontrakt polecenia, nie widoczny wpis Explorer na czystym Windows.
+6. Dodać izolowane testy Windows dla tych przepływów i przetestować niezależność Core od awarii UI.
+
+**Status całości: NIEUKOŃCZONE.** Aktualny zakres jest etapem UX, instalatora i pierwszego sprawdzenia, nie autonomicznym systemem ochrony opisanym w zleceniu.
+
 **F02 — przyczyna blokowania interfejsu i wydanie 0.15.39 (2026-10-29):** audyt kodu wykazał, że przejście do ekranu lokalizacji, odświeżanie pola folderu oraz podsumowanie wykonywały `ValidateInstallSelection` / `GetInstallSpaceSummary` synchronicznie na wątku WinForms. Te funkcje skanują drzewo wybranego katalogu, czytają manifest payloadu i liczą zachowywane pliki; sprawdzenie ścieżki było też powtarzane synchronicznie w `InstallAsync` przed właściwym `Task.Run`. To potwierdzona ścieżka blokowania UI, ale nie dowód pierwotnego wyjątku `0xE0434352` ze zrzutów: lokalny log dostępny tu kończy się 2026-10-24 i nie zawiera późniejszego zgłoszenia. W 0.15.39 przeniesiono te sprawdzenia do tła, ignoruje się przestarzałe wyniki, serializuje nawigację i loguje początek każdego etapu. Release run 40942017352 PASS dla dokładnego EXE: build, self-test, instalacja/aktualizacja/weryfikacja/deinstalacja i widoczny kreator; release opublikowano. EXE 274 317 878 B, SHA-256 `894004BF4C3784917BE342A3658733C9D1383AE0DB0E9D3E522DA59B3F14A803`; publiczna suma zgodna, HTTP HEAD 200. Lokalnie: build 0 ostrzeżeń/błędów, `--wizard-self-test` PASS, desktop 58/58, .NET 403 PASS + 2 środowiskowe SKIP, witryna test/lint PASS. Pełny Windows CI 40941791192 oraz live Pages deployment 40943610114 PASS. CI obejmuje świeży hostowany runner, nie fizycznie czysty komputer odbiorcy.
 
 **F02 — diagnostyka błędu deinstalacji w UI (2026-10-26):** błąd z transakcji deinstalacji zachowuje teraz w `Exception.Data` etap, który wcześniej był dostępny wyłącznie w logu. Okno błędu pokazuje etap, typ wyjątku, HRESULT i lokalizację logu; wyjątek przed wejściem do transakcji dostaje bezpieczny etap `dispatch`. Zaktualizowany `--uninstall-guard-self-test` asercyjnie sprawdza wszystkie pola. `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj -c Release --no-restore` PASS, 0 ostrzeżeń i błędów; `--uninstall-guard-self-test` PASS. To poprawia diagnostykę, ale nie wyjaśnia komunikatu o pobieraniu z historycznego uruchomienia.
@@ -546,3 +596,30 @@ F03 pozostaje krytyczne; nie wdrażać modelu ani nie obniżać progów bez wiar
 **F13 — poprawka odczytu autostartu Electron na Windows (2026-10-26):** zweryfikowane źródła upstream wskazują bug w Electron 44.9.1 przy odczycie wpisu Run ze spacjami; fix jest w v45.0.0. Podniesiono Electron do 45.0.0, ręcznie zsynchronizowano blokadę wersji i SRI potwierdzone trzema niezależnymi `package-lock.json`. Dodano integracyjny krok Windows CI: jawny opt-in, odmowa kolizji istniejącego HKCU, ścieżka testowa `...\Sentinel AI.exe`, weryfikacja wpisu i argumentu `--minimized`, sprzątanie. Safety guard bez opt-in PASS, test manifest/lock PASS, desktop `npm test` 53/53 PASS. Nowy Windows CI dopiero zweryfikuje wersję i rzeczywistą rejestrację; reboot/logon nadal niezweryfikowany.
 
 **F13 — Windows autostart testowany na runnerze (2026-10-26):** pierwsze CI ujawniło, że `setLoginItemSettings` nie zachowywało `--minimized`; zapis używa teraz separatora `--`. Kolejny test pokazał `openAtLogin=false` mimo obecnego wpisu z `args=["--minimized"]`, `scope=user`, `enabled=true` i `executableWillLaunchAtLogin=true`; odczyt aplikacji sprawdza teraz ten aktywny wpis zamiast sprzecznego pola `openAtLogin`. Test używa syntetycznej ścieżki `...\Sentinel AI Autostart Test\Sentinel AI.exe` i usuwa tymczasowy wpis. Windows CI run [40251276662](https://github.com/Matyyyy68/asystent/actions/runs/40251276662), commit `bd0eee3`, PASS dla .NET, Electron autostart, Chrome/Edge E2E, headless/GUI instalatora i Enterprise API. Lokalnie `npm test` 53/53 oraz `node --check` PASS. Run `40249212129` zakończył się wcześniej niezależnym timeoutem startu PowerShell helpera w teście międzyprocesowego locka; zwiększono jego limit startu do 90 s, po czym run `40251276662` przeszedł całą bramkę. Test nie symuluje rzeczywistego restartu/logowania ani nie modyfikuje rejestru komputera użytkownika.
+# Przebudowa produktu — 2026-11-03
+
+## Zrealizowany etap
+
+- Usunięto wybór profilu DNS z pierwszego uruchomienia. Po gotowości silnika UI uruchamia jeden rzeczywisty `collect`, odświeża dane i zapisuje lokalny znacznik ukończenia tylko po sukcesie. Po błędzie stan pozostaje jawnie niepotwierdzony i można ponowić próbę.
+- Główny ekran pokazuje dostępność silnika oraz statusy monitorów, z zastrzeżeniem, że cykl nie skanuje całego dysku. Ukryto szczegóły techniczne pod zwijanym menu zaawansowanym.
+- Smoke Electron dostosowano do nowego przepływu.
+- Dodano dokumenty `PRODUCT_PHILOSOPHY.md`, `USER_EXPERIENCE.md`, `AUTONOMOUS_PROTECTION.md`, `WINDOWS_MONITORING.md`, `DETECTION_ENGINE.md`, `PRIVACY_AND_SECURITY.md` i `TESTING.md`.
+
+## Walidacja
+
+- `npm test --prefix desktop`: 58/58 PASS.
+- `npm run lint --prefix desktop`: PASS.
+- `npm run build --prefix desktop`: zablokowany odmową odczytu esbuilda do katalogu nadrzędnego `../../..`; produkcyjny build nie jest zweryfikowany.
+- Nie uruchomiono GUI/instalatora/przeglądarki na komputerze użytkownika.
+
+## Pozostała praca krytyczna
+
+1. Przebudować instalator do jednego podstawowego przycisku i schowanych opcji; zachować dotychczasowe naprawy, rollback i deinstalację.
+2. Zaprojektować i wdrożyć niezależny od Electron Core jako usługę o minimalnych uprawnieniach, z bezpiecznym IPC, instalacją/aktualizacją/deinstalacją i recovery SCM.
+3. Zapewnić, że status UI odzwierciedla błędy każdego krytycznego monitora, a nie tylko gotowość procesu silnika.
+4. Wykonać pierwszą analizę o jasno określonym zakresie i pokazać wyniki systemowe bez sugerowania pełnego skanu.
+5. Ujednolicić detekcję, notyfikacje i deduplikację; nie twierdzić o blokadzie bez rzeczywistego mechanizmu.
+6. Zaimplementować bezpieczną integrację „Sprawdź w Sentinel AI” dla plików Windows oraz sprzątanie jej przy deinstalacji.
+7. Dodać izolowane testy Windows dla powyższych przepływów oraz przeprowadzić production build i smoke.
+
+**Status całości: NIEUKOŃCZONE.** Aktualny zakres jest użytecznym etapem UI i pierwszego sprawdzenia, nie autonomicznym systemem ochrony opisanym w zleceniu.

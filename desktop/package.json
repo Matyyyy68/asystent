@@ -10,7 +10,7 @@
     "start": "electron .",
     "package": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1 -Offline",
     "package:allow-downloads": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../installer/build-installer.ps1 -AllowDownloads",
-    "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/engine-client.cjs && node --check electron/preload.cjs",
+    "lint": "tsc --noEmit && node --check electron/main.cjs && node --check electron/engine-client.cjs && node --check electron/core-agent-client.cjs && node --check electron/file-check-args.cjs && node --check electron/preload.cjs",
     "test": "node --test test/*.test.cjs"
   },
   "dependencies": {

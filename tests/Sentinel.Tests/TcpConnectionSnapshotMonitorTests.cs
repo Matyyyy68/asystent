@@ -78,6 +78,7 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         sample = [Connection(443), Connection(8443)];
         clock.Advance(TimeSpan.FromSeconds(1));
         Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Equal(1, monitor.LastIpReputationMatches);
 
         var alert = Assert.Single(await store.ReadAsync());
         Assert.Equal(RiskLevel.High, alert.Risk);
@@ -85,6 +86,10 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Contains("198.51.100.7:8443", alert.Explanation);
         Assert.Contains("reputation.ip-feed.match", alert.EvidenceCodes!);
         Assert.Contains("nie blokuje ruchu", alert.Recommendation);
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        Assert.Equal(0, monitor.LastIpReputationMatches);
     }
 
     [Fact]

@@ -99,7 +99,7 @@ try {
   # artifacts removed from a project cannot survive into the packaged release.
   $engineOutput = Join-Path $repo 'artifacts/engine'
   if (Test-Path -LiteralPath $engineOutput) { Remove-Item -LiteralPath $engineOutput -Recurse -Force }
-  foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost')) {
+  foreach ($project in @('Sentinel.Engine','Sentinel.UrlHost','Sentinel.Agent')) {
     dotnet publish "src/$project/$project.csproj" -c Release -r win-x64 --self-contained true -o artifacts/engine @dotnetRestoreArgs
     if ($LASTEXITCODE) { throw "Build $project failed" }
   }

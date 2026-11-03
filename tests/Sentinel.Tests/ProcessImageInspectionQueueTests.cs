@@ -34,6 +34,8 @@ public sealed class ProcessImageInspectionQueueTests : IDisposable
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (queue.Completed == 0)
             await Task.Delay(10, timeout.Token);
+        Assert.Equal(1, queue.TakeLocalReputationMatches());
+        Assert.Equal(0, queue.TakeLocalReputationMatches());
 
         var inspected = Assert.Single(await store.ReadAsync());
         Assert.Equal(expectedHash, inspected.ProcessImageSha256);

@@ -24,6 +24,7 @@ public sealed class ProcessImageInspectionQueue : IAsyncDisposable
     private readonly Task worker;
     private long completed;
     private long dropped;
+    private long localReputationMatches;
 
     public ProcessImageInspectionQueue(LocalStore store, FileHashReputation reputation,
         Func<string, CancellationToken, Task<AuthenticodeSignatureInfo>> readSignature)
@@ -36,6 +37,12 @@ public sealed class ProcessImageInspectionQueue : IAsyncDisposable
 
     public long Completed => Interlocked.Read(ref completed);
     public long Dropped => Interlocked.Read(ref dropped);
+
+    public int TakeLocalReputationMatches()
+    {
+        var count = Interlocked.Exchange(ref localReputationMatches, 0);
+        return count > int.MaxValue ? int.MaxValue : (int)count;
+    }
 
     public bool TryEnqueue(Guid eventId, string path)
     {
@@ -106,6 +113,7 @@ public sealed class ProcessImageInspectionQueue : IAsyncDisposable
                 {
                     await store.UpdateProcessImageInspectionAsync(request.EventId, hash, signatureStatus, localHashMatch, cancellation.Token);
                     Interlocked.Increment(ref completed);
+                    if (localHashMatch == true) Interlocked.Increment(ref localReputationMatches);
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { break; }
                 catch { Interlocked.Increment(ref dropped); }

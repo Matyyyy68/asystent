@@ -28,6 +28,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
             ["new"] = Entry("registry.user.runonce", "secret-command-fingerprint", true)
         };
         Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Equal(1, monitor.LastSuspiciousChanges);
 
         var events = await store.ReadAsync();
         var item = Assert.Single(events);
@@ -38,6 +39,8 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         Assert.DoesNotContain("new", System.Text.Json.JsonSerializer.Serialize(events), StringComparison.Ordinal);
         Assert.Empty(await store.ReadPendingEnterpriseEventsAsync());
         Assert.Contains("zapisano 1 zmian", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        Assert.Equal(0, monitor.LastSuspiciousChanges);
     }
 
     [Fact]
@@ -302,12 +305,12 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
-    public async Task PersistenceMonitoringSettingSurvivesStoreReopenAndDefaultsOff()
+    public async Task PersistenceMonitoringSettingSurvivesStoreReopenAndDefaultsOn()
     {
         var data = Path.Combine(root, "settings");
         var store = new LocalStore(data);
         await store.InitializeAsync();
-        Assert.False((await store.LoadSettingsAsync()).MonitorPersistenceChanges);
+        Assert.True((await store.LoadSettingsAsync()).MonitorPersistenceChanges);
         await store.SaveSettingsAsync(new AppSettings(MonitorPersistenceChanges: true));
         var reopened = new LocalStore(data);
         await reopened.InitializeAsync();

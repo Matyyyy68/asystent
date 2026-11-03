@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+- Ekran pierwszego uruchomienia nie wymaga już wyboru profilu DNS; po uzyskaniu stanu `engine=ready` automatycznie uruchamia jeden cykl istniejącego zbierania i pokazuje rzeczywisty zakres monitorów. Opis jawnie zaznacza, że nie jest to pełny skan dysku.
+- W świeżej instalacji standardowa nawigacja pozostaje ukryta do zakończenia pierwszego cyklu zbierania; błąd pozostawia oddzielny ekran stanu z możliwością ponowienia.
+- Ekran główny upraszcza stan do dostępności silnika/ograniczenia DNS i widoczności statusów procesów, pobranych plików, trwałości, sieci i DNS. Nie deklaruje blokowania ruchu.
+- Status główny uwzględnia teraz gotowość pierwszego sprawdzenia, pauzę i awarię/wyłączenie wymaganych monitorów; „Monitorowanie działa” pojawia się tylko po potwierdzeniu zdrowia źródeł, bez fałszywej obietnicy aktywnego blokowania.
+- Główny status uwzględnia także jawny stan Windows Security Center: zgłoszenie problemu pokazuje „Wymagana uwaga”, a nieznany stan nie jest przedstawiany jako zdrowy.
+- Status prezentuje lokalny, zagregowany stan antywirusa i zapory z Windows Security Center przez tylko-odczytowe API Windows z cache jednej minuty; nie twierdzi, że ustalił konkretny produkt.
+- Agent sprawdza ten stan raz na minutę i ostrzega, jeśli Windows Security Center zgłasza brak monitorowania, wstrzymanie albo konieczność uwagi. Dodano testy rozróżniające stany zdrowe, nieznane i wymagające reakcji.
+- Agent ostrzega także o nowych połączeniach TCP dopasowanych do zaimportowanej lokalnej listy IP; zwykłe połączenia nie generują alertu. Wynik cyklu Engine zawiera odrębny, ograniczony do bieżącej próbki licznik dopasowań.
+- Agent ostrzega również o zapisanej zmianie autostartu lub trwałości w lokalizacji zapisywalnej przez użytkownika. Komunikat wyraźnie określa to jako sygnał do sprawdzenia, nie werdykt malware.
+- Kolejka lokalnie hashuje także obrazy nowo zaobserwowanych procesów; udane dopasowanie do importowanej listy trafia do dedykowanego powiadomienia. Agent nigdy nie kończy procesu, a źródło lokalnej listy pozostaje niezweryfikowane.
+- Nowe profile zaczynają z lokalnym monitorowaniem aktywnym: procesy, Downloads, zmiany trwałości i TCP/UDP. Zapisane preferencje istniejących instalacji nie są nadpisywane; zbieranie tekstu okien i autoaktualizacja zewnętrznych list pozostają wyłączone.
+- Nawigację ograniczono do przeglądu i zdarzeń; pozostałe dotychczasowe funkcje są zwinięte pod „Narzędzia zaawansowane”.
+- Zaktualizowano Electron smoke, aby weryfikował automatyczne pierwsze sprawdzenie zamiast poprzedniego konfiguratora.
+- Ekran startowy instalatora pokazuje teraz jeden duży przycisk „ZAINSTALUJ”; lokalizacja i opcje pozostają dostępne przez „Opcje zaawansowane”. Świeża instalacja przechodzi bezpośrednio do preflight/install/verify z domyślnymi ustawieniami.
+- Payload instalatora i końcowa weryfikacja wymagają teraz Agent, Core i Contracts jako niezbędnych zależności uruchomieniowych.
+- Dodano per-user opcję menu plików „Sprawdź w Sentinel AI”. Analiza ogranicza się do lokalnego SHA-256 i podpisu Authenticode; wynik nie twierdzi o blokowaniu. Deinstalator usuwa wpis tylko wtedy, gdy nadal wskazuje na własny plik.
+- Dodano per-user proces Sentinel.Agent z ikoną zasobnika i watchdogiem z rosnącym backoffem po awarii agenta. Start następuje po instalacji i przy logowaniu; cykle `collect` oraz IPC są niezależne od UI i ograniczone do bieżącego użytkownika. Agent nadzoruje restart silnika; instalator zatrzymuje agenta przed aktualizacją/deinstalacją i uruchamia go ponownie po wymianie plików.
+- Alerty o dopasowaniach lokalnych list mają limit częstotliwości 10 minut per typ oraz krótki dźwięk systemowy; treść nie sugeruje blokowania ruchu.
+- Ikona zasobnika zmienia się na ostrzegawczą przy wykryciu lub niedostępności silnika i wraca do ikony produktu po okresie bez alertów.
+- Dodano dokumentację filozofii, UX, autonomii, monitorowania, detekcji, prywatności, testów i aktualnego postępu. Sentinel.Agent jest procesem użytkownika, nie usługą Windows SCM; WFP, aktywne blokowanie i odzyskiwanie SCM pozostają niewdrożone.
+- Skrypt pakowania instalatora działa również w Windows PowerShell 5.1 bez `Path.GetRelativePath` i odrzuca niezgodny lokalny Electron 44.x przed czyszczeniem wyników. Build offline potwierdził, że repo wymaga Electron 45.x, a lokalnie dostępne jest 44.9.1.
+
 ## 0.15.39
 - Instalator: przeniesiono sprawdzanie lokalizacji i wolnego miejsca z wątku interfejsu do zadań w tle. Usunięto synchroniczne, rekurencyjne skanowanie katalogu z ekranów lokalizacji i podsumowania; nieaktualny wynik starszego sprawdzenia nie nadpisuje nowszego. Zablokowano równoległe przejścia kreatora po wielokrotnym kliknięciu. Log zapisuje początek każdego etapu instalacji.
 - Dokładny EXE 0.15.39 przeszedł Windows release workflow 40942017352: self-test, instalację/aktualizację/weryfikację/deinstalację oraz widoczny przepływ kreatora. Opublikowany plik 274 317 878 B ma SHA-256 `894004BF4C3784917BE342A3658733C9D1383AE0DB0E9D3E522DA59B3F14A803`; publiczny plik `.sha256` zgodny, HEAD pliku EXE zwrócił HTTP 200.

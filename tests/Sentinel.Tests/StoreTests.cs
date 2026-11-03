@@ -1223,9 +1223,21 @@ public sealed class StoreTests : IDisposable
         await cmd.ExecuteNonQueryAsync();
         var settings = await s.LoadSettingsAsync();
         Assert.True(settings.Paused); Assert.False(settings.MonitorForegroundChanges);
-        Assert.False(settings.MonitorNetworkConnections);
-        Assert.False(settings.MonitorDownloadedFiles);
+        Assert.True(settings.MonitorNetworkConnections);
+        Assert.True(settings.MonitorDownloadedFiles);
+        Assert.True(settings.MonitorPersistenceChanges);
         Assert.Equal(10, settings.MinimumIntervalSeconds); Assert.Contains("bitwarden",settings.ExcludedApplications);
+    }
+    [Fact] public async Task FreshSettingsEnableLocalMonitoringWithoutCapturingForegroundText()
+    {
+        var settings = await (await Store()).LoadSettingsAsync();
+        Assert.False(settings.Paused);
+        Assert.True(settings.MonitorNetworkConnections);
+        Assert.True(settings.MonitorDownloadedFiles);
+        Assert.True(settings.MonitorPersistenceChanges);
+        Assert.False(settings.MonitorForegroundChanges);
+        Assert.False(settings.CollectStaticText);
+        Assert.False(settings.AutoUpdateCertFeed);
     }
     [Theory] [InlineData(0)] [InlineData(301)]
     public async Task InvalidCollectionIntervalIsRejected(int seconds)

@@ -28,7 +28,7 @@ public sealed class ContextTests
     [Fact] public async Task PauseDoesNotReadEvenMetadata()
     {
         var provider=new Provider(); var c=new ContextCollector(provider,new Clock());
-        Assert.Equal(CaptureStatus.Paused,(await c.CaptureAsync(new())).Status); Assert.Equal(0,provider.Reads); Assert.Equal(0,provider.Captures);
+        Assert.Equal(CaptureStatus.Paused,(await c.CaptureAsync(new(Paused:true))).Status); Assert.Equal(0,provider.Reads); Assert.Equal(0,provider.Captures);
     }
     [Theory]
     [InlineData("bitwarden", "title", false, false, "")]

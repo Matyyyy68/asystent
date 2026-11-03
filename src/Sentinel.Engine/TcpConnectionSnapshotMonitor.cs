@@ -37,6 +37,7 @@ public sealed class TcpConnectionSnapshotMonitor
     private bool disabledModeHandled;
 
     public string State { get; private set; } = "Ciągła obserwacja TCP/UDP jest wyłączona.";
+    public int LastIpReputationMatches { get; private set; }
 
     public TcpConnectionSnapshotMonitor(
         Func<CancellationToken, Task<IReadOnlyCollection<ConnectionSnapshot>>> capture,
@@ -53,6 +54,7 @@ public sealed class TcpConnectionSnapshotMonitor
     public async Task<int> CollectAsync(LocalStore store, bool enabled, bool paused, string excludedApplications,
         CancellationToken cancellationToken = default)
     {
+        LastIpReputationMatches = 0;
         if (!enabled || paused)
         {
             if (!disabledModeHandled || knownConnections is not null || knownUdpEndpoints is not null)
@@ -224,6 +226,7 @@ public sealed class TcpConnectionSnapshotMonitor
                 return 0;
             }
         }
+        LastIpReputationMatches = events.Count(item => item.Risk == RiskLevel.High && item.Source == "tcp-connection-snapshot");
         knownConnections.ExceptWith(removedTcpKeys);
         knownConnections.UnionWith(addedTcpKeys);
         knownUdpEndpoints.ExceptWith(removedUdpKeys);

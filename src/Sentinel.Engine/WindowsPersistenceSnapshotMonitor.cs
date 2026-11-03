@@ -25,6 +25,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private bool? wasEnabled;
 
     public string State { get; private set; } = "Monitor zmian autostartu jest wyłączony.";
+    public int LastSuspiciousChanges { get; private set; }
 
     public WindowsPersistenceSnapshotMonitor(TimeSpan? minimumInterval = null)
         : this(CaptureSupportedPlatform, WindowsScheduledTaskSnapshotReader.CaptureAsync,
@@ -70,6 +71,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     public async Task<int> CollectAsync(LocalStore store, bool enabled, bool paused, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(store);
+        LastSuspiciousChanges = 0;
         if (!enabled || paused)
         {
             if (wasEnabled is null or true)
@@ -454,6 +456,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
             ApplyChange(baseline, change);
             recorded++;
+            if (suspicious) LastSuspiciousChanges++;
         }
 
         // Advance unchanged entries and removed entries only after the corresponding events have been written.

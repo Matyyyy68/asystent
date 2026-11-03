@@ -30,10 +30,13 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(initialStatus.result.storage.knowledge.recordCount, 0);
   assert.equal(initialStatus.result.enterprise.variant, 'User');
   assert.equal(initialStatus.result.enterprise.paired, false);
-  assert.equal(initialStatus.result.settings.monitorNetworkConnections, false, 'continuous TCP monitoring must default to off');
+  assert.equal(typeof initialStatus.result.windowsSecurityCenter.antivirus, 'string');
+  assert.equal(typeof initialStatus.result.windowsSecurityCenter.firewall, 'string');
+  assert.equal(initialStatus.result.settings.paused, false, 'fresh local protection must start unpaused');
+  assert.equal(initialStatus.result.settings.monitorNetworkConnections, true, 'local TCP monitoring must default on');
   assert.deepEqual(initialStatus.result.ipReputation, { networkCount: 0, importedAt: null }, 'IP reputation must start empty and local');
-  assert.equal(initialStatus.result.settings.monitorDownloadedFiles, false, 'Downloads monitoring must default to off');
-  assert.equal(initialStatus.result.settings.monitorPersistenceChanges, false, 'Windows persistence monitoring must default to off');
+  assert.equal(initialStatus.result.settings.monitorDownloadedFiles, true, 'local Downloads monitoring must default on');
+  assert.equal(initialStatus.result.settings.monitorPersistenceChanges, true, 'local persistence monitoring must default on');
   assert.equal(initialStatus.result.settings.autoUpdateCertFeed, false, 'CERT feed auto-refresh must default to off');
   assert.deepEqual(initialStatus.result.certFeedRefresh, { enabled: false, state: 'Wyłączone', lastAttemptAt: null, lastErrorCode: null });
   const enabledFeedRefresh = await call('settings', { retentionDays: initialStatus.result.settings.retentionDays,
@@ -44,7 +47,6 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     notifications: initialStatus.result.settings.notifications, autoUpdateCertFeed: false });
   assert.equal(disabledFeedRefresh.ok, true, disabledFeedRefresh.error);
   assert.equal((await call('status')).result.settings.autoUpdateCertFeed, false, 'user must be able to turn auto-refresh off');
-  assert.equal(initialStatus.result.persistence, 'Monitor zmian autostartu jest wyłączony.');
   assert.equal((await call('malwareBazaarLookup', { sha256: 'a'.repeat(64), consent: false })).ok, false,
     'MalwareBazaar hash lookup must require explicit consent');
   assert.equal((await call('malwareBazaarConfigure', { apiKey: 'synthetic-test-key', consent: false })).ok, false,
@@ -211,6 +213,9 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const enabledSettings = await call('settings', { retentionDays: 30, notifications: true, dnsPollIntervalSeconds: 15, monitorNetworkConnections: true });
   assert.equal(enabledSettings.ok, true, enabledSettings.error);
   const tcpBaseline = await call('collect'); assert.equal(tcpBaseline.ok, true, tcpBaseline.error);
+  assert.equal(tcpBaseline.result.tcpIpReputationMatches, 0, 'a baseline or ordinary connection must not trigger an IP reputation notification');
+  assert.equal(tcpBaseline.result.persistenceSuspiciousChanges, 0, 'an unchanged persistence baseline must not trigger a notification');
+  assert.ok(Number.isInteger(tcpBaseline.result.processImageReputationMatches), 'the collect response must expose completed local process-image matches');
   assert.match(tcpBaseline.result.tcpConnections, /baza początkowa|działa/);
   assert.equal((await call('status')).result.settings.monitorNetworkConnections, true);
   if (process.argv.includes('--tcp-live')) {

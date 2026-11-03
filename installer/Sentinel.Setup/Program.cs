@@ -17,6 +17,10 @@ namespace Sentinel.Setup;
 internal static class Program
 {
     private const string Product = "Sentinel AI";
+    private const string FileContextMenuKey = @"Software\Classes\*\shell\SentinelAI.CheckFile";
+    private const string FileContextMenuCommandKey = FileContextMenuKey + @"\command";
+    private const string FileContextMenuLabel = "Sprawdź w Sentinel AI";
+    private const string CoreAutoStartValueName = "Sentinel AI Core";
     private static string? selfTestLogPath;
     internal static string LogPath => selfTestLogPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Product, "Logs", "installer.log");
     private const long MaximumLogBytes = 1024 * 1024;
@@ -474,6 +478,8 @@ internal static class Program
                 if (uninstallKey is not null) throw new InvalidOperationException("Integration test refused: a Sentinel AI installation is already registered.");
             if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
                 throw new InvalidOperationException("Integration test refused: a Sentinel AI autostart value already exists.");
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue(CoreAutoStartValueName) is not null)
+                throw new InvalidOperationException("Integration test refused: a Sentinel AI Core autostart value already exists.");
             foreach (var keyPath in new[]
             {
                 @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck",
@@ -490,7 +496,7 @@ internal static class Program
             Log($"INTEGRATION_TEST_START target={root}");
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
             if (!string.IsNullOrWhiteSpace(browserE2eRepo))
                 RunInstalledHostBrowserE2E(browserE2eRepo, root);
             var preservedFile = Path.Combine(root, "integration-test-user-file.txt");
@@ -500,7 +506,7 @@ internal static class Program
             Log("INTEGRATION_TEST_UPDATE_START");
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
             if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
                 throw new InvalidDataException("Update did not preserve a file outside the application payload.");
             Log("INTEGRATION_TEST_UPDATE_SUCCESS preservedUserFile=true");
@@ -514,6 +520,8 @@ internal static class Program
                 throw new InvalidDataException("Uninstall registration remained after integration-test cleanup.");
             if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") is not null)
                 throw new InvalidDataException("Autostart remained after integration-test cleanup.");
+            if (Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue(CoreAutoStartValueName) is not null)
+                throw new InvalidDataException("Core autostart remained after integration-test cleanup.");
             foreach (var keyPath in new[]
             {
                 @"Software\Google\Chrome\NativeMessagingHosts\com.sentinelai.urlcheck",
@@ -643,13 +651,13 @@ internal static class Program
                 RunWizardIntegrationFlow(wizard, repairExpected: false);
             }
 
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
             File.WriteAllText(preservedFile, preservedContents);
             using (var wizard = new SetupWizard(integrationTestTarget: root))
             {
                 RunWizardIntegrationFlow(wizard, repairExpected: true);
             }
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
             if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
                 throw new InvalidDataException("GUI repair/update did not preserve a file outside the application payload.");
             Uninstall(root);
@@ -721,7 +729,10 @@ internal static class Program
             stream.Position = 0;
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
             if (!archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("Sentinel AI.exe", StringComparison.OrdinalIgnoreCase))
-                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Engine.exe", StringComparison.OrdinalIgnoreCase)))
+                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Engine.exe", StringComparison.OrdinalIgnoreCase))
+                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Agent.exe", StringComparison.OrdinalIgnoreCase))
+                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Core.dll", StringComparison.OrdinalIgnoreCase))
+                || !archive.Entries.Any(e => e.FullName.Replace('\\', '/').Equals("resources/engine/Sentinel.Contracts.dll", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("Pakiet jest niekompletny.");
             return true;
         }
@@ -810,6 +821,17 @@ internal static class Program
                 || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel AI.exe"))
                 || IsUninstallInvocation(Array.Empty<string>(), Path.Combine(root, "Sentinel.AI.Setup.exe")))
                 throw new InvalidDataException("Uruchomienie pliku deinstalatora bez parametru nie rozpoznaje trybu odinstalowania.");
+            var coreAgentPath = Path.Combine(root, "resources", "engine", "Sentinel.Agent.exe");
+            if (!CoreAutoStartValueMatches(BuildCoreAutoStartValue(coreAgentPath), coreAgentPath)
+                || CoreAutoStartValueMatches($"\"{Path.Combine(root, "other", "Sentinel.Agent.exe")}\" --background", coreAgentPath)
+                || CoreAutoStartValueMatches($"\"{coreAgentPath}\" --minimized", coreAgentPath))
+                throw new InvalidDataException("Kontrakt autostartu Sentinel Core nie wskazuje wyłącznie na własny agent w tle.");
+            var contextExecutable = Path.Combine(root, "Sentinel AI.exe");
+            var contextCommand = BuildFileContextMenuCommand(contextExecutable);
+            if (!contextCommand.Contains("--check-file \"%1\"", StringComparison.Ordinal)
+                || !IsFileContextMenuCommandOwned(contextCommand, contextExecutable)
+                || IsFileContextMenuCommandOwned(contextCommand.Replace("--check-file", "--open", StringComparison.Ordinal), contextExecutable))
+                throw new InvalidDataException("Polecenie menu kontekstowego nie cytuje bezpiecznie ścieżki pliku lub nie jest poprawnie rozpoznawane jako własne.");
             if (!PathsEqual(root, Path.Combine(root, ".")) || PathsEqual(root, Path.Combine(root, "other"))
                 || PathsEqual("\0", root) || PathsEqual(root, null))
                 throw new InvalidDataException("Porównanie lokalizacji instalacji nie obsługuje ścieżek równoważnych i nieprawidłowych.");
@@ -1756,10 +1778,11 @@ internal static class Program
         return $"Pliki aplikacji: {payloadBytes / 1_048_576:N0} MB\r\nWymagane miejsce z zapasem: {requiredBytes / 1_048_576:N0} MB\r\nDostępne miejsce: {availableBytes / 1_048_576:N0} MB";
     }
 
-    internal static void VerifyInstallation(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart)
+    internal static void VerifyInstallation(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart,
+        bool verifyFileContextMenu = true, bool verifyCoreAutoStart = true)
     {
         target = Path.GetFullPath(target);
-        foreach (var relative in new[] { "Sentinel AI.exe", "Uninstall Sentinel AI.exe", "resources/engine/Sentinel.Engine.exe", "resources/engine/Sentinel.UrlHost.exe", "resources/engine/com.sentinelai.urlcheck.json" })
+        foreach (var relative in new[] { "Sentinel AI.exe", "Uninstall Sentinel AI.exe", "resources/engine/Sentinel.Engine.exe", "resources/engine/Sentinel.Agent.exe", "resources/engine/Sentinel.Core.dll", "resources/engine/Sentinel.Contracts.dll", "resources/engine/Sentinel.UrlHost.exe", "resources/engine/com.sentinelai.urlcheck.json" })
             if (!File.Exists(Path.Combine(target, relative.Replace('/', Path.DirectorySeparatorChar))))
                 throw new InvalidDataException($"Weryfikacja nie znalazła wymaganego pliku: {relative}.");
 
@@ -1771,6 +1794,9 @@ internal static class Program
         var runValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") as string;
         if (!AutoStartValueMatches(runValue, executable, autoStart))
             throw new InvalidDataException("Weryfikacja ustawienia autostartu nie powiodła się.");
+        var coreRunValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue(CoreAutoStartValueName) as string;
+        if (verifyCoreAutoStart && !CoreAutoStartValueMatches(coreRunValue, Path.Combine(target, "resources", "engine", "Sentinel.Agent.exe")))
+            throw new InvalidDataException("Weryfikacja autostartu silnika Sentinel Core nie powiodła się.");
 
         var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
         var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
@@ -1784,6 +1810,9 @@ internal static class Program
                 throw new InvalidDataException("Weryfikacja rejestracji hosta przeglądarki nie powiodła się.");
         }
 
+        if (verifyFileContextMenu && !IsFileContextMenuRegistered(target))
+            throw new InvalidDataException("Weryfikacja opcji „Sprawdź w Sentinel AI” w menu plików nie powiodła się.");
+
         var manifestPath = Path.Combine(target, "resources", "engine", "com.sentinelai.urlcheck.json");
         using var nativeManifest = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var manifestRoot = nativeManifest.RootElement;
@@ -1792,6 +1821,71 @@ internal static class Program
             || manifestRoot.GetProperty("type").GetString() != "stdio"
             || !manifestRoot.GetProperty("allowed_origins").EnumerateArray().Any(origin => origin.GetString() == "chrome-extension://nakmencmekkefmcddpihiiohjgabfemg/"))
             throw new InvalidDataException("Weryfikacja manifestu Native Messaging nie powiodła się.");
+    }
+
+    internal static string BuildFileContextMenuCommand(string executable) =>
+        $"\"{Path.GetFullPath(executable)}\" --check-file \"%1\"";
+
+    internal static bool IsFileContextMenuCommandOwned(string? command, string executable) =>
+        string.Equals(command, BuildFileContextMenuCommand(executable), StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFileContextMenuRegistered(string target)
+    {
+        var executable = Path.Combine(Path.GetFullPath(target), "Sentinel AI.exe");
+        using var menu = Registry.CurrentUser.OpenSubKey(FileContextMenuKey);
+        using var command = Registry.CurrentUser.OpenSubKey(FileContextMenuCommandKey);
+        return string.Equals(menu?.GetValue("MUIVerb") as string, FileContextMenuLabel, StringComparison.Ordinal)
+            && IsFileContextMenuCommandOwned(command?.GetValue(null) as string, executable);
+    }
+
+    private static void RegisterFileContextMenu(string target)
+    {
+        var executable = Path.Combine(Path.GetFullPath(target), "Sentinel AI.exe");
+        var expectedCommand = BuildFileContextMenuCommand(executable);
+        using (var command = Registry.CurrentUser.OpenSubKey(FileContextMenuCommandKey))
+        {
+            var existing = command?.GetValue(null) as string;
+            if (existing is not null && !IsFileContextMenuCommandOwned(existing, executable))
+                throw new InvalidOperationException("Istnieje już inna opcja menu plików o nazwie SentinelAI.CheckFile; pozostawiono ją bez zmian.");
+        }
+        using (var menu = Registry.CurrentUser.OpenSubKey(FileContextMenuKey))
+        {
+            var existingLabel = menu?.GetValue("MUIVerb") as string;
+            if (existingLabel is not null && !string.Equals(existingLabel, FileContextMenuLabel, StringComparison.Ordinal))
+                throw new InvalidOperationException("Klucz menu plików SentinelAI.CheckFile należy do innej konfiguracji; pozostawiono go bez zmian.");
+        }
+        using (var menu = Registry.CurrentUser.CreateSubKey(FileContextMenuKey))
+        {
+            if (menu is null) throw new IOException("Nie można utworzyć opcji menu plików Sentinel AI.");
+            menu.SetValue("MUIVerb", FileContextMenuLabel, RegistryValueKind.String);
+            menu.SetValue("Icon", executable, RegistryValueKind.String);
+        }
+        using (var command = Registry.CurrentUser.CreateSubKey(FileContextMenuCommandKey))
+        {
+            if (command is null) throw new IOException("Nie można skonfigurować polecenia menu plików Sentinel AI.");
+            command.SetValue(null, expectedCommand, RegistryValueKind.String);
+        }
+    }
+
+    private static void RemoveFileContextMenuIfOwned(string target)
+    {
+        var executable = Path.Combine(Path.GetFullPath(target), "Sentinel AI.exe");
+        using (var command = Registry.CurrentUser.OpenSubKey(FileContextMenuCommandKey))
+        {
+            if (!IsFileContextMenuCommandOwned(command?.GetValue(null) as string, executable)) return;
+        }
+        Registry.CurrentUser.DeleteSubKey(FileContextMenuCommandKey, throwOnMissingSubKey: false);
+        var deleteParent = false;
+        using (var menu = Registry.CurrentUser.OpenSubKey(FileContextMenuKey, writable: true))
+        {
+            if (menu is null) return;
+            if (string.Equals(menu.GetValue("MUIVerb") as string, FileContextMenuLabel, StringComparison.Ordinal))
+                menu.DeleteValue("MUIVerb", throwOnMissingValue: false);
+            if (string.Equals(menu.GetValue("Icon") as string, executable, StringComparison.OrdinalIgnoreCase))
+                menu.DeleteValue("Icon", throwOnMissingValue: false);
+            deleteParent = menu.ValueCount == 0 && menu.SubKeyCount == 0;
+        }
+        if (deleteParent) Registry.CurrentUser.DeleteSubKey(FileContextMenuKey, throwOnMissingSubKey: false);
     }
 
     internal static bool AutoStartValueMatches(string? value, string executable, bool enabled)
@@ -1819,6 +1913,90 @@ internal static class Program
             target = separator < 0 ? command : command[..separator];
         }
         return PathsEqual(target, executable);
+    }
+
+    internal static string BuildCoreAutoStartValue(string agentExecutable) =>
+        $"\"{Path.GetFullPath(agentExecutable)}\" --background";
+
+    internal static bool CoreAutoStartValueMatches(string? value, string agentExecutable) =>
+        string.Equals(value, BuildCoreAutoStartValue(agentExecutable), StringComparison.OrdinalIgnoreCase);
+
+    private static void SetCoreAutoStart(string installPath)
+    {
+        var agentExecutable = Path.Combine(installPath, "resources", "engine", "Sentinel.Agent.exe");
+        var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")
+            ?? throw new IOException("Nie można skonfigurować automatycznego uruchamiania Sentinel Core.");
+        using (run)
+        {
+            var existing = run.GetValue(CoreAutoStartValueName) as string;
+            if (!string.IsNullOrWhiteSpace(existing) && !CoreAutoStartValueMatches(existing, agentExecutable))
+                throw new InvalidOperationException("Wpis autostartu Sentinel AI Core wskazuje na inny plik; pozostawiono go bez zmian.");
+            run.SetValue(CoreAutoStartValueName, BuildCoreAutoStartValue(agentExecutable), RegistryValueKind.String);
+        }
+    }
+
+    private static void DeleteCoreAutoStartIfOwned(string installPath)
+    {
+        using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+        var agentExecutable = Path.Combine(installPath, "resources", "engine", "Sentinel.Agent.exe");
+        if (run is not null && CoreAutoStartValueMatches(run.GetValue(CoreAutoStartValueName) as string, agentExecutable))
+            run.DeleteValue(CoreAutoStartValueName, throwOnMissingValue: false);
+    }
+
+    private static bool StopBackgroundAgent(string installPath)
+    {
+        var agentExecutable = Path.Combine(installPath, "resources", "engine", "Sentinel.Agent.exe");
+        if (!File.Exists(agentExecutable)) return false;
+        if (!IsBackgroundAgentRunning(agentExecutable)) return false;
+        using var process = Process.Start(new ProcessStartInfo(agentExecutable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            ArgumentList = { "--shutdown" }
+        }) ?? throw new IOException("Nie można wysłać polecenia bezpiecznego zatrzymania Sentinel Core.");
+        if (!process.WaitForExit(10_000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            throw new TimeoutException("Sentinel Core nie potwierdził zatrzymania; instalacja pozostaje bez zmian.");
+        }
+        if (process.ExitCode != 0) throw new IOException("Sentinel Core odmówił bezpiecznego zatrzymania.");
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (IsBackgroundAgentRunning(agentExecutable) && DateTime.UtcNow < deadline) Thread.Sleep(100);
+        if (IsBackgroundAgentRunning(agentExecutable)) throw new TimeoutException("Sentinel Core potwierdził polecenie, ale nie zakończył działania.");
+        return true;
+    }
+
+    private static void StartBackgroundAgent(string installPath)
+    {
+        var agentExecutable = Path.Combine(installPath, "resources", "engine", "Sentinel.Agent.exe");
+        if (!File.Exists(agentExecutable)) throw new FileNotFoundException("Brak pliku Sentinel Core.", agentExecutable);
+        if (IsBackgroundAgentRunning(agentExecutable)) return;
+        using var process = Process.Start(new ProcessStartInfo(agentExecutable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            ArgumentList = { "--background" }
+        }) ?? throw new IOException("Nie można uruchomić Sentinel Core w tle.");
+        Log($"CORE_AGENT_START_REQUESTED pid={process.Id}");
+    }
+
+    private static bool IsBackgroundAgentRunning(string executable)
+    {
+        foreach (var candidate in Process.GetProcessesByName("Sentinel.Agent"))
+        {
+            using (candidate)
+            {
+                try
+                {
+                    if (string.Equals(Path.GetFullPath(candidate.MainModule?.FileName ?? string.Empty), Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                catch (System.ComponentModel.Win32Exception) { return true; }
+            }
+        }
+        return false;
     }
 
     private static void DeleteAutoStartIfOwned(string installPath)
@@ -1964,10 +2142,14 @@ internal static class Program
         setStage("prepare", "capture_previous_configuration");
         var oldUninstallValues = CaptureRegistry(uninstallKeyPath);
         var oldRunValue = CaptureRegistryValue(runKeyPath, "Sentinel AI");
+        var oldCoreRunValue = CaptureRegistryValue(runKeyPath, CoreAutoStartValueName);
+        var oldFileContextMenuValues = CaptureRegistry(FileContextMenuKey);
+        var oldFileContextMenuCommandValues = CaptureRegistry(FileContextMenuCommandKey);
         var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
         var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
         var linkBackups = testMode ? new Dictionary<string, string?>() : CaptureShortcuts([startMenuLink, desktopLink], integrationBackup);
         var oldMoved = false;
+        var backgroundAgentWasRunning = false;
         try
         {
             Log($"INSTALL_START target={target} startMenu={startMenuShortcut} autostart={autoStart} desktop={desktopShortcut}");
@@ -2029,6 +2211,9 @@ internal static class Program
             {
                 using var mainExecutable = OpenInstallFileRead(Path.Combine(staging, "Sentinel AI.exe"), staging);
                 using var engineExecutable = OpenInstallFileRead(Path.Combine(staging, "resources", "engine", "Sentinel.Engine.exe"), staging);
+                using var agentExecutable = OpenInstallFileRead(Path.Combine(staging, "resources", "engine", "Sentinel.Agent.exe"), staging);
+                using var coreLibrary = OpenInstallFileRead(Path.Combine(staging, "resources", "engine", "Sentinel.Core.dll"), staging);
+                using var contractsLibrary = OpenInstallFileRead(Path.Combine(staging, "resources", "engine", "Sentinel.Contracts.dll"), staging);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             { throw new InvalidDataException("Brakuje wymaganych plików aplikacji albo ścieżka stagingu została zmieniona.", exception); }
@@ -2039,8 +2224,23 @@ internal static class Program
             setStage("secure", "apply_chromium_permissions");
             ApplyChromiumPermissions(staging);
 
+            if (!testMode && Directory.Exists(target))
+            {
+                setStage("replace", "stop_background_core");
+                try { backgroundAgentWasRunning = StopBackgroundAgent(target); }
+                catch
+                {
+                    try { StartBackgroundAgent(target); } catch (Exception restartError) { Log($"CORE_AGENT_RESTART_FAILED message={Clean(restartError.Message)}"); }
+                    throw;
+                }
+            }
             setStage("replace", "swap_install_directory");
-            if (Directory.Exists(target)) { RenameInstallDirectorySafely(target, backup, localApplicationData); oldMoved = true; }
+            try { if (Directory.Exists(target)) { RenameInstallDirectorySafely(target, backup, localApplicationData); oldMoved = true; } }
+            catch
+            {
+                if (backgroundAgentWasRunning) try { StartBackgroundAgent(target); } catch (Exception restartError) { Log($"CORE_AGENT_RESTART_FAILED message={Clean(restartError.Message)}"); }
+                throw;
+            }
             try { RenameInstallDirectorySafely(staging, target, localApplicationData); }
             catch
             {
@@ -2049,6 +2249,7 @@ internal static class Program
                     RenameInstallDirectorySafely(backup, target, localApplicationData);
                     oldMoved = false;
                 }
+                if (backgroundAgentWasRunning) try { StartBackgroundAgent(target); } catch (Exception restartError) { Log($"CORE_AGENT_RESTART_FAILED message={Clean(restartError.Message)}"); }
                 throw;
             }
             try
@@ -2062,6 +2263,8 @@ internal static class Program
                 {
                     var executable = Path.Combine(target, "Sentinel AI.exe");
                     SetUninstallRegistration(target);
+                    RegisterFileContextMenu(target);
+                    SetCoreAutoStart(target);
                     if (autoStart)
                     {
                         var existingRunValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue("Sentinel AI") as string;
@@ -2089,13 +2292,20 @@ internal static class Program
                 {
                     RestoreRegistry(uninstallKeyPath, oldUninstallValues);
                     RestoreRegistryValue(runKeyPath, "Sentinel AI", oldRunValue);
+                    RestoreRegistryValue(runKeyPath, CoreAutoStartValueName, oldCoreRunValue);
+                    RestoreRegistry(FileContextMenuKey, oldFileContextMenuValues);
+                    RestoreRegistry(FileContextMenuCommandKey, oldFileContextMenuCommandValues);
                     RestoreShortcuts(linkBackups);
                 }
                 if (!testMode && oldMoved && Directory.Exists(target))
                     try { RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--register", 8000); } catch (Exception restoreError) { Log($"ROLLBACK_HOST_REGISTER_FAILED message={Clean(restoreError.Message)}"); }
+                if (!testMode && backgroundAgentWasRunning && Directory.Exists(target))
+                    try { StartBackgroundAgent(target); } catch (Exception restartError) { Log($"CORE_AGENT_RESTART_FAILED message={Clean(restartError.Message)}"); }
                 throw;
             }
             if (oldMoved) TryDeleteInstallTree(backup);
+            if (!testMode)
+                try { StartBackgroundAgent(target); } catch (Exception startError) { Log($"CORE_AGENT_START_FAILED message={Clean(startError.Message)}"); }
         }
         finally { TryDeleteInstallTree(staging); if (Directory.Exists(backup) && Directory.Exists(target)) TryDeleteInstallTree(backup); TryDelete(integrationBackup); }
     }
@@ -2221,12 +2431,19 @@ internal static class Program
             {
                 stage = "unregister_native_messaging";
                 Log($"UNINSTALL_STAGE stage={stage} status=started");
+                StopBackgroundAgent(target);
                 RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000);
                 Log($"UNINSTALL_STAGE stage={stage} status=complete");
 
                 stage = "remove_owned_autostart";
                 Log($"UNINSTALL_STAGE stage={stage} status=started");
                 DeleteAutoStartIfOwned(target);
+                DeleteCoreAutoStartIfOwned(target);
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
+
+                stage = "remove_owned_file_context_menu";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                RemoveFileContextMenuIfOwned(target);
                 Log($"UNINSTALL_STAGE stage={stage} status=complete");
 
                 stage = "remove_uninstall_registration";
@@ -2421,6 +2638,7 @@ internal sealed class SetupWizard : Form
     private readonly ProgressBar progress = new() { Minimum = 0, Maximum = 100, Height = 14, Location = new Point(34, 344), Size = new Size(620, 14), Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
     private readonly Button back = new() { Text = "Wstecz", Size = new Size(100, 38), Location = new Point(34, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
     private readonly Button next = new() { Text = "Rozpocznij", Size = new Size(136, 38), Location = new Point(518, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+    private readonly Button advancedOptions = new() { Text = "Opcje zaawansowane", AutoSize = true, FlatStyle = FlatStyle.Flat, ForeColor = Color.FromArgb(190, 204, 222), BackColor = Color.Transparent };
     private readonly Button cancel = new() { Text = "Anuluj", Size = new Size(100, 38), Location = new Point(400, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
     private readonly Button openLog = new() { Text = "Otwórz log", Size = new Size(110, 38), Location = new Point(270, 408), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
     private readonly PictureBox illustration = new() { Bounds = new Rectangle(475, 82, 180, 170), SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent, Anchor = AnchorStyles.Top | AnchorStyles.Right };
@@ -2489,11 +2707,13 @@ internal sealed class SetupWizard : Form
         folder.SetBounds(34, 197, 430, 32); browse.Location = new Point(475, 197);
         startMenu.Location = new Point(36, 185); desktop.Location = new Point(36, 223); start.Location = new Point(36, 261);
         launchAfter.Location = new Point(36, 299); summary.Location = new Point(34, 178);
-        Controls.AddRange([heading, step, intro, pathLabel, folder, browse, spaceInfo, startMenu, desktop, start, launchAfter, summary, status, errorDetails, progress, illustration, back, next, cancel, openLog]);
+        advancedOptions.Location = new Point(285, 366);
+        Controls.AddRange([heading, step, intro, pathLabel, folder, browse, spaceInfo, startMenu, desktop, start, launchAfter, summary, status, errorDetails, progress, illustration, back, next, advancedOptions, cancel, openLog]);
         AcceptButton = next;
         CancelButton = cancel;
         browse.Click += async (_, _) => { using var dialog = new FolderBrowserDialog { SelectedPath = folder.Text, Description = "Wybierz folder instalacji Sentinel AI" }; if (dialog.ShowDialog(this) == DialogResult.OK) { folder.Text = Path.Combine(dialog.SelectedPath, "Sentinel AI"); await RefreshSpaceInfoAsync(); } };
         next.Click += async (_, _) => await MoveNextAsync();
+        advancedOptions.Click += (_, _) => ShowPage(WizardPage.Location);
         back.Click += (_, _) => MoveBack();
         openLog.Click += (_, _) => OpenLog();
         cancel.Click += (_, _) =>
@@ -2552,6 +2772,9 @@ internal sealed class SetupWizard : Form
                 case WizardPage.Welcome:
                     next.PerformClick();
                     break;
+                case WizardPage.Installing:
+                case WizardPage.Verify:
+                    break;
                 case WizardPage.Location:
                     folder.Text = integrationTestTarget!;
                     next.PerformClick();
@@ -2585,7 +2808,10 @@ internal sealed class SetupWizard : Form
         {
             switch (page)
             {
-                case WizardPage.Welcome: ShowPage(WizardPage.Location); break;
+                case WizardPage.Welcome:
+                    if (repairMode) ShowPage(WizardPage.Location);
+                    else await InstallAsync();
+                    break;
                 case WizardPage.Location:
                     await RefreshSpaceInfoAsync();
                     ShowPage(WizardPage.Options);
@@ -2706,6 +2932,7 @@ internal sealed class SetupWizard : Form
         errorDetails.Visible = showError;
         openLog.Visible = showError;
         launchAfter.Visible = target is WizardPage.Options or WizardPage.Complete;
+        advancedOptions.Visible = !repairMode && target == WizardPage.Welcome;
         illustration.Visible = target is WizardPage.Welcome or WizardPage.Options or WizardPage.Installing or WizardPage.Verify or WizardPage.Complete or WizardPage.Error;
         back.Visible = target is WizardPage.Location or WizardPage.Options or WizardPage.Summary or WizardPage.Error;
         cancel.Visible = target is WizardPage.Location or WizardPage.Options or WizardPage.Summary or WizardPage.Installing or WizardPage.Verify;
@@ -2714,7 +2941,7 @@ internal sealed class SetupWizard : Form
         next.Enabled = !installationRunning;
         next.Text = target switch
         {
-            WizardPage.Welcome => repairMode ? "Dalej" : "Rozpocznij",
+            WizardPage.Welcome => repairMode ? "Dalej" : "ZAINSTALUJ",
             WizardPage.Location or WizardPage.Options => "Dalej",
             WizardPage.Summary => repairMode ? "Zastosuj" : "Zainstaluj",
             WizardPage.Error when errorCanRetry => repairMode ? "Ponów naprawę" : "Ponów instalację",
@@ -2722,6 +2949,8 @@ internal sealed class SetupWizard : Form
             WizardPage.Complete => "Zakończ",
             _ => "Dalej"
         };
+        if (!repairMode && target == WizardPage.Welcome) next.SetBounds(205, 286, 290, 58);
+        else next.SetBounds(518, 408, 136, 38);
         back.Enabled = !installationRunning;
         ActiveControl = next.Visible && next.Enabled ? next : cancel.Visible && cancel.Enabled ? cancel : null;
         step.Text = target switch
@@ -2750,7 +2979,7 @@ internal sealed class SetupWizard : Form
         {
             WizardPage.Welcome => repairMode
                 ? "Wykryto istniejącą instalację. Naprawa lub aktualizacja odtworzy pliki z tego pakietu i zachowa wykryte skróty oraz autostart."
-                : "Własna instalacja Sentinel AI. Program zostanie zainstalowany w profilu użytkownika; nie wymaga uprawnień administratora.",
+                : "Inteligentna ochrona Twojego komputera. Zainstalujemy Sentinel AI w profilu użytkownika; zmiana domyślnych ustawień jest opcjonalna.",
             WizardPage.Location => repairMode
                 ? "Wybierz istniejący folder instalacji. Operacja zachowa ustawienia oraz pliki użytkownika spoza pakietu aplikacji."
                 : "Wybierz bezpieczny folder w swoim profilu. Istniejąca instalacja zostanie zaktualizowana w tym samym miejscu.",
@@ -2765,6 +2994,7 @@ internal sealed class SetupWizard : Form
             WizardPage.Complete => repairMode ? "Pliki i konfiguracja naprawionej instalacji zostały sprawdzone." : "Pliki i konfiguracja instalacji zostały sprawdzone.",
             _ => "Instalator nie zgłosi sukcesu, jeśli konfiguracja lub weryfikacja się nie powiedzie."
         };
+        step.Visible = target != WizardPage.Welcome || repairMode;
         status.Text = target switch
         {
             WizardPage.Installing => repairMode ? "Przygotowuję naprawę / aktualizację…" : "Przygotowuję instalację…",
@@ -2859,6 +3089,12 @@ internal sealed class SetupWizard : Form
 
     internal static void ValidateVisualStates()
     {
+        var contextMenuExecutable = Path.Combine(Path.GetTempPath(), "Sentinel AI.exe");
+        var contextMenuCommand = Program.BuildFileContextMenuCommand(contextMenuExecutable);
+        if (!contextMenuCommand.Contains("--check-file \"%1\"", StringComparison.Ordinal)
+            || !Program.IsFileContextMenuCommandOwned(contextMenuCommand, contextMenuExecutable)
+            || Program.IsFileContextMenuCommandOwned(contextMenuCommand.Replace("--check-file", "--open", StringComparison.Ordinal), contextMenuExecutable))
+            throw new InvalidDataException("Polecenie menu kontekstowego nie cytuje bezpiecznie ścieżki pliku lub nie jest poprawnie rozpoznawane jako własne.");
         using var wizard = new SetupWizard(repairModeOverride: false);
         wizard.ShowInTaskbar = false;
         wizard.StartPosition = FormStartPosition.Manual;
@@ -2870,6 +3106,10 @@ internal sealed class SetupWizard : Form
             throw new InvalidDataException("Kreator instalatora nie może blokować aktywacji okna.");
         if (!ReferenceEquals(wizard.AcceptButton, wizard.next) || !ReferenceEquals(wizard.CancelButton, wizard.cancel))
             throw new InvalidDataException("Kreator nie udostępnia klawiaturowych przycisków Dalej i Anuluj.");
+        if (wizard.next.Text != "ZAINSTALUJ" || !wizard.advancedOptions.Visible || wizard.folder.Visible
+            || wizard.startMenu.Visible || wizard.desktop.Visible || wizard.start.Visible || wizard.step.Visible
+            || wizard.next.Width < 250)
+            throw new InvalidDataException("Ekran startowy nie pokazuje prostego instalowania z opcjonalnym obszarem zaawansowanym.");
         if (wizard.folder.BackColor != Color.FromArgb(26, 37, 54) || wizard.folder.ForeColor != Color.White
             || wizard.folder.BorderStyle != BorderStyle.FixedSingle
             || new[] { wizard.startMenu, wizard.desktop, wizard.start, wizard.launchAfter }.Any(option => option.FlatStyle != FlatStyle.Flat)

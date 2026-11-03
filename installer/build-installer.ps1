@@ -11,6 +11,14 @@ $electronDistribution = Join-Path $repo 'desktop/node_modules/electron/dist'
 if (!(Test-Path -LiteralPath (Join-Path $electronDistribution 'electron.exe') -PathType Leaf)) {
   throw 'The local Electron runtime is missing. Install the locked desktop dependencies before packaging.'
 }
+$electronPackagePath = Join-Path $repo 'desktop/node_modules/electron/package.json'
+if (!(Test-Path -LiteralPath $electronPackagePath -PathType Leaf)) {
+  throw 'The local Electron package metadata is missing. Install the locked desktop dependencies before packaging.'
+}
+$electronPackage = Get-Content -LiteralPath $electronPackagePath -Raw | ConvertFrom-Json
+if ($electronPackage.version -notmatch '^45\.') {
+  throw "The local Electron runtime is $($electronPackage.version), but this project requires Electron 45.x. Install the locked desktop dependencies before packaging."
+}
 # electron-builder 26.15.3 edits the Windows executable using its installed
 # `resedit` dependency; the `dir` target does not need the optional rcedit toolset.
 $version = ([xml](Get-Content (Join-Path $repo 'eng/ProductVersion.props'))).Project.PropertyGroup.VersionPrefix
@@ -60,7 +68,9 @@ try {
   $illustrations = @(Get-ChildItem -LiteralPath $illustrationSource -Recurse -Filter *.png)
   if ($illustrations.Count -lt 103) { throw "Biblioteka ilustracji jest niekompletna: znaleziono $($illustrations.Count), oczekiwano co najmniej 103 plików." }
   foreach ($illustrationFile in $illustrations) {
-    $relativeIllustration = [IO.Path]::GetRelativePath($illustrationSource, $illustrationFile.FullName)
+    # Windows PowerShell 5.1 runs on .NET Framework, which has no GetRelativePath.
+    $illustrationRoot = $illustrationSource.TrimEnd([char[]]@('\', '/'))
+    $relativeIllustration = $illustrationFile.FullName.Substring($illustrationRoot.Length).TrimStart([char[]]@('\', '/'))
     if (!(Test-Path -LiteralPath (Join-Path $repo "desktop/dist/media/illustrations/$relativeIllustration") -PathType Leaf)) {
       throw "Brak ilustracji w paczce aplikacji: $relativeIllustration"
     }

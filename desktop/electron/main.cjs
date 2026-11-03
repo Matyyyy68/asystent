@@ -1,14 +1,16 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { EngineClient } = require('./engine-client.cjs');
+const { CoreAgentClient } = require('./core-agent-client.cjs');
 const { requestEnterpriseContextConsent } = require('./enterprise-context-consent.cjs');
 const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-log.cjs');
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
+const { requestedFileCheck } = require('./file-check-args.cjs');
 const { isolatedElectronPaths, lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
-let win, tray, quitting = false;
+let win, quitting = false, fileCheckHandler = null;
 const smokeTest = process.argv.includes('--smoke-test');
 if (smokeTest && process.env.SENTINEL_DATA_ROOT) {
   const isolatedPaths = isolatedElectronPaths(process.env.SENTINEL_DATA_ROOT);
@@ -20,20 +22,29 @@ const isAutostartEnabled = () => {
   return settings.executableWillLaunchAtLogin === true &&
     settings.launchItems?.some(item => item.name === 'Sentinel AI' && item.scope === 'user' && item.enabled && item.args?.includes('--minimized')) === true;
 };
-const allowed = new Set(['status', 'history', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
+const allowed = new Set(['status', 'history', 'collect', 'eventStatus', 'pause', 'settings', 'analyze', 'connections', 'clearHistory', 'updateFeed', 'rollbackFeed', 'urlReputationImport', 'urlReputationRollback', 'urlReputationClear', 'ipReputationClear', 'fileHashFeedClear', 'knowledgeList', 'knowledgeSearch', 'knowledgeDelete', 'aiModels', 'aiSettings', 'enterpriseStatus', 'enterprisePair', 'enterpriseSync', 'enterpriseConsent', 'enterpriseRotateCredential', 'malwareBazaarConfigure', 'malwareBazaarLookup']);
 const page = pathToFileURL(path.join(__dirname, '../dist/index.html')).href;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-app.on('second-instance', () => win?.show());
+app.on('second-instance', (_event, commandLine) => {
+  if (commandLine.includes('--quit-ui')) { quitting = true; app.quit(); return; }
+  const filePath = requestedFileCheck(commandLine);
+  if (filePath && fileCheckHandler) { void fileCheckHandler(filePath, false); return; }
+  win?.show();
+});
 app.whenReady().then(() => {
+  if (process.argv.includes('--quit-ui')) { app.quit(); return; }
   const executable = app.isPackaged ? path.join(process.resourcesPath, 'engine/Sentinel.Engine.exe') : path.join(__dirname, '../../artifacts/engine/Sentinel.Engine.exe');
+  const agentExecutable = app.isPackaged ? path.join(process.resourcesPath, 'engine/Sentinel.Agent.exe') : path.join(__dirname, '../../artifacts/engine/Sentinel.Agent.exe');
   const lifecycleLogDirectory = resolveLifecycleLogDirectory({
     smokeTest,
     isolatedDataRoot: process.env.SENTINEL_DATA_ROOT,
     localAppData: process.env.LOCALAPPDATA,
     userDataPath: app.getPath('userData')
   });
-  const engine = new EngineClient(executable, { onDiagnostic: failure => recordFailure(lifecycleLogDirectory, failure) });
+  const engine = smokeTest
+    ? new EngineClient(executable, { onDiagnostic: failure => recordFailure(lifecycleLogDirectory, failure) })
+    : new CoreAgentClient(agentExecutable, { onDiagnostic: failure => recordFailure(lifecycleLogDirectory, failure) });
   engine.start();
   const call = (method, data) => engine.call(method, data);
   ipcMain.handle('sentinel', async (event, method, data) => {
@@ -107,7 +118,8 @@ app.whenReady().then(() => {
     }
     return call(method, data);
   });
-  win = new BrowserWindow({ show: shouldShowInitialWindow(process.argv), width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
+  const startupFileCheck = requestedFileCheck(process.argv);
+  win = new BrowserWindow({ show: !startupFileCheck && shouldShowInitialWindow(process.argv), width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
   const stopSmokeTestWatch = smokeTest ? watchSmokeTestWindow(win.webContents, message => {
     console.error(message);
@@ -118,27 +130,38 @@ app.whenReady().then(() => {
   win.webContents.on('will-navigate', e => e.preventDefault());
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.loadURL(page);
+  fileCheckHandler = async (filePath, oneShot) => {
+    try {
+      const result = await call('file', { path: filePath });
+      const detail = result.reputation?.match
+        ? 'Hash pliku pasuje do lokalnej listy. Źródło listy nie zostało niezależnie zweryfikowane; to nie jest automatyczny werdykt zagrożenia.'
+        : 'Obliczono SHA-256 i sprawdzono podpis. Brak dopasowania nie potwierdza bezpieczeństwa. Sentinel nie zablokował ani nie usunął pliku.';
+      await dialog.showMessageBox({ type: result.reputation?.match ? 'warning' : 'info', buttons: ['OK'],
+        title: 'Sentinel AI — sprawdzenie pliku', message: `Sprawdzono: ${result.name}`, detail });
+    } catch (error) {
+      await dialog.showMessageBox({ type: 'error', buttons: ['OK'], title: 'Sentinel AI — nie udało się sprawdzić pliku',
+        message: 'Nie można było ukończyć podstawowego sprawdzenia wybranego pliku.', detail: String(error?.message || 'Błąd silnika').slice(0, 500) });
+    } finally {
+      if (oneShot) { quitting = true; app.quit(); }
+    }
+  };
+  if (startupFileCheck) void fileCheckHandler(startupFileCheck, true);
   if (process.argv.includes('--smoke-test')) win.webContents.once('did-finish-load', async () => {
     try {
+      const firstRunScreen = await win.webContents.executeJavaScript('document.querySelector(".first-run-screen") !== null && document.querySelector(".layout") === null');
+      if (!firstRunScreen) throw new Error('Zwykły interfejs pojawił się przed zakończeniem pierwszego sprawdzenia');
       const status = await win.webContents.executeJavaScript('window.sentinel.call("status")');
       if (status.engine !== 'ready') throw new Error('Silnik niegotowy');
       await new Promise(resolve => setTimeout(resolve, 500));
-      await win.webContents.executeJavaScript(`(() => {
-        const select = document.querySelector('select');
-        if (!select) throw new Error('Brak kreatora pierwszego uruchomienia');
-        select.value = 'resources'; select.dispatchEvent(new Event('change', { bubbles: true }));
-        const button = [...document.querySelectorAll('button')].find(button => button.textContent.includes('Zastosuj i sprawdź'));
-        if (!button || button.disabled) throw new Error('Przycisk konfiguracji pierwszego uruchomienia jest niedostępny');
-        button.click();
-      })()`);
       let configured;
       for (let attempt = 0; attempt < 20; attempt++) {
         configured = await win.webContents.executeJavaScript('window.sentinel.call("status")');
-        if (configured.settings.dnsPollIntervalSeconds === 60 && !configured.settings.paused) break;
+        const firstRunComplete = await win.webContents.executeJavaScript('localStorage.getItem("sentinel-first-run") === "complete"');
+        if (firstRunComplete) break;
         await new Promise(resolve => setTimeout(resolve, 250));
       }
-      if (configured.settings.dnsPollIntervalSeconds !== 60 || configured.settings.paused)
-        throw new Error(`Kreator nie zapisał priorytetu (DNS=${configured.settings.dnsPollIntervalSeconds}, paused=${configured.settings.paused})`);
+      if (await win.webContents.executeJavaScript('localStorage.getItem("sentinel-first-run") !== "complete"'))
+        throw new Error('Automatyczne pierwsze sprawdzenie nie zakończyło się');
       const assessment = await win.webContents.executeJavaScript('window.sentinel.call("analyze", {text:"Pilnie zaloguj się i podaj hasło",url:"https://paypal.com.evil.test/login"})');
       if (!['High','Critical'].includes(assessment.risk)) throw new Error('Nieprawidłowa ocena');
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -148,27 +171,7 @@ app.whenReady().then(() => {
       quitting = true; app.quit();
     } catch (error) { stopSmokeTestWatch(); console.error(error); quitting = true; app.exit(1); }
   });
-  let collecting = false;
-  const collector = smokeTest ? null : setInterval(async () => {
-    if (collecting || quitting) return;
-    collecting = true;
-    try {
-      const state = await call('collect', {});
-      tray?.setToolTip('Sentinel AI — ' + state.dns + ' · procesy: ' + state.processes);
-      if (state.detections > 0 && state.notifications && Notification.isSupported())
-        new Notification({ title: 'Sentinel AI — ostrzeżenie DNS', body: 'W źródle DNS wykryto domenę z listy CERT Polska. Ruch nie został zablokowany.' }).show();
-    } catch { tray?.setToolTip('Sentinel AI — silnik niedostępny'); }
-    finally { collecting = false; }
-  }, 1000);
-  app.on('before-quit', () => { clearInterval(collector); engine.dispose(); });
-  if (!smokeTest) {
-    const icon = nativeImage.createFromPath(path.join(__dirname, "../assets/icon-32.png"));
-    tray = new Tray(icon);
-    tray.setToolTip('Sentinel AI — otwórz, aby sprawdzić status');
-    tray.on('double-click', () => win.show());
-    tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Otwórz Sentinel AI', click: () => win.show() },
-      { label: 'Zakończ', click: async () => { const answer = await dialog.showMessageBox({ type: 'question', message: 'Zakończyć Sentinel AI i zatrzymać silnik?', buttons: ['Anuluj', 'Zakończ'], defaultId: 0, cancelId: 0 }); if (answer.response === 1) { quitting = true; app.quit(); } } }]));
-  }
+  app.on('before-quit', () => engine.dispose());
 });
 app.on('before-quit', () => { quitting = true; });
 }
