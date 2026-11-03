@@ -367,8 +367,17 @@ internal static class MachineServiceInstaller
             rule.InheritanceFlags == (InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit) &&
             rule.PropagationFlags == PropagationFlags.None &&
             rule.IdentityReference is SecurityIdentifier sid &&
-            expected.TryGetValue(sid.Value, out var rights) && rights == rule.FileSystemRights && expected.Remove(sid.Value)) &&
+            expected.TryGetValue(sid.Value, out var rights) && SameDirectoryRights(rights, rule.FileSystemRights) && expected.Remove(sid.Value)) &&
             expected.Count == 0;
+    }
+
+    private static bool SameDirectoryRights(FileSystemRights expected, FileSystemRights actual)
+    {
+        // Windows includes SYNCHRONIZE in returned directory ACE masks even when
+        // the requested FileSystemRights value omits it. This bit grants no
+        // additional file or directory access, so normalize only that bit.
+        const FileSystemRights synchronization = FileSystemRights.Synchronize;
+        return (expected & ~synchronization) == (actual & ~synchronization);
     }
 
     private static void AddDirectoryRule(DirectorySecurity security, SecurityIdentifier sid, FileSystemRights rights) =>
