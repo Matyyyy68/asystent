@@ -156,12 +156,16 @@ internal static class MachineServiceInstaller
 
     private static int Install(string userSidText)
     {
+        var stage = "validate_user_sid";
         var userSid = new SecurityIdentifier(userSidText);
         if (!userSid.IsAccountSid()) throw new ArgumentException("Nieprawidłowy SID użytkownika instalacji.");
+        stage = "validate_program_files";
         if (ProgramFilesRoot.Length == 0 || !Path.IsPathFullyQualified(ProgramFilesRoot))
             throw new IOException("Nie można ustalić chronionej lokalizacji Program Files.");
 
+        stage = "verify_embedded_payload";
         VerifyEmbeddedPayload();
+        stage = "inspect_existing_service";
         var serviceExisted = QueryService().ExitCode == 0;
         if (serviceExisted)
         {
@@ -176,6 +180,7 @@ internal static class MachineServiceInstaller
         var createdService = false;
         try
         {
+            stage = "prepare_product_directory";
             Directory.CreateDirectory(parent);
             RejectReparsePoint(parent, ProgramFilesRoot);
             var unexpectedEntries = Directory.EnumerateFileSystemEntries(parent)
@@ -186,10 +191,12 @@ internal static class MachineServiceInstaller
             ApplySecureAcl(parent, allowLocalServiceExecute: true);
             if (serviceExisted)
             {
+                stage = "stop_existing_service";
                 StopService();
                 WaitForServiceState(1, TimeSpan.FromSeconds(30));
             }
 
+            stage = "extract_service_payload";
             Directory.CreateDirectory(staging);
             ApplySecureAcl(staging, allowLocalServiceExecute: true);
             ExtractVerifiedServicePayload(staging);
@@ -199,34 +206,43 @@ internal static class MachineServiceInstaller
 
             if (Directory.Exists(ServiceDirectory))
             {
+                stage = "backup_previous_service_payload";
                 RejectReparsePoint(ServiceDirectory, parent);
                 MoveDirectoryWithRetry(ServiceDirectory, backup);
                 oldMoved = true;
             }
+            stage = "activate_service_payload";
             MoveDirectoryWithRetry(staging, ServiceDirectory);
             ApplySecureAcl(ServiceDirectory, allowLocalServiceExecute: true);
 
             var binaryPath = "\"" + ServiceExecutable + "\" --allowed-user-sid=" + userSid.Value;
             if (serviceExisted)
             {
+                stage = "configure_existing_scm_service";
                 RunSc("config", ServiceName, "binPath=", binaryPath, "start=", "auto", "obj=", @"NT AUTHORITY\LocalService");
             }
             else
             {
+                stage = "create_scm_service";
                 RunSc("create", ServiceName, "binPath=", binaryPath, "start=", "auto", "obj=", @"NT AUTHORITY\LocalService");
                 createdService = true;
             }
+            stage = "configure_scm_recovery";
             RunSc("description", ServiceName, "Usługa monitorowania Sentinel AI działająca w tle.");
             RunSc("failure", ServiceName, "reset=", "86400", "actions=", "restart/60000/restart/60000/none/0");
             RunSc("failureflag", ServiceName, "1");
+            stage = "verify_scm_service";
             EnsureOwnedService();
+            stage = "start_scm_service";
             RunSc("start", ServiceName);
             WaitForServiceState(4, TimeSpan.FromSeconds(60));
+            stage = "wait_for_first_collection";
             WaitForFirstCollection(TimeSpan.FromSeconds(90));
             using (var helperIdentity = WindowsIdentity.GetCurrent())
             {
                 if (StringComparer.OrdinalIgnoreCase.Equals(helperIdentity.User?.Value, userSid.Value))
                 {
+                    stage = "verify_user_service_pipe";
                     if (!WaitForCurrentUserServiceHealth(TimeSpan.FromSeconds(15)))
                         throw new IOException("Usługa nie odpowiedziała przez uwierzytelniony status pipe po pierwszym cyklu.");
                 }
@@ -241,8 +257,9 @@ internal static class MachineServiceInstaller
             if (oldMoved) Directory.Delete(backup, recursive: true);
             return 0;
         }
-        catch
+        catch (Exception exception)
         {
+            Program.Log($"MACHINE_SERVICE_INSTALL_FAILED stage={stage} type={exception.GetType().Name} hresult=0x{exception.HResult:X8}");
             try { StopService(); } catch { }
             if (createdService) try { RunSc("delete", ServiceName); } catch { }
             if (Directory.Exists(ServiceDirectory)) TryDeleteProtectedDirectory(ServiceDirectory);
