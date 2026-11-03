@@ -110,6 +110,10 @@ jobs:
             if (Test-Path -LiteralPath $log -PathType Leaf) {
               Get-Content -LiteralPath $log -Tail 80 | Select-String 'INTEGRATION_TEST_|BROWSER_E2E|Native Messaging'
             }
+            $agentLog = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/agent.log'
+            if (Test-Path -LiteralPath $agentLog -PathType Leaf) {
+              Get-Content -LiteralPath $agentLog -Tail 120
+            }
             throw "Isolated installer integration test failed with exit code $($test.ExitCode)."
           }
       - name: Run visible installer wizard install-repair-uninstall integration test

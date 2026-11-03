@@ -14,6 +14,23 @@ internal static class Program
     private static Mutex? singleInstance;
     private const int AgentShutdownExitCode = 42;
     private const int AgentAlreadyRunningExitCode = 43;
+    private static readonly object AgentLogGate = new();
+
+    private static void AgentLog(string message)
+    {
+        try
+        {
+            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "Logs");
+            Directory.CreateDirectory(directory);
+            var path = Path.Combine(directory, "agent.log");
+            lock (AgentLogGate)
+            {
+                if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024) File.WriteAllText(path, string.Empty);
+                File.AppendAllText(path, $"{DateTimeOffset.UtcNow:O} pid={Environment.ProcessId} {message}{Environment.NewLine}", Encoding.UTF8);
+            }
+        }
+        catch { /* Diagnostics must never prevent protection startup or shutdown. */ }
+    }
 
     [STAThread]
     private static async Task<int> Main(string[] args)
@@ -21,19 +38,22 @@ internal static class Program
         if (!OperatingSystem.IsWindows()) return 2;
         if (args.Contains("--shutdown", StringComparer.OrdinalIgnoreCase)) return await RequestShutdownAsync();
         if (!args.Contains("--agent-process", StringComparer.OrdinalIgnoreCase)) return await RunWatchdogAsync();
+        AgentLog("AGENT_PROCESS_START");
         singleInstance = new Mutex(initiallyOwned: true, "Local\\SentinelAI.CoreAgent.v1", out var created);
-        if (!created) return AgentAlreadyRunningExitCode;
+        if (!created) { AgentLog("AGENT_DUPLICATE_INSTANCE"); return AgentAlreadyRunningExitCode; }
         ApplicationConfiguration.Initialize();
         using var agent = new AgentContext();
         Application.Run(agent);
+        AgentLog($"AGENT_MESSAGE_LOOP_EXIT exitCode={Environment.ExitCode}");
         GC.KeepAlive(singleInstance);
         return Environment.ExitCode;
     }
 
     private static async Task<int> RunWatchdogAsync()
     {
+        AgentLog("WATCHDOG_START");
         using var watchdogLock = new Semaphore(1, 1, "Local\\SentinelAI.CoreWatchdog.v1");
-        if (!watchdogLock.WaitOne(0)) return 0;
+        if (!watchdogLock.WaitOne(0)) { AgentLog("WATCHDOG_DUPLICATE_INSTANCE"); return 0; }
         var restartDelaySeconds = 1;
         while (true)
         {
@@ -45,7 +65,9 @@ internal static class Program
                 WindowStyle = ProcessWindowStyle.Hidden,
                 ArgumentList = { "--agent-process" }
             }) ?? throw new IOException("Nie można uruchomić procesu Sentinel Core.");
+            AgentLog($"WATCHDOG_CHILD_START pid={agent.Id}");
             await agent.WaitForExitAsync();
+            AgentLog($"WATCHDOG_CHILD_EXIT pid={agent.Id} exitCode={agent.ExitCode}");
             if (agent.ExitCode == AgentShutdownExitCode || agent.ExitCode == AgentAlreadyRunningExitCode) return 0;
             await Task.Delay(TimeSpan.FromSeconds(restartDelaySeconds));
             restartDelaySeconds = Math.Min(restartDelaySeconds * 2, 30);
@@ -113,6 +135,7 @@ internal static class Program
             collector.Tick += async (_, _) => await CollectAsync();
             collector.Start();
             server = Task.Run(() => ServeClientsAsync(shutdown.Token));
+            AgentLog("AGENT_CONTEXT_READY");
         }
 
         private static Icon TryLoadIcon(string appPath)
@@ -255,15 +278,20 @@ internal static class Program
                     {
                         if (parsed.RootElement.TryGetProperty("method", out var method) && method.GetString() == "agentShutdown")
                         {
+                            AgentLog("AGENT_SHUTDOWN_REQUEST_RECEIVED");
                             await writer.WriteLineAsync("{\"id\":\"core-shutdown\",\"ok\":true,\"result\":{\"stopping\":true}}");
-                            dispatcher.BeginInvoke((Action)(() =>
+                            AgentLog("AGENT_SHUTDOWN_ACK_SENT");
+                            try { dispatcher.BeginInvoke((Action)(() =>
                             {
+                                AgentLog("AGENT_SHUTDOWN_UI_BEGIN");
                                 Environment.ExitCode = AgentShutdownExitCode;
-                                shutdown.Cancel();
-                                collector.Stop();
-                                tray.Visible = false;
+                                try { shutdown.Cancel(); } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_CANCEL_FAILED type=" + exception.GetType().Name); }
+                                try { collector.Stop(); } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_TIMER_STOP_FAILED type=" + exception.GetType().Name); }
+                                try { tray.Visible = false; } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_TRAY_STOP_FAILED type=" + exception.GetType().Name); }
+                                AgentLog("AGENT_SHUTDOWN_EXIT_THREAD");
                                 ExitThread();
-                            }));
+                            })); }
+                            catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_DISPATCH_FAILED type=" + exception.GetType().Name); throw; }
                             continue;
                         }
                     }
@@ -279,6 +307,7 @@ internal static class Program
         {
             if (disposing)
             {
+                AgentLog("AGENT_CONTEXT_DISPOSE_BEGIN");
                 shutdown.Cancel();
                 collector.Stop();
                 tray.Visible = false;
@@ -286,6 +315,7 @@ internal static class Program
                 dispatcher.Dispose();
                 engine.Dispose();
                 shutdown.Dispose();
+                AgentLog("AGENT_CONTEXT_DISPOSE_END");
             }
             base.Dispose(disposing);
         }
