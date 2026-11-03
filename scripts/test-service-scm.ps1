@@ -3,6 +3,7 @@ if (-not $IsWindows) { throw 'SCM service integration test requires Windows.' }
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+$interactiveUserSid = $identity.User.Value
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
   throw 'SCM service integration test requires the isolated Windows runner to be elevated.'
 }
@@ -69,7 +70,7 @@ try {
     throw 'Isolated service directory does not contain both executable payloads.'
   }
 
-  $quotedBinPath = '"' + $serviceExe + '"'
+  $quotedBinPath = '"' + $serviceExe + '" --allowed-user-sid=' + $interactiveUserSid
   Invoke-Sc @('create', $serviceName, 'binPath=', $quotedBinPath, 'start=', 'demand', 'obj=', 'NT AUTHORITY\LocalService') | Out-Null
   $serviceCreated = $true
   $mayRemoveServiceDataRoot = $true
@@ -111,9 +112,32 @@ try {
     throw 'Service did not finish its first real Engine collection within 90 seconds.'
   }
 
+  $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'SentinelAI.Service.Status.v1', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+  $reader = $null
+  $writer = $null
+  try {
+    $pipe.Connect(5000)
+    $reader = [IO.StreamReader]::new($pipe, [Text.UTF8Encoding]::new($false), $false, 1024, $true)
+    $writer = [IO.StreamWriter]::new($pipe, [Text.UTF8Encoding]::new($false), 1024, $true)
+    $writer.AutoFlush = $true
+    $writer.WriteLine('{"id":"scm-smoke","version":1,"method":"status"}')
+    $statusLine = $reader.ReadLine()
+    if ([string]::IsNullOrWhiteSpace($statusLine)) { throw 'Service status pipe returned no response.' }
+    $statusResponse = $statusLine | ConvertFrom-Json
+    if ($statusResponse.id -ne 'scm-smoke' -or $statusResponse.version -ne 1 -or
+        $statusResponse.ok -ne $true -or $statusResponse.result.state -ne 'running' -or
+        [string]::IsNullOrWhiteSpace($statusResponse.result.lastCollectionAtUtc)) {
+      throw "Service status pipe returned an unexpected health response: $statusLine"
+    }
+  } finally {
+    if ($null -ne $reader) { $reader.Dispose() }
+    if ($null -ne $writer) { $writer.Dispose() }
+    $pipe.Dispose()
+  }
+
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
-  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection.'
+  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status pipe.'
 }
 finally {
   if ($serviceCreated) {

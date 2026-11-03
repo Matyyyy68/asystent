@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace Sentinel.Service;
@@ -9,10 +10,16 @@ internal sealed class SentinelMonitoringWorker : IDisposable
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
     private readonly string serviceRoot = SecureServiceDataDirectory.GetPath();
     private readonly string dataRoot = Path.Combine(SecureServiceDataDirectory.GetPath(), "Data");
+    private readonly SecurityIdentifier? allowedUserSid;
+    private readonly ServiceHealthSnapshot health = new();
     private string downloadsPath = string.Empty;
     private EngineProcess? engine;
+    private ServiceStatusPipeServer? statusPipe;
+    private Task? statusPipeTask;
     private readonly ServiceRestartBackoff restartBackoff = new();
     private DateTimeOffset engineStartedAt;
+
+    public SentinelMonitoringWorker(SecurityIdentifier? allowedUserSid = null) => this.allowedUserSid = allowedUserSid;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -24,6 +31,11 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         engine = StartEngine();
         await CollectAsync(cancellationToken);
         ServiceLog.Write("CORE_FIRST_COLLECTION_COMPLETED");
+        if (allowedUserSid is not null)
+        {
+            statusPipe = new ServiceStatusPipeServer(allowedUserSid, health);
+            statusPipeTask = statusPipe.RunAsync(cancellationToken);
+        }
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -48,6 +60,11 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             }
         }
         StopEngine();
+        if (statusPipeTask is not null)
+        {
+            try { await statusPipeTask; }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        }
     }
 
     private EngineProcess StartEngine()
@@ -69,6 +86,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         using var document = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 16 });
         if (!document.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
             throw new InvalidDataException("Sentinel Engine rejected a service collection cycle.");
+        health.MarkCollectionSucceeded(DateTimeOffset.UtcNow);
     }
 
     private void StopEngine()
@@ -76,6 +94,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         engine?.Dispose();
         engine = null;
         engineStartedAt = default;
+        health.MarkCollectionFailed();
     }
 
     public void Dispose() => StopEngine();
