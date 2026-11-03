@@ -2,7 +2,7 @@
 
 ## Zweryfikowane w bieżącym checkoutcie (2026-11-03)
 
-- `npm test --prefix desktop`: PASS, 79/79, w tym jawna kwarantanna oraz ograniczony widok lokalnego inwentarza aplikacji.
+- `npm test --prefix desktop`: PASS, 83/83, w tym jawna kwarantanna oraz ograniczony widok lokalnego inwentarza aplikacji.
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).
 - `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 447 testów, 2 środowiskowe SKIP. Obejmuje parser stanu Defendera i nieprawidłowe wyniki, korelację plik Downloads → proces po identycznym SHA-256 i oknie ±10 minut, brak korelacji dla innego hasha/starego pliku, inwentarz aplikacji i timeout rejestru.
 - `dotnet build Sentinel.sln -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów; osobno Setup Release i autotest kreatora też PASS.
@@ -27,3 +27,8 @@
 Nie uruchamiano instalatora, przeglądarki ani GUI produktu na komputerze użytkownika; nie instalowano certyfikatów i nie uruchamiano rzeczywistego malware. Nie należy zaliczać wymienionych testów integracyjnych jako PASS.
 
 Lokalny pełny packaging pozostaje niedostępny bez przywrócenia wymaganej zależności Electron 45; zainstalowany Electron 44.9.1 nie spełnia `^45.0.0`. Nie uruchomiono `npm ci` ani nie pobierano zależności. Wcześniejszy zdalny Windows CI zbudował payload na runnerze.
+# Weryfikacja zbiorczego menu kontekstowego
+
+- `npm test --prefix desktop`: 83/83 PASS; nowe testy sprawdzają grupowanie równoległych wezwań z Explorera, deduplikację identycznych ścieżek, limit 15 elementów i bezpieczne odrzucenie oczekujących zadań podczas zamykania.
+- `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj --no-restore`: PASS, 0 ostrzeżeń i błędów.
+- Testy nie odtwarzają rzeczywistego wielokrotnego zaznaczenia w Explorerze ani widoczności pozycji menu na czystych Windows 10/11; ten gate pozostaje wymagany.

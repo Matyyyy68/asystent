@@ -63,9 +63,9 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 8. Menu kontekstowe
 
-- Per-user wpis „Sprawdź w Sentinel AI” obsługuje jeden plik.
+- Per-user wpis „Sprawdź w Sentinel AI” obsługuje zaznaczenie do 15 plików. Explorer uruchamia komendę dla elementów zaznaczenia, a pojedyncza instancja Sentinel grupuje ścieżki, kolejno wykonuje lokalne sprawdzenie i prezentuje jeden raport zbiorczy. Duplikaty ścieżek są deduplikowane, a batch jest ograniczony do 15 plików.
 - Analiza lokalna liczy SHA-256, odczytuje Authenticode i pokazuje ograniczony komunikat. Nie uruchamia, nie usuwa ani nie blokuje pliku.
-- Deinstalator usuwa tylko własny wpis. Widoczność wpisu w Explorerze na czystym Windows 10/11 nie została tu przetestowana.
+- Instalator ustawia `MultiSelectModel=Document`, weryfikuje ten stan i przy deinstalacji usuwa go tylko wtedy, gdy wartość nadal jest własna. Microsoft opisuje model `Document` jako ograniczony do 15 elementów; widoczność menu i rzeczywista selekcja wielu plików w Explorerze na czystym Windows 10/11 nadal wymagają testu integracyjnego ([dokumentacja Microsoft](https://learn.microsoft.com/en-us/windows/win32/shell/how-to-employ-the-verb-selection-model)).
 
 ## 9. Autonomia
 

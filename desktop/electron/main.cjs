@@ -6,12 +6,14 @@ const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-l
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
 const { requestedFileCheck } = require('./file-check-args.cjs');
+const { createFileCheckBatcher } = require('./file-check-batch.cjs');
 const { quarantineDownloadedFile, restoreDownloadedFile } = require('./downloaded-file-actions.cjs');
 const { isolatedElectronPaths, lifecycleLogDirectory: resolveLifecycleLogDirectory } = require('./lifecycle-log-path.cjs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const fs = require('node:fs');
 let win, quitting = false, fileCheckHandler = null;
+const pendingFileChecks = [];
 const smokeTest = process.argv.includes('--smoke-test');
 if (smokeTest && process.env.SENTINEL_DATA_ROOT) {
   const isolatedPaths = isolatedElectronPaths(process.env.SENTINEL_DATA_ROOT);
@@ -30,7 +32,11 @@ else {
 app.on('second-instance', (_event, commandLine) => {
   if (commandLine.includes('--quit-ui')) { quitting = true; app.quit(); return; }
   const filePath = requestedFileCheck(commandLine);
-  if (filePath && fileCheckHandler) { void fileCheckHandler(filePath, false); return; }
+  if (filePath) {
+    if (fileCheckHandler) void fileCheckHandler(filePath);
+    else pendingFileChecks.push(filePath);
+    return;
+  }
   if (commandLine.includes('--alerts')) { win?.loadURL(`${page}#alerts`); win?.show(); return; }
   win?.show();
 });
@@ -127,6 +133,30 @@ app.whenReady().then(() => {
     return call(method, data);
   });
   const startupFileCheck = requestedFileCheck(process.argv);
+  const oneShotFileCheck = startupFileCheck !== null;
+  let oneShotTimer = null;
+  const fileCheckBatcher = createFileCheckBatcher(async filePaths => {
+    const results = [];
+    for (const filePath of filePaths) {
+      try {
+        const result = await call('file', { path: filePath });
+        results.push({ name: path.basename(filePath), matched: result.reputation?.match === true, error: null });
+      } catch (error) {
+        results.push({ name: path.basename(filePath), matched: false, error: String(error?.message || 'Błąd silnika').slice(0, 240) });
+      }
+    }
+    const matched = results.filter(result => result.matched).length;
+    const failed = results.filter(result => result.error).length;
+    const lines = results.map(result => `${result.matched ? 'Podejrzenie' : result.error ? 'Nie sprawdzono' : 'Bez dopasowania'} — ${result.name}`);
+    const detail = results.some(result => result.matched)
+      ? 'Co najmniej jeden SHA-256 pasuje do lokalnej listy. Źródło listy nie zostało niezależnie zweryfikowane; to nie jest automatyczny werdykt zagrożenia.'
+      : 'Lokalnie sprawdzono SHA-256 i podpis cyfrowy. Brak dopasowania nie potwierdza bezpieczeństwa. Sentinel nie zablokował ani nie usunął plików.';
+    await dialog.showMessageBox({ type: matched ? 'warning' : failed ? 'error' : 'info', buttons: ['OK'],
+      title: 'Sentinel AI — sprawdzenie plików',
+      message: `Sprawdzono ${results.length} plików${matched ? `; dopasowania: ${matched}` : ''}${failed ? `; błędy: ${failed}` : ''}.`,
+      detail: `${detail}\n\n${lines.join('\n')}`.slice(0, 3500) });
+    return { checked: results.length, matched, failed };
+  });
   win = new BrowserWindow({ show: !startupFileCheck && shouldShowInitialWindow(process.argv), width: 1180, height: 800, minWidth: 760, minHeight: 560, backgroundColor: '#101927',
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false } });
   const stopSmokeTestWatch = smokeTest ? watchSmokeTestWindow(win.webContents, message => {
@@ -138,22 +168,23 @@ app.whenReady().then(() => {
   win.webContents.on('will-navigate', e => e.preventDefault());
   win.on('close', e => { if (!quitting) { e.preventDefault(); win.hide(); } });
   win.loadURL(process.argv.includes('--alerts') ? `${page}#alerts` : page);
-  fileCheckHandler = async (filePath, oneShot) => {
-    try {
-      const result = await call('file', { path: filePath });
-      const detail = result.reputation?.match
-        ? 'Hash pliku pasuje do lokalnej listy. Źródło listy nie zostało niezależnie zweryfikowane; to nie jest automatyczny werdykt zagrożenia.'
-        : 'Obliczono SHA-256 i sprawdzono podpis. Brak dopasowania nie potwierdza bezpieczeństwa. Sentinel nie zablokował ani nie usunął pliku.';
-      await dialog.showMessageBox({ type: result.reputation?.match ? 'warning' : 'info', buttons: ['OK'],
-        title: 'Sentinel AI — sprawdzenie pliku', message: `Sprawdzono: ${result.name}`, detail });
-    } catch (error) {
-      await dialog.showMessageBox({ type: 'error', buttons: ['OK'], title: 'Sentinel AI — nie udało się sprawdzić pliku',
-        message: 'Nie można było ukończyć podstawowego sprawdzenia wybranego pliku.', detail: String(error?.message || 'Błąd silnika').slice(0, 500) });
-    } finally {
-      if (oneShot) { quitting = true; app.quit(); }
-    }
+  fileCheckHandler = filePath => {
+    if (oneShotTimer) clearTimeout(oneShotTimer);
+    void fileCheckBatcher.enqueue(filePath).finally(() => {
+      if (oneShotFileCheck && !quitting) {
+        if (oneShotTimer) clearTimeout(oneShotTimer);
+        const closeWhenIdle = () => {
+          if (quitting) return;
+          if (!fileCheckBatcher.isIdle()) { oneShotTimer = setTimeout(closeWhenIdle, 500); return; }
+          quitting = true;
+          app.quit();
+        };
+        oneShotTimer = setTimeout(closeWhenIdle, 1800);
+      }
+    });
   };
-  if (startupFileCheck) void fileCheckHandler(startupFileCheck, true);
+  for (const filePath of pendingFileChecks.splice(0)) fileCheckHandler(filePath);
+  if (startupFileCheck) fileCheckHandler(startupFileCheck);
   if (process.argv.includes('--smoke-test')) win.webContents.once('did-finish-load', async () => {
     try {
       const firstRunScreen = await win.webContents.executeJavaScript('document.querySelector(".first-run-screen") !== null && document.querySelector(".layout") === null');
@@ -179,7 +210,11 @@ app.whenReady().then(() => {
       quitting = true; app.quit();
     } catch (error) { stopSmokeTestWatch(); console.error(error); quitting = true; app.exit(1); }
   });
-  app.on('before-quit', () => engine.dispose());
+  app.on('before-quit', () => {
+    if (oneShotTimer) clearTimeout(oneShotTimer);
+    fileCheckBatcher.dispose();
+    engine.dispose();
+  });
 });
 app.on('before-quit', () => { quitting = true; });
 }

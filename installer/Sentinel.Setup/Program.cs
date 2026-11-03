@@ -20,6 +20,7 @@ internal static class Program
     private const string FileContextMenuKey = @"Software\Classes\*\shell\SentinelAI.CheckFile";
     private const string FileContextMenuCommandKey = FileContextMenuKey + @"\command";
     private const string FileContextMenuLabel = "Sprawdź w Sentinel AI";
+    private const string FileContextMenuSelectionModel = "Document";
     private const string CoreAutoStartValueName = "Sentinel AI Core";
     private static string? selfTestLogPath;
     internal static string LogPath => selfTestLogPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Product, "Logs", "installer.log");
@@ -853,7 +854,9 @@ internal static class Program
             var contextCommand = BuildFileContextMenuCommand(contextExecutable);
             if (!contextCommand.Contains("--check-file \"%1\"", StringComparison.Ordinal)
                 || !IsFileContextMenuCommandOwned(contextCommand, contextExecutable)
-                || IsFileContextMenuCommandOwned(contextCommand.Replace("--check-file", "--open", StringComparison.Ordinal), contextExecutable))
+                || IsFileContextMenuCommandOwned(contextCommand.Replace("--check-file", "--open", StringComparison.Ordinal), contextExecutable)
+                || !IsFileContextMenuSelectionModelOwned("Document")
+                || IsFileContextMenuSelectionModelOwned("Single"))
                 throw new InvalidDataException("Polecenie menu kontekstowego nie cytuje bezpiecznie ścieżki pliku lub nie jest poprawnie rozpoznawane jako własne.");
             if (!PathsEqual(root, Path.Combine(root, ".")) || PathsEqual(root, Path.Combine(root, "other"))
                 || PathsEqual("\0", root) || PathsEqual(root, null))
@@ -1852,12 +1855,16 @@ internal static class Program
     internal static bool IsFileContextMenuCommandOwned(string? command, string executable) =>
         string.Equals(command, BuildFileContextMenuCommand(executable), StringComparison.OrdinalIgnoreCase);
 
+    internal static bool IsFileContextMenuSelectionModelOwned(string? selectionModel) =>
+        string.Equals(selectionModel, FileContextMenuSelectionModel, StringComparison.Ordinal);
+
     private static bool IsFileContextMenuRegistered(string target)
     {
         var executable = Path.Combine(Path.GetFullPath(target), "Sentinel AI.exe");
         using var menu = Registry.CurrentUser.OpenSubKey(FileContextMenuKey);
         using var command = Registry.CurrentUser.OpenSubKey(FileContextMenuCommandKey);
         return string.Equals(menu?.GetValue("MUIVerb") as string, FileContextMenuLabel, StringComparison.Ordinal)
+            && IsFileContextMenuSelectionModelOwned(menu?.GetValue("MultiSelectModel") as string)
             && IsFileContextMenuCommandOwned(command?.GetValue(null) as string, executable);
     }
 
@@ -1876,11 +1883,15 @@ internal static class Program
             var existingLabel = menu?.GetValue("MUIVerb") as string;
             if (existingLabel is not null && !string.Equals(existingLabel, FileContextMenuLabel, StringComparison.Ordinal))
                 throw new InvalidOperationException("Klucz menu plików SentinelAI.CheckFile należy do innej konfiguracji; pozostawiono go bez zmian.");
+            var existingSelectionModel = menu?.GetValue("MultiSelectModel") as string;
+            if (existingSelectionModel is not null && !string.Equals(existingSelectionModel, FileContextMenuSelectionModel, StringComparison.Ordinal))
+                throw new InvalidOperationException("Model wyboru menu plików SentinelAI.CheckFile należy do innej konfiguracji; pozostawiono go bez zmian.");
         }
         using (var menu = Registry.CurrentUser.CreateSubKey(FileContextMenuKey))
         {
             if (menu is null) throw new IOException("Nie można utworzyć opcji menu plików Sentinel AI.");
             menu.SetValue("MUIVerb", FileContextMenuLabel, RegistryValueKind.String);
+            menu.SetValue("MultiSelectModel", FileContextMenuSelectionModel, RegistryValueKind.String);
             menu.SetValue("Icon", executable, RegistryValueKind.String);
         }
         using (var command = Registry.CurrentUser.CreateSubKey(FileContextMenuCommandKey))
@@ -1904,6 +1915,8 @@ internal static class Program
             if (menu is null) return;
             if (string.Equals(menu.GetValue("MUIVerb") as string, FileContextMenuLabel, StringComparison.Ordinal))
                 menu.DeleteValue("MUIVerb", throwOnMissingValue: false);
+            if (string.Equals(menu.GetValue("MultiSelectModel") as string, FileContextMenuSelectionModel, StringComparison.Ordinal))
+                menu.DeleteValue("MultiSelectModel", throwOnMissingValue: false);
             if (string.Equals(menu.GetValue("Icon") as string, executable, StringComparison.OrdinalIgnoreCase))
                 menu.DeleteValue("Icon", throwOnMissingValue: false);
             deleteParent = menu.ValueCount == 0 && menu.SubKeyCount == 0;
@@ -3193,7 +3206,9 @@ internal sealed class SetupWizard : Form
         var contextMenuCommand = Program.BuildFileContextMenuCommand(contextMenuExecutable);
         if (!contextMenuCommand.Contains("--check-file \"%1\"", StringComparison.Ordinal)
             || !Program.IsFileContextMenuCommandOwned(contextMenuCommand, contextMenuExecutable)
-            || Program.IsFileContextMenuCommandOwned(contextMenuCommand.Replace("--check-file", "--open", StringComparison.Ordinal), contextMenuExecutable))
+            || Program.IsFileContextMenuCommandOwned(contextMenuCommand.Replace("--check-file", "--open", StringComparison.Ordinal), contextMenuExecutable)
+            || !Program.IsFileContextMenuSelectionModelOwned("Document")
+            || Program.IsFileContextMenuSelectionModelOwned("Single"))
             throw new InvalidDataException("Polecenie menu kontekstowego nie cytuje bezpiecznie ścieżki pliku lub nie jest poprawnie rozpoznawane jako własne.");
         using var wizard = new SetupWizard(repairModeOverride: false);
         wizard.ShowInTaskbar = false;
