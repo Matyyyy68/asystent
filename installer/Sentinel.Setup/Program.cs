@@ -196,7 +196,30 @@ internal static class Program
             if (!uiFailure.Contains("type=InvalidOperationException", StringComparison.Ordinal)
                 || !uiFailure.Contains("hresult=0x", StringComparison.Ordinal))
                 throw new InvalidOperationException("UI exception diagnostic omits its type or HRESULT.");
-            Log("WIZARD_SELF_TEST_SUCCESS states=true repairMode=true settingsPreserved=true failureStopsBeforeChanges=true backgroundPreflight=true");
+            var stopAttempts = 0;
+            var retryDelays = 0;
+            var retriedShutdown = StopAgentWithRetry(() => ++stopAttempts == 1 ? 1 : 0, () => true,
+                _ => retryDelays++, _ => { });
+            if (!retriedShutdown || stopAttempts != 2 || retryDelays != 1)
+                throw new InvalidOperationException("Transient Core shutdown failure was not retried safely.");
+            var absentAgentAttempts = 0;
+            var alreadyStopped = StopAgentWithRetry(() => { absentAgentAttempts++; return 1; }, () => false,
+                _ => { }, _ => { });
+            if (!alreadyStopped || absentAgentAttempts != 1)
+                throw new InvalidOperationException("An agent that exited during shutdown was not accepted as stopped.");
+            var persistentFailureAttempts = 0;
+            try
+            {
+                StopAgentWithRetry(() => { persistentFailureAttempts++; return 1; }, () => true,
+                    _ => { }, _ => { });
+                throw new InvalidOperationException("A running Core that never acknowledges shutdown was accepted.");
+            }
+            catch (IOException exception) when (exception.Message.Contains("po ponowieniach", StringComparison.Ordinal))
+            {
+                if (persistentFailureAttempts != 8)
+                    throw new InvalidOperationException("Core shutdown retry was not bounded to eight attempts.");
+            }
+            Log("WIZARD_SELF_TEST_SUCCESS states=true repairMode=true settingsPreserved=true failureStopsBeforeChanges=true backgroundPreflight=true coreStopRetry=true");
             return 0;
         }
         catch (Exception exception)
@@ -1949,21 +1972,8 @@ internal static class Program
         if (!File.Exists(agentExecutable)) return false;
         if (!IsBackgroundAgentRunning(agentExecutable)) return false;
         Log("CORE_AGENT_STOP_REQUESTED executable=" + Clean(Path.GetFileName(agentExecutable)));
-        using var process = Process.Start(new ProcessStartInfo(agentExecutable)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-            ArgumentList = { "--shutdown" }
-        }) ?? throw new IOException("Nie można wysłać polecenia bezpiecznego zatrzymania Sentinel Core.");
-        if (!process.WaitForExit(10_000))
-        {
-            try { process.Kill(entireProcessTree: true); } catch { }
-            Log("CORE_AGENT_STOP_COMMAND_TIMEOUT");
-            throw new TimeoutException("Sentinel Core nie potwierdził zatrzymania; instalacja pozostaje bez zmian.");
-        }
-        if (process.ExitCode != 0) throw new IOException("Sentinel Core odmówił bezpiecznego zatrzymania.");
-        Log("CORE_AGENT_STOP_COMMAND_ACKNOWLEDGED");
+        StopAgentWithRetry(() => SendAgentShutdownCommand(agentExecutable),
+            () => IsBackgroundAgentRunning(agentExecutable), Thread.Sleep, Log);
         var deadline = DateTime.UtcNow.AddSeconds(30);
         var nextStatusLog = DateTime.UtcNow.AddSeconds(5);
         var stillRunning = IsBackgroundAgentRunning(agentExecutable);
@@ -1985,6 +1995,53 @@ internal static class Program
         }
         Log("CORE_AGENT_STOP_SUCCESS");
         return true;
+    }
+
+    internal static bool StopAgentWithRetry(Func<int> sendShutdown, Func<bool> isRunning,
+        Action<int> delayMilliseconds, Action<string> log, int maximumAttempts = 8)
+    {
+        ArgumentNullException.ThrowIfNull(sendShutdown);
+        ArgumentNullException.ThrowIfNull(isRunning);
+        ArgumentNullException.ThrowIfNull(delayMilliseconds);
+        ArgumentNullException.ThrowIfNull(log);
+        if (maximumAttempts is < 1 or > 8) throw new ArgumentOutOfRangeException(nameof(maximumAttempts));
+
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
+        {
+            var exitCode = sendShutdown();
+            if (exitCode == 0)
+            {
+                log($"CORE_AGENT_STOP_COMMAND_ACKNOWLEDGED attempt={attempt}");
+                return true;
+            }
+            if (!isRunning())
+            {
+                log($"CORE_AGENT_EXITED_DURING_STOP attempt={attempt} commandExitCode={exitCode}");
+                return true;
+            }
+            if (attempt == maximumAttempts) break;
+            log($"CORE_AGENT_STOP_RETRY attempt={attempt} commandExitCode={exitCode}");
+            delayMilliseconds(250);
+        }
+        throw new IOException("Sentinel Core nie potwierdził bezpiecznego zatrzymania po ponowieniach; instalacja pozostaje bez zmian.");
+    }
+
+    private static int SendAgentShutdownCommand(string agentExecutable)
+    {
+        using var process = Process.Start(new ProcessStartInfo(agentExecutable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            ArgumentList = { "--shutdown" }
+        }) ?? throw new IOException("Nie można wysłać polecenia bezpiecznego zatrzymania Sentinel Core.");
+        if (!process.WaitForExit(10_000))
+        {
+            try { process.Kill(entireProcessTree: true); } catch { }
+            Log("CORE_AGENT_STOP_COMMAND_TIMEOUT");
+            throw new TimeoutException("Sentinel Core nie potwierdził zatrzymania; instalacja pozostaje bez zmian.");
+        }
+        return process.ExitCode;
     }
 
     private static string DescribeBackgroundAgentProcesses(string executable)

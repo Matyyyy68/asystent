@@ -638,3 +638,11 @@ F03 pozostaje krytyczne; nie wdrażać modelu ani nie obniżać progów bez wiar
 7. Dodać izolowane testy Windows dla powyższych przepływów oraz przeprowadzić production build i smoke.
 
 **Status całości: NIEUKOŃCZONE.** Aktualny zakres jest użytecznym etapem UI i pierwszego sprawdzenia, nie autonomicznym systemem ochrony opisanym w zleceniu.
+
+## Aktualizacja 2026-11-03 — wyścig przy bezpiecznym zatrzymaniu instalatora
+
+Windows CI run [41681512457](https://github.com/Matyyyy68/asystent/actions/runs/41681512457) przeszedł build, testy źródeł, smoke Electron, Downloads, autostart, Chrome/Edge oraz test instalacji headless, ale widoczny cykl kreatora zakończył się błędem podczas pierwszej próby deinstalacji. Log potwierdzał, że instalacja i naprawa przeszły, a sprzątanie ponowione przez test usunęło pliki; kreator prawidłowo zgłosił jednak pierwszą nieudaną próbę.
+
+Przyczyna w kodzie: klient `Sentinel.Agent.exe --shutdown` może wystartować, zanim serwer potoku IPC będzie gotowy. Pierwsza odpowiedź błędu była uznawana od razu za odmowę, mimo że Agent nadal działał; ponowienie operacji chwilę później potwierdziło, że zatrzymanie było możliwe. Dodano maksymalnie osiem prób z krótką przerwą. Instalator nadal nie przechodzi do zmian plików, jeśli działający Agent nie potwierdzi zatrzymania; procesu Agenta nie wymusza się. Sam krótko żyjący klient polecenia shutdown jest kończony wyłącznie po własnym timeoutcie.
+
+Samokontrola kreatora sprawdza teraz ponowienie błędu przejściowego, akceptację Agenta który zakończył działanie oraz limit ośmiu prób przy trwałym braku potwierdzenia. Lokalny Release build instalatora przechodzi bez ostrzeżeń i błędów, a `--wizard-self-test` kończy się kodem 0. Pełny Windows CI po poprawce jest wymagany, zanim uznamy cykl GUI za zaliczony. Testy i instalacja odbywają się lokalnie wyłącznie jako samokontrola kodu; pełna instalacja pozostaje na izolowanym runnerze CI.
