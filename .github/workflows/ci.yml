@@ -105,14 +105,14 @@ jobs:
             taskkill.exe /PID $test.Id /T /F | Out-Null
             $log = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/installer.log'
             if (Test-Path -LiteralPath $log -PathType Leaf) {
-              Get-Content -LiteralPath $log -Tail 120 | Select-String 'INTEGRATION_TEST_|BROWSER_E2E|INSTALL_|UNINSTALL_|Native Messaging'
+              Get-Content -LiteralPath $log -Tail 160 | Select-String 'INTEGRATION_TEST_|BROWSER_E2E|INSTALL_|UNINSTALL_|MACHINE_SERVICE_|Native Messaging'
             }
             throw 'Isolated installer integration test exceeded its 15-minute limit.'
           }
           if ($test.ExitCode -ne 0) {
             $log = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/installer.log'
             if (Test-Path -LiteralPath $log -PathType Leaf) {
-              Get-Content -LiteralPath $log -Tail 80 | Select-String 'INTEGRATION_TEST_|BROWSER_E2E|Native Messaging'
+              Get-Content -LiteralPath $log -Tail 120 | Select-String 'INTEGRATION_TEST_|BROWSER_E2E|MACHINE_SERVICE_|Native Messaging'
             }
             $agentLog = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/agent.log'
             if (Test-Path -LiteralPath $agentLog -PathType Leaf) {
