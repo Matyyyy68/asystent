@@ -75,7 +75,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Desktop: 67/67 testów, lint i produkcyjny Vite (1582 moduły) PASS.
+- Desktop: 67/67 testów, lint i produkcyjny Vite (1582 moduły) PASS; Windows CI 41673687559: wszystkie 20 kroków PASS.
 - .NET: 417 testów PASS, 2 pominięte z powodu środowiska.
 - `dotnet build Sentinel.sln -c Release --no-restore` (w tym Agent) PASS, 0 ostrzeżeń i błędów. Setup Release oraz `--wizard-self-test`: PASS.
 - Publikacja Engine/UrlHost/Agent i `scripts/test-engine.cjs`: PASS dla IPC, kontrolowanych fixture'ów i prywatności.
@@ -85,12 +85,12 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - Test monitora trwałości potwierdza alertowalny licznik wyłącznie dla zapisanej zmiany w lokalizacji zapisywalnej przez użytkownika i zeruje go w kolejnym niezmienionym cyklu.
 - Test kolejki inspekcji obrazu procesu potwierdza dedykowany licznik po udanym dopasowaniu lokalnego SHA-256 i jego jednorazowy odbiór przez agenta.
 - Testy relacji procesów pokrywają regułę Office → interpreter, umiarkowane ryzyko, dowody rodzic/child, limit alertu do bieżącego cyklu i działanie odczytu Toolhelp na Windows.
-- Windows CI run [41657844276](https://github.com/Matyyyy68/asystent/actions/runs/41657844276): build aplikacji/pakietu, testy źródeł, smoke Electron, Downloads, autostart, Chrome/Edge E2E i E2E z zainstalowanym hostem — PASS. Aktualizacja ujawniła błąd podwójnego `Dispose` w `ApplicationContext`: wyjątek .NET powodował ponowne uruchamianie agenta przez watchdog. Po naprawie idempotentnego sprzątania pełny Windows CI [41666279158](https://github.com/Matyyyy68/asystent/actions/runs/41666279158) zakończył się PASS, łącznie z buildem, wszystkimi testami, rzeczywistym hostem Chrome/Edge w instalacji, aktualizacją/deinstalacją, widocznym kreatorem i API Enterprise.
+- Windows CI run [41657844276](https://github.com/Matyyyy68/asystent/actions/runs/41657844276): build aplikacji/pakietu, testy źródeł, smoke Electron, Downloads, autostart, Chrome/Edge E2E i E2E z zainstalowanym hostem — PASS. Aktualizacja ujawniła błąd podwójnego `Dispose` w `ApplicationContext`: wyjątek .NET powodował ponowne uruchamianie agenta przez watchdog. Po naprawie idempotentnego sprzątania pełny Windows CI [41666279158](https://github.com/Matyyyy68/asystent/actions/runs/41666279158) zakończył się PASS. Dla commita `f42108a` run [41671769059](https://github.com/Matyyyy68/asystent/actions/runs/41671769059) przeszedł 419 testów .NET, ale test ujawnianej wersji reguł wykrył nieaktualny tekst UI; poprawka jest w `6fe951e`, run [41673687559](https://github.com/Matyyyy68/asystent/actions/runs/41673687559) dla `6fe951e` zakończył się PASS we wszystkich 20 krokach: build/test, Electron smoke, izolowany Downloads i junction soak, autostart Windows, Chrome/Edge, headless install/update/uninstall, widoczny kreator oraz API Enterprise.
 - Pełny packaging offline przerwał się przed budowaniem z powodu lokalnego Electron 44.9.1 vs wymagane `^45.0.0`. Nie instalowano zależności ani niczego nie pobierano.
 
 ## 12. Pozostałe prace
 
-- Ostatni Windows CI [41666279158](https://github.com/Matyyyy68/asystent/actions/runs/41666279158) zaliczył pełny install/update/uninstall, host Chrome/Edge, kreator i API Enterprise. Uruchomić nowy CI dla bieżącej reguły rodzic–potomek, a następnie domknąć rollback, Explorer w Windows 10/11, powiadomienia/dźwięki oraz awarię samego watchdoga.
+- Ostatni Windows CI [41673687559](https://github.com/Matyyyy68/asystent/actions/runs/41673687559) zaliczył build/test, Electron smoke, Downloads soak, autostart, Chrome/Edge, pełny cykl instalatora headless, widoczny kreator i API Enterprise; potwierdził też nową regułę rodzic–potomek. Nadal domknąć fizyczny rollback, widoczność menu Explorer na czystych Windows 10/11, powiadomienia/dźwięki oraz awarię samego watchdoga.
 - Rozstrzygnąć architekturę prawdziwej usługi SCM lub ograniczenia user-mode watchdog.
 - Dokończyć korelację alertów, aktualizacje aplikacji/reguł, ocenę stanu konkretnego AV/sygnatur i uzasadnione bezpieczne reakcje.
 - Nie oznaczać celu jako ukończonego do czasu domknięcia tych prac i weryfikacji całego przepływu na izolowanym Windows.
