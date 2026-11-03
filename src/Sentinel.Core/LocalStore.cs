@@ -1505,13 +1505,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             throw new ArgumentException("Nieprawidłowy SHA-256 pliku procesu.");
         await using var c = await Open(cancellationToken); using var transaction = c.BeginTransaction();
         using var read = c.CreateCommand(); read.Transaction = transaction;
-        read.CommandText = "SELECT id,evidence_codes FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source='process-snapshot'";
+        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source='process-snapshot'";
         read.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
-        long rowId; IReadOnlyList<string> evidence;
+        long rowId; IReadOnlyList<string> evidence; Guid? processCorrelationId; DateTimeOffset processTimestamp;
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken)) { await transaction.RollbackAsync(cancellationToken); return; }
             rowId = reader.GetInt64(0); evidence = ParseEvidenceCodes(reader.GetString(1));
+            processCorrelationId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2));
+            processTimestamp = DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture);
         }
         var codes = evidence.ToList();
         void AddCode(string code) { if (codes.Count < 32 && !codes.Contains(code, StringComparer.Ordinal)) codes.Add(code); }
@@ -1529,7 +1531,77 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
         updateObservation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(codes)); updateObservation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
         await updateObservation.ExecuteNonQueryAsync(cancellationToken);
+
+        if (sha256 is not null)
+            await CorrelateProcessWithDownloadedHashAsync(c, transaction, rowId, eventId, sha256.ToUpperInvariant(),
+                processTimestamp, processCorrelationId, codes, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task CorrelateProcessWithDownloadedHashAsync(SqliteConnection connection, SqliteTransaction transaction,
+        long processRowId, Guid processEventId, string sha256, DateTimeOffset processTimestamp, Guid? processCorrelationId,
+        List<string> processEvidence, CancellationToken cancellationToken)
+    {
+        var from = processTimestamp.ToUniversalTime().AddMinutes(-10).ToString("O", CultureInfo.InvariantCulture);
+        var to = processTimestamp.ToUniversalTime().AddMinutes(10).ToString("O", CultureInfo.InvariantCulture);
+        using var find = connection.CreateCommand(); find.Transaction = transaction;
+        find.CommandText = "SELECT id,event_id,evidence_codes,correlation_id FROM events WHERE source='downloads-local-hash' AND signal_hash=$hash AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
+        find.Parameters.AddWithValue("$hash", sha256); find.Parameters.AddWithValue("$from", from); find.Parameters.AddWithValue("$to", to);
+        find.Parameters.AddWithValue("$timestamp", processTimestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        var candidates = new List<(long RowId, Guid EventId, IReadOnlyList<string> Evidence, Guid? CorrelationId)>();
+        await using (var reader = await find.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+                if (Guid.TryParse(reader.GetString(1), out var downloadEventId))
+                    candidates.Add((reader.GetInt64(0), downloadEventId, ParseEvidenceCodes(reader.GetString(2)),
+                        reader.IsDBNull(3) ? null : Guid.Parse(reader.GetString(3))));
+
+        foreach (var candidate in candidates)
+        {
+            if (processCorrelationId is { } existingProcessId && candidate.CorrelationId is { } existingDownloadId && existingProcessId != existingDownloadId)
+                continue;
+            var correlationId = processCorrelationId ?? candidate.CorrelationId ?? Guid.NewGuid();
+            const string evidenceCode = "correlation.download-process.same-sha256";
+            if (!processEvidence.Contains(evidenceCode, StringComparer.Ordinal)) processEvidence.Add(evidenceCode);
+            var downloadEvidence = candidate.Evidence.ToList();
+            if (!downloadEvidence.Contains(evidenceCode, StringComparer.Ordinal)) downloadEvidence.Add(evidenceCode);
+
+            using (var updateProcess = connection.CreateCommand())
+            {
+                updateProcess.Transaction = transaction;
+                updateProcess.CommandText = "UPDATE events SET correlation_id=$correlationId,evidence_codes=$evidence WHERE id=$id";
+                updateProcess.Parameters.AddWithValue("$correlationId", correlationId.ToString("D"));
+                updateProcess.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(processEvidence));
+                updateProcess.Parameters.AddWithValue("$id", processRowId);
+                await updateProcess.ExecuteNonQueryAsync(cancellationToken);
+            }
+            using (var updateDownload = connection.CreateCommand())
+            {
+                updateDownload.Transaction = transaction;
+                updateDownload.CommandText = "UPDATE events SET correlation_id=$correlationId,evidence_codes=$evidence WHERE id=$id";
+                updateDownload.Parameters.AddWithValue("$correlationId", correlationId.ToString("D"));
+                updateDownload.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(downloadEvidence));
+                updateDownload.Parameters.AddWithValue("$id", candidate.RowId);
+                await updateDownload.ExecuteNonQueryAsync(cancellationToken);
+            }
+            using (var observations = connection.CreateCommand())
+            {
+                observations.Transaction = transaction;
+                observations.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+                observations.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(processEvidence));
+                observations.Parameters.AddWithValue("$eventId", processEventId.ToString("D"));
+                await observations.ExecuteNonQueryAsync(cancellationToken);
+            }
+            using (var observations = connection.CreateCommand())
+            {
+                observations.Transaction = transaction;
+                observations.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+                observations.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(downloadEvidence));
+                observations.Parameters.AddWithValue("$eventId", candidate.EventId.ToString("D"));
+                await observations.ExecuteNonQueryAsync(cancellationToken);
+            }
+            processCorrelationId = correlationId;
+            break; // Attach to the nearest compatible download event only; don't merge separate same-hash incidents.
+        }
     }
     public async Task<IReadOnlyList<(Guid EventId, string Path)>> ReadPendingProcessImageInspectionsAsync(CancellationToken cancellationToken = default)
     {

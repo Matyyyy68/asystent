@@ -47,6 +47,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 ## 6. Silnik detekcji
 
 - Istniejące reguły, lokalne listy reputacji i obserwacje systemowe zapisują ustrukturyzowane zdarzenia z ryzykiem, źródłem, uzasadnieniem, zaleceniem i statusem.
+- Po odczytaniu obrazu procesu Engine koreluje go z najbliższym, kompatybilnym zdarzeniem Downloads po identycznym SHA-256 i oknie czasu ±10 minut. Nie łączy niezależnych dopasowań tego samego hasha. Ten dowód nie potwierdza bezpośredniej ścieżki uruchomienia.
 - Lokalny model AI pozostaje opcjonalny; brak modelu nie wyłącza reguł.
 - Ręczna kwarantanna jest dostępna tylko dla nowego pliku z Downloads, którego SHA-256 dopasowano do lokalnej listy. Electron wymaga osobnego potwierdzenia, a Engine sprawdza hash przy wybranym pliku, bez uruchamiania i bez nadpisywania. Przywrócenie jest jawne i ponownie kontroluje hash. Automatyczna kwarantanna, usuwanie i blokada wykonania nie są wdrożone.
 
@@ -80,7 +81,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 ## 11. Walidacja wykonana
 
-- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru oraz ograniczony do 3 s czas oczekiwania na jego odczyt. Lokalnie: pełne .NET 439 PASS + 2 środowiskowe SKIP; testy desktop 79/79, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC inventory PASS. Ten commit nie zmieniał UI testowanego wcześniej.
+- Bieżący checkout zawiera inwentarz nazw, wersji i wydawców z rejestru oraz ograniczony do 3 s czas oczekiwania na jego odczyt. Lokalnie: pełne .NET 441 PASS + 2 środowiskowe SKIP; testy desktop 79/79, lint i produkcyjny Vite (1584 moduły) PASS; Engine publish i IPC inventory PASS. Dokładna korelacja Downloads → proces ma testy .NET dla zgodnego hasha, niewłaściwego hasha i starego zdarzenia. Pełny Windows CI nowego commita oczekuje.
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich 20 krokach: testy/build, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless install/update/uninstall, widoczny kreator i Enterprise API. Potwierdza test na izolowanym runnerze Windows, nie na komputerze użytkownika.
 - Wcześniejsze walidacje: Windows CI 41673687559 i 41679066451 dla uproszczenia strony/alertów oraz 41685182964 dla instalatora i ograniczenia statusu DNS również zakończyły się PASS.
 - Setup Release oraz `--wizard-self-test`: wcześniejsze przejścia PASS; bieżący Windows CI zbudował i przetestował pełny instalator oraz cykl kreatora.
@@ -100,6 +101,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 
 - Windows CI [41696210343](https://github.com/Matyyyy68/asystent/actions/runs/41696210343) dla `dcb6d01` PASS we wszystkich krokach: build i testy źródeł, Electron smoke, Downloads/junction, autostart, Chrome/Edge, headless instalacja/aktualizacja/deinstalacja, widoczny kreator oraz Enterprise API. Potwierdza izolowany runner; nie zastępuje fizycznego testu na czystym Windows 10/11.
 - Bieżące `a972a71` zawiera ograniczenie oczekiwania na rejestr, z testem lokalnym w pełnym .NET suite (439 PASS, 2 środowiskowe SKIP); pełny Windows CI tego commita nadal działa i nie ma jeszcze wyniku końcowego.
+- Korelacja obrazu procesu z pasującym hashem pobranego pliku jest lokalnie zweryfikowana w pełnym .NET suite; potrzebuje pełnego Windows CI po push.
 - Agent i watchdog pozostają user-mode: nie ma usługi SCM, pracy przed logowaniem ani niezależnego recovery samego watchdoga.
 - Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
 - Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa produktu AV ani wersji sygnatur.

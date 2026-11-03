@@ -4,7 +4,7 @@
 
 - `npm test --prefix desktop`: PASS, 79/79, w tym jawna kwarantanna oraz ograniczony widok lokalnego inwentarza aplikacji.
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).
-- `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 439 testów, 2 środowiskowe SKIP. Obejmuje walidację metadanych spisu aplikacji, timeout odczytu rejestru, kwarantannę, regułę Office → interpreter/skrypt oraz lokalny Toolhelp parent snapshot.
+- `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 441 testów, 2 środowiskowe SKIP. Obejmuje korelację plik Downloads → proces po identycznym SHA-256 i oknie ±10 minut, brak korelacji dla innego hasha/starego pliku, walidację inwentarza aplikacji i timeout odczytu rejestru.
 - `dotnet build Sentinel.sln -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów; osobno Setup Release i autotest kreatora też PASS.
 - `dotnet build src/Sentinel.Agent/Sentinel.Agent.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
 - `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów.
@@ -19,7 +19,7 @@
 
 ## Niezweryfikowane / wymagają kolejnej bramki CI
 
-- Bieżący inventory reader, limit oczekiwania na rejestr i pierwsze sprawdzenie wymagają pełnego Windows CI po push; lokalna Engine IPC odczytała rzeczywisty rejestr Windows tylko w bieżącym profilu.
+- Bieżąca korelacja Downloads → proces wraz z inventory readerem i pierwszym sprawdzeniem wymaga pełnego Windows CI po push; lokalna Engine IPC odczytała rzeczywisty rejestr Windows tylko w bieżącym profilu.
 - Rollback instalatora, zachowanie istniejących wpisów HKCU, widoczność menu Eksploratora na czystym Windows 10/11.
 - Integracyjny test awarii samego watchdoga, powiadomień/dźwięków w aktywnej sesji i wydajności na reprezentatywnych maszynach.
 - Usługa Windows SCM, automatyczne aktualizacje, blokada wykonania/ruchu, ocena CVE i rozpoznanie konkretnego AV/sygnatur nie są wdrożone.

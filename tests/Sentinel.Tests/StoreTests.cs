@@ -1040,6 +1040,50 @@ public sealed class StoreTests : IDisposable
         Assert.DoesNotContain(path, json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(hash, json, StringComparison.OrdinalIgnoreCase);
     }
+    [Fact] public async Task ProcessImageWithExactDownloadedSha256SharesIncidentCorrelation()
+    {
+        var store = await Store();
+        const string hash = "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+        var observedAt = DateTimeOffset.UtcNow;
+        var downloadEventId = Guid.NewGuid();
+        var processEventId = Guid.NewGuid();
+        await store.AddLocalOnlyAsync(Event(observedAt) with { EventId = downloadEventId, Source = "downloads-local-hash",
+            Category = "Pobrany plik pasuje do lokalnej listy hashy", SignalHash = hash,
+            EvidenceCodes = ["file.sha256.matches-local-list"] });
+        await store.AddLocalOnlyAsync(Event(observedAt.AddSeconds(40)) with { EventId = processEventId, Source = "process-snapshot",
+            ProcessId = 123, ProcessName = "downloaded-program", ProcessImagePath = Path.Combine(dir, "downloaded-program.exe"),
+            ProcessImageSignatureStatus = "Pending", EvidenceCodes = ["process.snapshot.new-pid"] });
+
+        await store.UpdateProcessImageInspectionAsync(processEventId, hash, "NotSigned", null);
+
+        var events = await store.ReadAsync();
+        var download = Assert.Single(events, item => item.EventId == downloadEventId);
+        var process = Assert.Single(events, item => item.EventId == processEventId);
+        Assert.NotNull(download.CorrelationId);
+        Assert.Equal(download.CorrelationId, process.CorrelationId);
+        Assert.Contains("correlation.download-process.same-sha256", download.EvidenceCodes!);
+        Assert.Contains("correlation.download-process.same-sha256", process.EvidenceCodes!);
+    }
+    [Fact] public async Task ProcessImageDoesNotCorrelateToDifferentHashOrOldDownload()
+    {
+        var store = await Store();
+        var observedAt = DateTimeOffset.UtcNow;
+        var downloadEventId = Guid.NewGuid();
+        var processEventId = Guid.NewGuid();
+        await store.AddLocalOnlyAsync(Event(observedAt.AddMinutes(-11)) with { EventId = downloadEventId, Source = "downloads-local-hash",
+            SignalHash = new string('C', 64), EvidenceCodes = ["file.sha256.matches-local-list"] });
+        await store.AddLocalOnlyAsync(Event(observedAt) with { EventId = processEventId, Source = "process-snapshot",
+            ProcessId = 123, ProcessName = "different-program", ProcessImagePath = Path.Combine(dir, "different-program.exe"),
+            ProcessImageSignatureStatus = "Pending", EvidenceCodes = ["process.snapshot.new-pid"] });
+
+        await store.UpdateProcessImageInspectionAsync(processEventId, new string('D', 64), "Valid", false);
+
+        var events = await store.ReadAsync();
+        Assert.Null(Assert.Single(events, item => item.EventId == downloadEventId).CorrelationId);
+        var process = Assert.Single(events, item => item.EventId == processEventId);
+        Assert.Null(process.CorrelationId);
+        Assert.DoesNotContain("correlation.download-process.same-sha256", process.EvidenceCodes!);
+    }
     [Fact] public async Task CsvExportQuotesFieldsAndPreventsSpreadsheetFormulas()
     {
         var s = await Store();
