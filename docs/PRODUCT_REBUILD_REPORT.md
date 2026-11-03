@@ -15,7 +15,7 @@
 - Świeża ścieżka przechodzi przez preflight, lokalny payload, konfigurację i weryfikację.
 - Payload i instalacja sprawdzają obecność silnika, agenta, Core i Contracts.
 - Agent ma być uruchomiony od razu i przy logowaniu. Przy aktualizacji instalator prosi o zamknięcie agenta, a przy rollbacku próbuje go wznowić.
-- Bieżący produkcyjny instalator nie został zbudowany: lokalne `node_modules` zawiera Electron 44.9.1, podczas gdy lockfile wymaga `^45.0.0`.
+- Lokalny offline build nie mógł zbudować produkcyjnego pakietu, bo `node_modules` zawiera Electron 44.9.1, a lockfile wymaga `^45.0.0`; nie pobierałem zależności na komputer użytkownika. Windows CI zbudował pakiet przy użyciu wymaganej wersji Electron 45.
 
 ## 3. Pierwsze sprawdzenie
 
@@ -84,11 +84,12 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - Test monitora TCP potwierdza, że pojedyncze nowe dopasowanie lokalnego IP jest przekazywane do alertu, a kolejny zwykły cykl zwraca zero dopasowań. Test IPC Engine sprawdza zerową wartość dla bazowej próbki.
 - Test monitora trwałości potwierdza alertowalny licznik wyłącznie dla zapisanej zmiany w lokalizacji zapisywalnej przez użytkownika i zeruje go w kolejnym niezmienionym cyklu.
 - Test kolejki inspekcji obrazu procesu potwierdza dedykowany licznik po udanym dopasowaniu lokalnego SHA-256 i jego jednorazowy odbiór przez agenta.
+- Windows CI run [41650228013](https://github.com/Matyyyy68/asystent/actions/runs/41650228013): build aplikacji/pakietu, testy źródeł, smoke Electron, Downloads, autostart i zwykłe Chrome/Edge E2E — PASS. Izolowany install-verify-uninstall pozostaje w toku ponad 30 minut; kreator i Enterprise API jeszcze nie wystartowały, więc nie liczę pełnego testu instalatora jako zaliczonego. Commit `1e3642e` ogranicza nowy przebieg do 15 minut i drukuje log przy timeout.
 - Pełny packaging offline przerwał się przed budowaniem z powodu lokalnego Electron 44.9.1 vs wymagane `^45.0.0`. Nie instalowano zależności ani niczego nie pobierano.
 
 ## 12. Pozostałe prace
 
-- Uzyskać zgodne lokalne zależności bez naruszania preferencji użytkownika dotyczącej pobierania, a następnie zbudować i zweryfikować aktualny payload instalatora.
+- Wyjaśnić zawieszenie integracyjnego install-verify-uninstall i uzyskać końcowy wynik pełnego Windows CI, w tym testu kreatora i Enterprise API.
 - Przeprowadzić izolowane testy instalacji, aktualizacji, rollbacku, deinstalacji, Explorer, powiadomień i awarii/restartu agenta.
 - Rozstrzygnąć architekturę prawdziwej usługi SCM lub ograniczenia user-mode watchdog.
 - Dokończyć korelację alertów, aktualizacje aplikacji/reguł, ocenę stanu konkretnego AV/sygnatur i uzasadnione bezpieczne reakcje.
