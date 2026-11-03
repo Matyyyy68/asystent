@@ -142,6 +142,7 @@ app.whenReady().then(() => {
       try {
         const result = await call('file', { path: filePath });
         results.push({ name: path.basename(filePath), matched: result.reputation?.match === true,
+          feedImported: result.reputation?.feedImported === true,
           signatureStatus: result.signature?.status, error: null });
       } catch (error) {
         results.push({ name: path.basename(filePath), matched: false, error: String(error?.message || 'Błąd silnika').slice(0, 240) });

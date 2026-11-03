@@ -690,3 +690,5 @@ Rozszerzono „Sprawdź w Sentinel AI” o wielokrotny wybór do 15 plików. Rej
 # Zbiorcze sprawdzanie pokazuje stan podpisu (2026-11-03)
 
 Komunikat z menu kontekstowego przedstawia osobno dopasowanie SHA-256 do lokalnej listy i status Authenticode. Rozróżnia prawidłowy podpis, brak podpisu, niedopasowanie podpisu, niezaufany certyfikat i stan nieznany; nie nazywa pliku bezpiecznym na podstawie samego braku dopasowania. Nowy formatter ogranicza i sanitizuje nazwy; desktop 86/86, lint PASS. Rzeczywisty Explorer E2E i pełny Windows CI dla najnowszego kodu nadal oczekują.
+
+Raport jawnie rozróżnia również brak zaimportowanej listy hashy od sprawdzonego braku dopasowania. Regresja podnosi desktop suite do 87/87 PASS.

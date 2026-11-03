@@ -14,7 +14,8 @@ function formatFileCheckResult(result) {
     ? result.name.replace(/[\r\n\t]/g, ' ').slice(0, 160) || '(bez nazwy)'
     : '(bez nazwy)';
   if (result?.error) return `Nie sprawdzono — ${name}`;
-  const reputation = result?.matched ? 'dopasowanie lokalnej listy' : 'brak dopasowania lokalnej listy';
+  const reputation = result?.matched ? 'dopasowanie lokalnej listy'
+    : result?.feedImported ? 'brak dopasowania lokalnej listy' : 'brak zaimportowanej listy hashy';
   const signature = signatureLabels.get(result?.signatureStatus) || signatureLabels.get('Unknown');
   return `${reputation}; ${signature} — ${name}`;
 }

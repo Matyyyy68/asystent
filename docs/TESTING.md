@@ -2,7 +2,7 @@
 
 ## Zweryfikowane w bieżącym checkoutcie (2026-11-03)
 
-- `npm test --prefix desktop`: PASS, 86/86, w tym testy grupowania wielu plików oraz formatowania statusów Authenticode i lokalnego dopasowania.
+- `npm test --prefix desktop`: PASS, 87/87, w tym testy grupowania wielu plików, formatowania Authenticode oraz jawnego braku lokalnej listy hashy.
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).
 - `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj -c Release --no-restore`: PASS, 447 testów, 2 środowiskowe SKIP. Obejmuje parser stanu Defendera i nieprawidłowe wyniki, korelację plik Downloads → proces po identycznym SHA-256 i oknie ±10 minut, brak korelacji dla innego hasha/starego pliku, inwentarz aplikacji i timeout rejestru.
 - `dotnet build Sentinel.sln -c Release --no-restore`: PASS, 0 ostrzeżeń/błędów; osobno Setup Release i autotest kreatora też PASS.
@@ -29,6 +29,6 @@ Nie uruchamiano instalatora, przeglądarki ani GUI produktu na komputerze użytk
 Lokalny pełny packaging pozostaje niedostępny bez przywrócenia wymaganej zależności Electron 45; zainstalowany Electron 44.9.1 nie spełnia `^45.0.0`. Nie uruchomiono `npm ci` ani nie pobierano zależności. Wcześniejszy zdalny Windows CI zbudował payload na runnerze.
 # Weryfikacja zbiorczego menu kontekstowego
 
-- `npm test --prefix desktop`: 86/86 PASS; testy sprawdzają grupowanie równoległych wezwań z Explorera, deduplikację, limit 15 elementów, kolejkę podczas aktywnego sprawdzania, rozdzielenie SHA-256 od Authenticode i sanitację wyświetlanej nazwy.
+- `npm test --prefix desktop`: 87/87 PASS; testy sprawdzają grupowanie równoległych wezwań z Explorera, deduplikację, limit 15 elementów, kolejkę podczas aktywnego sprawdzania, rozdzielenie SHA-256 od Authenticode, brak listy i sanitację nazwy.
 - `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj --no-restore`: PASS, 0 ostrzeżeń i błędów.
 - Testy nie odtwarzają rzeczywistego wielokrotnego zaznaczenia w Explorerze ani widoczności pozycji menu na czystych Windows 10/11; ten gate pozostaje wymagany.
