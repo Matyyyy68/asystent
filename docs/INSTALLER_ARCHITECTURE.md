@@ -8,14 +8,15 @@ Windowsowy instalator jest natywną aplikacją WinForms; zainstalowany Sentinel 
 
 - Kreator jest natywną aplikacją WinForms w `installer/Sentinel.Setup/Program.cs`. Interfejs nie ładuje HTML, CSS, JavaScriptu, Node.js, Codexa ani plików z katalogu tymczasowego.
 - `installer/Sentinel.Setup/Sentinel.Setup.csproj` publikuje `win-x64` jako aplikację samodzielną i jednoplikową (`SelfContained`, `PublishSingleFile`). Wymagany runtime .NET oraz kod kreatora trafiają do EXE.
-- `installer/build-installer.ps1` buduje aplikację desktopową, tworzy z jej kompletnego katalogu ZIP, a następnie osadza ZIP jako `payload.zip` w kreatorze. Osadza też ilustracje stron kreatora jako zasoby assembly. Nie są wymagane dodatkowe pliki obok instalatora.
+- `installer/build-installer.ps1` buduje aplikację desktopową, tworzy z jej kompletnego katalogu ZIP, a następnie osadza ZIP jako `payload.zip` w kreatorze. ZIP zawiera również `resources/service` z hostem SCM i silnikiem. Helper instalatora weryfikuje SHA-256 payloadu, po jawnej zgodzie UAC instaluje usługę do `Program Files\Sentinel AI\Service` z chronionym DACL; nie wymaga osobnego pliku obok instalatora.
 - Ikona pliku EXE pochodzi z `desktop/assets/sentinel.ico`, wskazanej w `ApplicationIcon`. Kreator odczytuje ikonę z uruchomionego EXE.
 - Końcowy plik to `artifacts/desktop/Sentinel.AI.Setup.<wersja>.exe`; obok powstaje plik `.sha256`.
 
 ## Wątek interfejsu i przepływ instalacji
 
 - Sprawdzanie wybranego drzewa katalogów, wolnego miejsca i zachowywanych plików może wymagać enumeracji wielu wpisów systemu plików. Kreator uruchamia te operacje w tle; odświeża ekran tylko wynikiem dla aktualnie wybranej ścieżki.
-- Właściwa instalacja (weryfikacja payloadu, staging, rozpakowanie, weryfikacja plików, atomowa zamiana katalogu, konfiguracja HKCU, skróty i Native Messaging) działa poza wątkiem WinForms. Postęp ekstrakcji pochodzi z rzeczywiście zapisanych bajtów.
+- Właściwa instalacja (weryfikacja payloadu, staging, rozpakowanie, weryfikacja plików, atomowa zamiana katalogu, konfiguracja HKCU, skróty i Native Messaging) działa poza wątkiem WinForms. Na końcu helper z UAC rejestruje lub aktualizuje usługę i instalator czeka na pierwszy cykl oraz świeży heartbeat. Postęp ekstrakcji pochodzi z rzeczywiście zapisanych bajtów; osobny etap komunikatu UAC nie jest sztucznie animowany.
+- Deinstalacja najpierw prosi o UAC i usuwa tylko rozpoznaną usługę Sentinel oraz jej pliki; dane ProgramData są zachowane. Przy odmowie UAC zmiany per-user nie są jeszcze wykonywane. Nowy przepływ wymaga pełnego Windows CI cyklu install/upgrade/rollback/uninstall.
 - Każda zmiana etapu zapisuje `INSTALL_STAGE` w logu w `%LOCALAPPDATA%\Sentinel AI\Logs\installer.log`. Błąd zapisuje etap i operację, a kreator udostępnia ten log.
 - Sekwencja GUI jest serializowana, aby szybkie lub powtórzone kliknięcie nie uruchomiło drugiego równoległego przejścia podczas asynchronicznego preflightu.
 

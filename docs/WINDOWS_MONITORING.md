@@ -2,6 +2,8 @@
 
 Monitorowanie jest lokalne; konkretne stany zależą od ustawień, platformy i uprawnień. `Sentinel.Agent` w sesji użytkownika wywołuje `collect` w `Sentinel.Engine` mniej więcej co sekundę, niezależnie od otwartego okna Electron. To cykliczne zbieranie obsługiwanych migawek i zdarzeń, a nie pełny strumień telemetrii systemowej.
 
+Repozytorium zawiera też `Sentinel.Service`, uruchamiany przez Windows SCM jako `LocalService`, oraz nowy helper UAC instalatora. Usługa cyklicznie wywołuje własny Engine i zapisuje stan w osobnym ProgramData; UI odczytuje jej heartbeat przez potok o ograniczonym SID, oddzielnie od statusu Agenta. Nowy przepływ instalatora czeka na Windows CI. Usługa i Agent nadal mają osobne silniki/bazy i mogą powtarzać część monitorów; zdarzenia użytkownika nie są jeszcze przekazywane do usługi.
+
 W **nowym profilu** monitorowanie jest domyślnie aktywne dla procesów, pobranych plików, zmian autostartu/trwałości i połączeń TCP/UDP. Dane są lokalne. Istniejące, zapisane preferencje pozostają bez zmian; wstrzymanie ochrony nadal zatrzymuje odpowiednie źródła. Zbieranie tekstu aktywnego okna i automatyczne pobieranie zewnętrznych list pozostają wyłączone.
 
 - **Procesy:** snapshoty PID/nazw co około sekundę. Dla nowych procesów odczytywana jest jedna migawka Toolhelp z PID-ami rodziców; reguła oznacza relację Office → interpreter/host skryptów jako wymagającą sprawdzenia, nie jako potwierdzone zagrożenie. Zdarzenie zawiera nazwę i PID rodzica w lokalnym wyjaśnieniu. Zależność od próbkowania oznacza, że krótkie procesy lub zakończony proces rodzic mogą zostać pominięte; korelacja PID nie jest pełnym strumieniem ETW. Obrazy procesów są analizowane w ograniczonej kolejce SHA-256/Authenticode.
