@@ -8,6 +8,7 @@
 4. Agent kontynuuje cykle lokalnie niezależnie od otwartego okna.
 5. Ekran główny pokazuje stan ochrony, najważniejsze wykrycia i czas ostatniego udanego cyklu monitorowania z silnika. Szczegółowe statusy monitorów i Windows Security Center są zwinięte pod „Szczegóły monitorowania”. Nie deklaruje pełnego skanu.
 6. Zdarzenia wymagające uwagi można zobaczyć w historii. Narzędzia techniczne są dostępne po rozwinięciu „Narzędzia zaawansowane”.
+7. Lista zdarzeń używa polskich etykiet ryzyka i statusu. Szczegóły źródła, wersji reguł i dowodów są domyślnie zwinięte; nowe zdarzenie można oznaczyć jako sprawdzone lub fałszywy alarm.
 
 ## Co się zmieniło
 
@@ -15,6 +16,6 @@ Poprzedni ekran pierwszego uruchomienia wymagał wyboru profilu DNS i ręcznego 
 
 ## Granice
 
-Pierwsze sprawdzenie wywołuje istniejące źródła zbierania, nie skanowanie całego systemu. Nowe profile uruchamiają lokalne monitorowanie procesów, Downloads, trwałości i TCP/UDP; stare zapisane preferencje nie są nadpisywane. Wykrycia zależą od dostępności źródeł, uprawnień i lokalnych list reputacji. Po błędzie interfejs komunikuje niepowodzenie i pozwala ponowić próbę. Interaktywny test nowego widoku w Windows nie został jeszcze wykonany.
+Pierwsze sprawdzenie wywołuje istniejące źródła zbierania, nie skanowanie całego systemu. Nowe profile uruchamiają lokalne monitorowanie procesów, Downloads, trwałości i TCP/UDP; stare zapisane preferencje nie są nadpisywane. Wykrycia zależą od dostępności źródeł, uprawnień i lokalnych list reputacji. Błąd albo brak pierwszego odczytu cache DNS obniża status ochrony. Po błędzie interfejs komunikuje niepowodzenie i pozwala ponowić próbę. Pełny interaktywny test instalatora przechodzi na izolowanym Windows runnerze CI; widok użytkownika nie był ręcznie testowany na fizycznym komputerze odbiorcy.
 
 Z menu kontekstowego pliku można wybrać „Sprawdź w Sentinel AI”. Dostępna analiza jest lokalna i ograniczona do SHA-256 oraz statusu podpisu cyfrowego. Nie uruchamia, nie blokuje i nie usuwa pliku. Szczegóły i ograniczenia są w [WINDOWS_MONITORING.md](WINDOWS_MONITORING.md).

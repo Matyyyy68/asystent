@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Shield, Activity, Search, Database, Plug, Cpu, Lock, Bell, Settings, Info, Stethoscope } from 'lucide-react';
 import { Illustration } from './Illustration';
 import { groupHistoryEvents } from './history-groups.js';
+import { presentEventStatus, presentRisk } from './event-presentation.js';
 import { formatExitCode } from './diagnostics-format.js';
 import { getProtectionStatus } from './protection-status.js';
 import './style.css';
@@ -81,7 +82,24 @@ function App() {
     {(firstAssessment === 'failed' || (!status && !busy)) && <button disabled={busy} onClick={() => { setError(''); initialAssessmentStarted.current = false; void runFirstAssessment(); }}>Spróbuj ponownie</button>}
     <small>Ochrona działa w granicach dostępnych źródeł; brak wykrycia nie potwierdza bezpieczeństwa.</small>
   </main>;
-  const renderHistoryEvent = (e: any) => { const observations = e.observations || []; return <div className="history-event" key={e.id}><small>{new Date(e.timestamp).toLocaleString()} · {e.application} · {e.source || 'źródło historyczne'}{observations.length > 1 ? ` · ${observations.length} potwierdzone źródła` : ''} · reguły {e.ruleVersion || 'nieznane'} · schemat {e.schemaVersion ?? 1}</small><h3>{e.risk} · {e.category}</h3><p>{e.explanation}</p><details><summary>Dowody, zalecenia i status</summary>{e.processImagePath && <><p>Ścieżka pliku procesu (lokalnie): {e.processImagePath}</p><p>SHA-256: {e.processImageSha256 || 'oczekuje lub niedostępny'} · Authenticode: {e.processImageSignatureStatus || 'nieznany'} · zgodność z lokalną listą: {e.processImageLocalHashMatch == null ? 'brak zaimportowanej listy' : e.processImageLocalHashMatch ? 'tak' : 'nie'}</p></>}<p>Ograniczenia weryfikacji: {e.analysisLimitations?.length ? e.analysisLimitations.map((code: string) => analysisLimitationLabels[code] || code).join(' ') : 'brak zapisanych danych o ograniczeniach'}</p><p>Kody dowodowe: {e.evidenceCodes?.length ? e.evidenceCodes.join(', ') : 'brak ustrukturyzowanych kodów dowodowych'}</p>{observations.length > 1 && <><p>Źródła i dowody poszczególnych obserwacji:</p>{observations.map((observation: any) => <p key={observation.eventId}>{observation.source} · {new Date(observation.observedAt).toLocaleString()} · {observation.evidenceCodes?.join(', ') || 'brak kodów dowodowych'}{observation.analysisLimitations?.length ? <span> · Ograniczenia: {observation.analysisLimitations.map((code: string) => analysisLimitationLabels[code] || code).join(' ')}</span> : null}</p>)}</>}<p>{e.recommendation}</p><p>{e.status}</p><p>{e.confidence == null ? 'Pewność: niekalibrowana' : `Pewność: ${e.confidence}%`}</p></details>{e.status !== 'FalsePositive' && <button disabled={busy} onClick={() => perform(async () => { await call('eventStatus', { eventId: e.id, status: 'FalsePositive' }); await refresh(); })}>Oznacz jako fałszywy alarm</button>}</div>; };
+  const renderHistoryEvent = (e: any) => {
+    const observations = e.observations || [];
+    return <div className="history-event" key={e.id}>
+      <small>{new Date(e.timestamp).toLocaleString()}{observations.length > 1 ? ` · ${observations.length} potwierdzone sygnały` : ''}</small>
+      <h3>{presentRisk(e.risk)} · {e.category}</h3>
+      <p>{e.explanation}</p>
+      <details><summary>Szczegóły i zalecenia</summary>
+        <p>Aplikacja: {e.application} · źródło: {e.source || 'nieznane'} · reguły: {e.ruleVersion || 'nieznane'} · schemat: {e.schemaVersion ?? 1}</p>
+        {e.processImagePath && <><p>Ścieżka pliku procesu (lokalnie): {e.processImagePath}</p><p>SHA-256: {e.processImageSha256 || 'oczekuje lub niedostępny'} · Authenticode: {e.processImageSignatureStatus || 'nieznany'} · zgodność z lokalną listą: {e.processImageLocalHashMatch == null ? 'brak zaimportowanej listy' : e.processImageLocalHashMatch ? 'tak' : 'nie'}</p></>}
+        <p>Ograniczenia weryfikacji: {e.analysisLimitations?.length ? e.analysisLimitations.map((code: string) => analysisLimitationLabels[code] || code).join(' ') : 'brak zapisanych danych o ograniczeniach'}</p>
+        <p>Kody dowodowe: {e.evidenceCodes?.length ? e.evidenceCodes.join(', ') : 'brak ustrukturyzowanych kodów dowodowych'}</p>
+        {observations.length > 1 && <><p>Źródła i dowody poszczególnych obserwacji:</p>{observations.map((observation: any) => <p key={observation.eventId}>{observation.source} · {new Date(observation.observedAt).toLocaleString()} · {observation.evidenceCodes?.join(', ') || 'brak kodów dowodowych'}{observation.analysisLimitations?.length ? <span> · Ograniczenia: {observation.analysisLimitations.map((code: string) => analysisLimitationLabels[code] || code).join(' ')}</span> : null}</p>)}</>}
+        <p>{e.recommendation}</p><p>Status: {presentEventStatus(e.status)}</p><p>{e.confidence == null ? 'Pewność: niekalibrowana' : `Pewność: ${e.confidence}%`}</p>
+      </details>
+      {e.status === 'New' && <button disabled={busy} onClick={() => perform(async () => { await call('eventStatus', { eventId: e.id, status: 'Reviewed' }); await refresh(); })}>Oznacz jako sprawdzone</button>}
+      {e.status !== 'FalsePositive' && <button disabled={busy} onClick={() => perform(async () => { await call('eventStatus', { eventId: e.id, status: 'FalsePositive' }); await refresh(); })}>Oznacz jako fałszywy alarm</button>}
+    </div>;
+  };
   return <div className="layout"><aside><div className="brand"><Shield size={36}/><div>Sentinel <b>AI</b><small>{status?.enterprise?.variant === 'EnterpriseClient' ? 'ENTERPRISE · LOKALNIE' : 'USER · LOKALNIE'}</small></div></div>
     <nav aria-label="Nawigacja podstawowa">{sections.slice(0, 2).map((label, i) => { const Icon = icons[i]; return <button key={label} aria-current={section === i ? 'page' : undefined} onClick={() => setSection(i)}><Icon size={18}/>{label}</button>; })}<details className="advanced-navigation"><summary>Narzędzia zaawansowane</summary>{sections.slice(2).map((label, offset) => { const i = offset + 2, Icon = icons[i]; return <button key={label} aria-current={section === i ? 'page' : undefined} onClick={() => setSection(i)}><Icon size={18}/>{label}</button>; })}</details></nav>
     <p className="aside-note">{status?.enterprise?.paired && status?.enterprise?.sharingMetadata ? 'Metadane wykryć są wysyłane zgodnie z udzieloną zgodą.' : status?.enterprise?.paired ? 'Synchronizacja metadanych jest wyłączona.' : 'Twoje dane pozostają na tym urządzeniu.'}</p></aside>
