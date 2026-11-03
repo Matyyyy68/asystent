@@ -72,7 +72,7 @@ internal static class MachineServiceInstaller
         }
         catch (Exception exception)
         {
-            Program.Log($"MACHINE_SERVICE_HELPER_FAILED type={exception.GetType().Name} hresult=0x{exception.HResult:X8}");
+            Program.Log($"MACHINE_SERVICE_HELPER_FAILED type={exception.GetType().Name} hresult=0x{exception.HResult:X8} message={Program.Clean(exception.Message)}");
             return 10;
         }
     }
