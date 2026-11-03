@@ -51,7 +51,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 ## 7. Powiadomienia i dźwięk
 
 - Agent pokazuje baloniki dla lokalnych dopasowań DNS i hashy plików pobranych oraz nowych procesów, połączeń TCP do zaimportowanych adresów IP, zmian autostartu w lokalizacjach zapisywalnych przez użytkownika oraz dla antywirusa/zapory, gdy Windows Security Center zgłasza stan wymagający uwagi lub brak monitorowania. Alerty mają limit 10 minut per typ; różne sygnały wykryte w jednym cyklu są grupowane do jednego krótkiego balonika, którego kliknięcie otwiera aplikację.
-- Odtwarza krótkie standardowe dźwięki systemowe. Własny zestaw dźwięków produktu nie został przygotowany.
+- Agent generuje lokalnie trzy krótkie, ciche tony Sentinel w formacie PCM WAV. Aktualne sygnały agenta mają poziom ostrzeżenia i odtwarzają ton ostrzegawczy; wzorce informacji i poważnego ostrzeżenia są przygotowane, ale nie są jeszcze przypisane do odrębnych typów zdarzeń. Awaria urządzenia audio nie zatrzymuje agenta. Odtwarzania na fizycznej aktywnej sesji Windows nie zweryfikowano.
 - Ikona zasobnika zmienia się przy alertach i błędzie silnika.
 - Menu zasobnika ma skrót „Ostatnie alerty”, który otwiera historię zdarzeń w Electron.
 - Menu zasobnika oferuje ręczne sprawdzenie najnowszego stabilnego wydania przez GitHub API. Użytkownik sam otwiera stronę wydania; brak automatycznego pobierania, weryfikowanego manifestu i instalacji aktualizacji.

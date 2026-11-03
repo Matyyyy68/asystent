@@ -91,6 +91,33 @@ internal static class Program
         catch { return 1; }
     }
 
+    private static class NotificationSoundPlayer
+    {
+        private static readonly SoundPlayer?[] Players = CreatePlayers();
+
+        private static SoundPlayer?[] CreatePlayers()
+        {
+            var players = new SoundPlayer?[Enum.GetValues<NotificationToneKind>().Length];
+            foreach (var kind in Enum.GetValues<NotificationToneKind>())
+            {
+                try
+                {
+                    var player = new SoundPlayer(new MemoryStream(NotificationTone.CreateWave(kind), writable: false));
+                    player.Load();
+                    players[(int)kind] = player;
+                }
+                catch { /* Malformed or unavailable audio support must not prevent agent startup. */ }
+            }
+            return players;
+        }
+
+        public static void Play(NotificationToneKind kind)
+        {
+            try { Players[(int)kind]?.Play(); }
+            catch { /* Audio output may be unavailable or disabled; never stop protection. */ }
+        }
+    }
+
     private static string ResolveSessionSuffix(string? sessionName)
     {
         var suffix = new string((sessionName ?? string.Empty).Take(40)
@@ -107,7 +134,7 @@ internal static class Program
         private readonly Task server;
         private readonly System.Windows.Forms.Timer collector = new() { Interval = 1000 };
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
-        private readonly List<(string Key, string Title, string Message, ToolTipIcon Icon, SystemSound Sound)> pendingNotifications = [];
+        private readonly List<(string Key, string Title, string Message, ToolTipIcon Icon)> pendingNotifications = [];
         private readonly Icon normalIcon;
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
@@ -217,30 +244,30 @@ internal static class Program
                 var notifications = result.TryGetProperty("notifications", out var enabled) && enabled.GetBoolean();
                 var detections = result.TryGetProperty("detections", out var count) && count.TryGetInt32(out var total) ? total : 0;
                 if (notifications && detections > 0)
-                    NotifyOnce("dns-reputation", "Sentinel AI — ostrzeżenie", "W cache DNS wykryto adres z lokalnie sprawdzanej listy reputacji. Ruch nie został zablokowany.", ToolTipIcon.Warning, SystemSounds.Exclamation);
+                    NotifyOnce("dns-reputation", "Sentinel AI — ostrzeżenie", "W cache DNS wykryto adres z lokalnie sprawdzanej listy reputacji. Ruch nie został zablokowany.", ToolTipIcon.Warning);
                 var fileMatches = result.TryGetProperty("downloadedFileMatches", out var fileCount) && fileCount.TryGetInt32(out var matched) ? matched : 0;
                 if (notifications && fileMatches > 0)
-                    NotifyOnce("file-reputation", "Sentinel AI — sprawdź plik", "SHA-256 nowego pliku dopasował się do lokalnej listy. Źródło listy nie jest niezależnie zweryfikowane.", ToolTipIcon.Warning, SystemSounds.Exclamation);
+                    NotifyOnce("file-reputation", "Sentinel AI — sprawdź plik", "SHA-256 nowego pliku dopasował się do lokalnej listy. Źródło listy nie jest niezależnie zweryfikowane.", ToolTipIcon.Warning);
                 var ipMatches = result.TryGetProperty("tcpIpReputationMatches", out var ipCount) && ipCount.TryGetInt32(out var matchedIps) ? matchedIps : 0;
                 if (notifications && ipMatches > 0)
                     NotifyOnce("tcp-ip-reputation", "Sentinel AI — sprawdź połączenie",
                         "Nowe połączenie TCP pasuje do lokalnej listy adresów IP. Źródło listy nie jest niezależnie zweryfikowane; Sentinel nie zablokował ruchu.",
-                        ToolTipIcon.Warning, SystemSounds.Exclamation);
+                        ToolTipIcon.Warning);
                 var processImageMatches = result.TryGetProperty("processImageReputationMatches", out var processImageCount) && processImageCount.TryGetInt32(out var matchedImages) ? matchedImages : 0;
                 if (notifications && processImageMatches > 0)
                     NotifyOnce("running-process-image-reputation", "Sentinel AI — sprawdź uruchomiony plik",
                         "SHA-256 obrazu uruchomionego procesu dopasował się do lokalnej listy. Źródło listy nie jest niezależnie zweryfikowane; Sentinel nie zatrzymał procesu.",
-                        ToolTipIcon.Warning, SystemSounds.Exclamation);
+                        ToolTipIcon.Warning);
                 var suspiciousLaunches = result.TryGetProperty("suspiciousProcessLaunches", out var launchCount) && launchCount.TryGetInt32(out var matchedLaunches) ? matchedLaunches : 0;
                 if (notifications && suspiciousLaunches > 0)
                     NotifyOnce("suspicious-parent-child-process", "Sentinel AI — sprawdź uruchomiony program",
                         "Aplikacja Office uruchomiła interpreter poleceń lub host skryptów. Może to być legalne; Sentinel nie zatrzymał procesu.",
-                        ToolTipIcon.Warning, SystemSounds.Exclamation);
+                        ToolTipIcon.Warning);
                 var persistenceMatches = result.TryGetProperty("persistenceSuspiciousChanges", out var persistenceCount) && persistenceCount.TryGetInt32(out var matchedPersistence) ? matchedPersistence : 0;
                 if (notifications && persistenceMatches > 0)
                     NotifyOnce("persistence-writable-location", "Sentinel AI — sprawdź autostart Windows",
                         "Wykryto zmianę autostartu lub trwałości w lokalizacji zapisywalnej przez użytkownika. To sygnał do sprawdzenia, nie werdykt malware; Sentinel niczego nie zmienił.",
-                        ToolTipIcon.Warning, SystemSounds.Exclamation);
+                        ToolTipIcon.Warning);
                 if (notifications && DateTimeOffset.UtcNow - lastWindowsSecurityCheckAtUtc >= TimeSpan.FromMinutes(1))
                     await CheckWindowsSecurityCenterAsync();
                 if (detections == 0 && fileMatches == 0 && DateTimeOffset.UtcNow >= alertUntil) tray.Icon = normalIcon;
@@ -274,18 +301,18 @@ internal static class Program
                     if (SecurityCenterAlertPolicy.RequiresAttention(message))
                         NotifyOnce("windows-security-center-" + provider.Property, "Sentinel AI — stan zabezpieczeń Windows",
                             $"Windows Security Center: {provider.Name} — {message}. Sentinel AI tylko odczytuje ten stan i niczego nie zmienia.",
-                            ToolTipIcon.Warning, SystemSounds.Exclamation);
+                            ToolTipIcon.Warning);
                 }
             }
             catch { /* Security Center is informative; failure must not interrupt local collection. */ }
         }
 
-        private void NotifyOnce(string key, string title, string message, ToolTipIcon icon, SystemSound sound)
+        private void NotifyOnce(string key, string title, string message, ToolTipIcon icon)
         {
             if (!notificationDeduplicator.TryMark(key, DateTimeOffset.UtcNow)) return;
             alertUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
             tray.Icon = SystemIcons.Warning;
-            pendingNotifications.Add((key, title, message, icon, sound));
+            pendingNotifications.Add((key, title, message, icon));
         }
 
         private void FlushNotifications()
@@ -299,7 +326,7 @@ internal static class Program
                 try
                 {
                     tray.ShowBalloonTip(6000, notification.Title, notification.Message, notification.Icon);
-                    notification.Sound.Play();
+                    NotificationSoundPlayer.Play(NotificationToneKind.Warning);
                 }
                 catch { /* Notification UI or system audio can be unavailable without stopping collection. */ }
                 return;
@@ -309,7 +336,7 @@ internal static class Program
             try
             {
                 tray.ShowBalloonTip(6000, "Sentinel AI — kilka sygnałów", NotificationBatchSummary.Compose(categories), ToolTipIcon.Warning);
-                SystemSounds.Exclamation.Play();
+                NotificationSoundPlayer.Play(NotificationToneKind.Warning);
             }
             catch { /* Notification UI or system audio can be unavailable without stopping collection. */ }
         }

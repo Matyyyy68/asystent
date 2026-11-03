@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+- Zastąpiono domyślny dźwięk Windows trzema krótkimi, cichymi tonami Sentinel (informacja, ostrzeżenie, poważne ostrzeżenie), generowanymi jako lokalny PCM WAV. Aktualne sygnały agenta są klasyfikowane jako ostrzeżenia i odtwarzają ton ostrzegawczy; awaria audio nie przerywa ochrony.
 - Menu ikony zasobnika zawiera ręczne „Sprawdź aktualizacje”. Sprawdza najnowsze stabilne wydanie przez publiczne GitHub API i otwiera wyłącznie stały adres wydania repozytorium; niczego nie pobiera ani nie instaluje automatycznie.
 - Historia zdarzeń pokazuje polskie, zrozumiałe etykiety ryzyka i statusu; źródło, wersja reguł, schemat i kody dowodowe są schowane w rozwijanych szczegółach. Dodano osobną akcję „Oznacz jako sprawdzone”, aby nie mylić potwierdzenia z fałszywym alarmem.
 - Nagłówki grup zdarzeń używają tej samej polskiej etykiety ryzyka; techniczne nazwy źródeł nie są już nagłówkiem dla użytkownika.

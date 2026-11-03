@@ -1,5 +1,10 @@
 # Postęp projektu Sentinel AI
 
+## Własne tony powiadomień — 2026-11-03
+
+- Zamiast domyślnego `SystemSounds.Exclamation` agent odtwarza cichy, krótki ton Sentinel. Dodano trzy deterministyczne wzorce PCM WAV (informacja/ostrzeżenie/poważne ostrzeżenie), generowane lokalnie bez dodatkowych plików lub pobierania. Bieżące źródła agenta są uczciwie traktowane jako ostrzeżenia; wzorce informacji/poważnego ostrzeżenia nie są jeszcze przypisane do oddzielnych klas wykryć.
+- Testy formatu, czasu, unikalności i odrzucenia nieprawidłowego poziomu: 4/4 PASS; Release build `Sentinel.Agent`: 0 ostrzeżeń/błędów. Fizyczne odtworzenie dźwięku w aktywnej sesji Windows pozostaje niezweryfikowane.
+
 ## Sprawdzenie aktualizacji i skróty zasobnika — 2026-11-03
 
 - Dodano ręczną pozycję „Sprawdź aktualizacje” do menu zasobnika. Klient odpytuje wyłącznie endpoint najnowszego stabilnego wydania repozytorium, ogranicza rozmiar odpowiedzi, odrzuca przekierowania/tagi niezgodne z wersją i buduje adres zaufanej strony z lokalnie stałego hosta/repo. Nie pobiera ani nie uruchamia instalatora.
