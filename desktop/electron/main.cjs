@@ -6,6 +6,7 @@ const { readFailures, readLastFailure, recordFailure } = require('./diagnostic-l
 const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
 const { requestedFileCheck } = require('./file-check-args.cjs');
+const { readServiceStatus } = require('./service-status.cjs');
 const { createFileCheckBatcher } = require('./file-check-batch.cjs');
 const { formatFileCheckResult } = require('./file-check-format.cjs');
 const { quarantineDownloadedFile, restoreDownloadedFile } = require('./downloaded-file-actions.cjs');
@@ -59,6 +60,7 @@ app.whenReady().then(() => {
   ipcMain.handle('sentinel', async (event, method, data) => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
     if (method === 'engineStatus') return { ...engine.diagnostics(), lastFailure: readLastFailure(lifecycleLogDirectory) };
+    if (method === 'machineServiceStatus') return readServiceStatus();
     if (method === 'autostart') {
       const loginItem = { path: process.execPath, args: ['--minimized'], name: 'Sentinel AI' };
       app.setLoginItemSettings({ ...loginItem, args: ['--', ...loginItem.args], openAtLogin: data.enabled === true });

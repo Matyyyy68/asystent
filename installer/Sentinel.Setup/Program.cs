@@ -153,6 +153,8 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Any(x => x.StartsWith("--machine-service-helper=", StringComparison.OrdinalIgnoreCase)))
+            return MachineServiceInstaller.DispatchHelper(args);
         if (args.Contains("--integration-test", StringComparer.OrdinalIgnoreCase))
         {
             const string browserE2ePrefix = "--browser-e2e-repo=";
@@ -169,8 +171,14 @@ internal static class Program
         if (IsUninstallInvocation(args, Environment.ProcessPath))
         {
             ApplicationConfiguration.Initialize();
-            if (MessageBox.Show($"Czy na pewno odinstalować Sentinel AI?\n\nTwoje lokalne dane i historia pozostaną na tym komputerze.", Product, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return 0;
+            if (MessageBox.Show($"Czy na pewno odinstalować Sentinel AI?\n\nPliki usługi ochrony zostaną usunięte. Lokalne dane i historia pozostaną na tym komputerze. Windows może poprosić o zgodę administratora.", Product, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return 0;
             try { Uninstall(Path.GetDirectoryName(Environment.ProcessPath!)!); return 0; }
+            catch (OperationCanceledException)
+            {
+                Log("UNINSTALL_CANCELLED stage=machine_service_uac no_machine_changes=true");
+                MessageBox.Show("Odinstalowanie anulowano. Sentinel AI i jego usługa nadal są zainstalowane.", Product, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return 0;
+            }
             catch (Exception ex)
             {
                 if (ex.Data["SentinelUninstallStage"] is not string)
@@ -511,6 +519,7 @@ internal static class Program
             })
                 using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
                     if (key is not null) throw new InvalidOperationException($"Integration test refused: Native Messaging key already exists ({keyPath}).");
+            MachineServiceInstaller.EnsureNoServiceForIntegrationTest();
             var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
             var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
             if (File.Exists(startMenuLink) || File.Exists(desktopLink))
@@ -520,7 +529,7 @@ internal static class Program
             Log($"INTEGRATION_TEST_START target={root}");
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false, verifyMachineService: true);
             if (!string.IsNullOrWhiteSpace(browserE2eRepo))
                 RunInstalledHostBrowserE2E(browserE2eRepo, root);
             var preservedFile = Path.Combine(root, "integration-test-user-file.txt");
@@ -530,12 +539,13 @@ internal static class Program
             Log("INTEGRATION_TEST_UPDATE_START");
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false, verifyMachineService: true);
             if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
                 throw new InvalidDataException("Update did not preserve a file outside the application payload.");
             Log("INTEGRATION_TEST_UPDATE_SUCCESS preservedUserFile=true");
 
             Uninstall(root);
+            MachineServiceInstaller.VerifyUninstalledForIntegrationTest();
             if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
                 throw new InvalidDataException("Uninstall did not preserve a user file outside the application payload.");
             DeleteInstallPathSafely(preservedFile, root, isDirectory: false);
@@ -663,6 +673,7 @@ internal static class Program
             })
                 using (var key = Registry.CurrentUser.OpenSubKey(keyPath))
                     if (key is not null) throw new InvalidOperationException($"Wizard integration test refused: Native Messaging key already exists ({keyPath}).");
+            MachineServiceInstaller.EnsureNoServiceForIntegrationTest();
             var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
             var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
             if (File.Exists(startMenuLink) || File.Exists(desktopLink))
@@ -675,16 +686,17 @@ internal static class Program
                 RunWizardIntegrationFlow(wizard, repairExpected: false);
             }
 
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false, verifyMachineService: true);
             File.WriteAllText(preservedFile, preservedContents);
             using (var wizard = new SetupWizard(integrationTestTarget: root))
             {
                 RunWizardIntegrationFlow(wizard, repairExpected: true);
             }
-            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false);
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false, verifyFileContextMenu: false, verifyCoreAutoStart: false, verifyMachineService: true);
             if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
                 throw new InvalidDataException("GUI repair/update did not preserve a file outside the application payload.");
             Uninstall(root);
+            MachineServiceInstaller.VerifyUninstalledForIntegrationTest();
             using (var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")!)
             using (var archive = new ZipArchive(resource, ZipArchiveMode.Read))
                 foreach (var entry in archive.Entries.Where(x => !string.IsNullOrEmpty(x.Name)))
@@ -1807,7 +1819,7 @@ internal static class Program
     }
 
     internal static void VerifyInstallation(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart,
-        bool verifyFileContextMenu = true, bool verifyCoreAutoStart = true)
+        bool verifyFileContextMenu = true, bool verifyCoreAutoStart = true, bool verifyMachineService = false)
     {
         target = Path.GetFullPath(target);
         foreach (var relative in new[] { "Sentinel AI.exe", "Uninstall Sentinel AI.exe", "resources/engine/Sentinel.Engine.exe", "resources/engine/Sentinel.Agent.exe", "resources/service/Sentinel.Service.exe", "resources/service/Sentinel.Engine.exe", "resources/engine/Sentinel.Core.dll", "resources/engine/Sentinel.Contracts.dll", "resources/engine/Sentinel.UrlHost.exe", "resources/engine/com.sentinelai.urlcheck.json" })
@@ -1825,6 +1837,8 @@ internal static class Program
         var coreRunValue = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue(CoreAutoStartValueName) as string;
         if (verifyCoreAutoStart && !CoreAutoStartValueMatches(coreRunValue, Path.Combine(target, "resources", "engine", "Sentinel.Agent.exe")))
             throw new InvalidDataException("Weryfikacja autostartu silnika Sentinel Core nie powiodła się.");
+        if (verifyMachineService && !MachineServiceInstaller.VerifyCurrentUserServiceHealth())
+            throw new InvalidDataException("Weryfikacja usługi Sentinel AI i jej ostatniego cyklu ochrony nie powiodła się.");
 
         var startMenuLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "Sentinel AI.lnk");
         var desktopLink = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Sentinel AI.lnk");
@@ -2265,6 +2279,7 @@ internal static class Program
         var linkBackups = testMode ? new Dictionary<string, string?>() : CaptureShortcuts([startMenuLink, desktopLink], integrationBackup);
         var oldMoved = false;
         var backgroundAgentWasRunning = false;
+        var machineServiceInstalled = false;
         try
         {
             Log($"INSTALL_START target={target} startMenu={startMenuShortcut} autostart={autoStart} desktop={desktopShortcut}");
@@ -2392,6 +2407,10 @@ internal static class Program
                     ApplyShortcutOption(startMenuLink, executable, target, startMenuShortcut);
                     ApplyShortcutOption(desktopLink, executable, target, desktopShortcut);
                     RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--register", 8000);
+                    setStage("configure", "install_machine_service");
+                    progress("Konfiguruję ochronę działającą w tle…", 96);
+                    MachineServiceInstaller.InstallForCurrentUser();
+                    machineServiceInstalled = true;
                 }
                 setStage("complete", "report_installation_success");
                 progress("Gotowe.", 100);
@@ -2400,6 +2419,8 @@ internal static class Program
             catch (Exception ex)
             {
                 Log($"INSTALL_CONFIG_FAILED type={ex.GetType().Name} message={Clean(ex.Message)}");
+                if (!testMode && machineServiceInstalled && !oldMoved)
+                    try { MachineServiceInstaller.UninstallElevated(); } catch (Exception cleanupError) { Log($"ROLLBACK_MACHINE_SERVICE_FAILED type={cleanupError.GetType().Name}"); }
                 if (!testMode) try { RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--unregister", 5000); } catch (Exception cleanupError) { Log($"ROLLBACK_HOST_UNREGISTER_FAILED message={Clean(cleanupError.Message)}"); }
                 TryDeleteInstallTree(target);
                 if (oldMoved && Directory.Exists(backup)) RenameInstallDirectorySafely(backup, target, localApplicationData);
@@ -2544,6 +2565,10 @@ internal static class Program
             Log($"UNINSTALL_STAGE stage={stage} status=complete");
             if (!testMode)
             {
+                stage = "remove_machine_service";
+                Log($"UNINSTALL_STAGE stage={stage} status=started");
+                MachineServiceInstaller.UninstallElevated();
+                Log($"UNINSTALL_STAGE stage={stage} status=complete");
                 stage = "unregister_native_messaging";
                 Log($"UNINSTALL_STAGE stage={stage} status=started");
                 StopBackgroundAgent(target);
@@ -2997,7 +3022,7 @@ internal sealed class SetupWizard : Form
             status.Text = repairMode
                 ? "Sprawdzam naprawione pliki, ustawienia, skróty i rejestrację przeglądarki…"
                 : "Sprawdzam pliki, ustawienia, skróty i rejestrację przeglądarki…";
-            await Task.Run(() => Program.VerifyInstallation(selectedPath, startMenu.Checked, desktop.Checked, start.Checked));
+            await Task.Run(() => Program.VerifyInstallation(selectedPath, startMenu.Checked, desktop.Checked, start.Checked, verifyMachineService: true));
             Program.Log($"INSTALL_VERIFIED repair={repairMode} files=true registration=true shortcuts=true autostart={start.Checked} target={selectedPath}");
             status.Text = repairMode ? "Naprawa została zweryfikowana." : "Instalacja została zweryfikowana.";
             progress.Value = 100;
@@ -3094,7 +3119,7 @@ internal sealed class SetupWizard : Form
         {
             WizardPage.Welcome => repairMode
                 ? "Wykryto istniejącą instalację. Naprawa lub aktualizacja odtworzy pliki z tego pakietu i zachowa wykryte skróty oraz autostart."
-                : "Inteligentna ochrona Twojego komputera. Zainstalujemy Sentinel AI w profilu użytkownika; zmiana domyślnych ustawień jest opcjonalna.",
+                : "Inteligentna ochrona Twojego komputera. Aplikacja zainstaluje się w profilu użytkownika. Windows poprosi o zgodę na skonfigurowanie chronionej usługi działającej w tle.",
             WizardPage.Location => repairMode
                 ? "Wybierz istniejący folder instalacji. Operacja zachowa ustawienia oraz pliki użytkownika spoza pakietu aplikacji."
                 : "Wybierz bezpieczny folder w swoim profilu. Istniejąca instalacja zostanie zaktualizowana w tym samym miejscu.",
@@ -3105,7 +3130,7 @@ internal sealed class SetupWizard : Form
                 ? "Naprawa lub aktualizacja odtworzy pliki aplikacji, zweryfikuje wynik i zastosuje pokazane ustawienia."
                 : "Instalator sprawdzi pakiet, skopiuje pliki, skonfiguruje wybrane opcje i zweryfikuje wynik.",
             WizardPage.Installing => "Rozpakowuję aplikację z pakietu osadzonego w instalatorze; pobieranie nie jest wymagane.",
-            WizardPage.Verify => "Sprawdzam pliki programu, ustawienie autostartu, skróty i host przeglądarki.",
+            WizardPage.Verify => "Sprawdzam pliki aplikacji, usługę ochrony, autostart, skróty i host przeglądarki.",
             WizardPage.Complete => repairMode ? "Pliki i konfiguracja naprawionej instalacji zostały sprawdzone." : "Pliki i konfiguracja instalacji zostały sprawdzone.",
             _ => "Instalator nie zgłosi sukcesu, jeśli konfiguracja lub weryfikacja się nie powiedzie."
         };
