@@ -35,4 +35,15 @@ public sealed class NotificationToneTests
         Assert.NotEqual(NotificationTone.CreateWave(NotificationToneKind.Warning), NotificationTone.CreateWave(NotificationToneKind.Critical));
         Assert.Throws<ArgumentOutOfRangeException>(() => NotificationTone.CreateWave((NotificationToneKind)99));
     }
+
+    [Fact]
+    public void BatchToneUsesTheHighestSeverityWithoutElevatingInformationOnlySignals()
+    {
+        Assert.Equal(NotificationToneKind.Information,
+            NotificationTonePolicy.Select([NotificationToneKind.Information, (NotificationToneKind)99]));
+        Assert.Equal(NotificationToneKind.Warning,
+            NotificationTonePolicy.Select([NotificationToneKind.Information, NotificationToneKind.Warning]));
+        Assert.Equal(NotificationToneKind.Critical,
+            NotificationTonePolicy.Select([NotificationToneKind.Warning, NotificationToneKind.Critical]));
+    }
 }

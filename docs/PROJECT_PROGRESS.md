@@ -692,3 +692,7 @@ Rozszerzono „Sprawdź w Sentinel AI” o wielokrotny wybór do 15 plików. Rej
 Komunikat z menu kontekstowego przedstawia osobno dopasowanie SHA-256 do lokalnej listy i status Authenticode. Rozróżnia prawidłowy podpis, brak podpisu, niedopasowanie podpisu, niezaufany certyfikat i stan nieznany; nie nazywa pliku bezpiecznym na podstawie samego braku dopasowania. Nowy formatter ogranicza i sanitizuje nazwy; desktop 86/86, lint PASS. Rzeczywisty Explorer E2E i pełny Windows CI dla najnowszego kodu nadal oczekują.
 
 Raport jawnie rozróżnia również brak zaimportowanej listy hashy od sprawdzonego braku dopasowania. Regresja podnosi desktop suite do 87/87 PASS.
+
+# Dźwięk powiadomienia odpowiada wadze sygnału (2026-11-03)
+
+Dopasowania do lokalnych list hashy i IP o niezweryfikowanym pochodzeniu używają tonu informacyjnego, a ostrzeżenia DNS/WSC i heurystyki pozostają ostrzegawcze. Grupowany alert wybiera najwyższą wagę; nie używa tonu krytycznego, bo Sentinel nie zablokował żadnego działania. `NotificationToneTests` 5/5 PASS; pełna .NET suite 448 PASS + 2 środowiskowe SKIP; `Sentinel.Agent` Release buduje się bez ostrzeżeń. Dźwięku na fizycznej sesji Windows nadal nie zweryfikowano.

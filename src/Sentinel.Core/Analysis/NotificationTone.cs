@@ -9,6 +9,21 @@ public enum NotificationToneKind
     Critical
 }
 
+public static class NotificationTonePolicy
+{
+    public static NotificationToneKind Select(IEnumerable<NotificationToneKind> tones)
+    {
+        ArgumentNullException.ThrowIfNull(tones);
+        var selected = NotificationToneKind.Information;
+        foreach (var tone in tones)
+        {
+            if (!Enum.IsDefined(tone)) continue;
+            if (tone > selected) selected = tone;
+        }
+        return selected;
+    }
+}
+
 /// <summary>Creates short, quiet Sentinel notification tones as mono 16-bit PCM WAV data.</summary>
 public static class NotificationTone
 {
