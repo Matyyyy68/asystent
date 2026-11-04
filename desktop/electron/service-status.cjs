@@ -19,9 +19,15 @@ function parseServiceStatusLine(line, now = Date.now()) {
 }
 
 function parseServiceEventsLine(line) {
-  if (typeof line !== 'string' || line.length > 32768) return { available: false, reason: 'invalid-response', events: [] };
+  if (typeof line !== 'string') return { available: false, reason: 'invalid-response', events: [] };
+  if (line.length > 32768) return { available: false, reason: 'response-line-too-large', events: [] };
+  let response;
   try {
-    const response = JSON.parse(line);
+    response = JSON.parse(line);
+  } catch {
+    return { available: false, reason: 'invalid-json', events: [] };
+  }
+  try {
     const events = response?.result?.events;
     if (response?.version !== 1 || response?.id !== 'desktop-events') return { available: false, reason: 'invalid-envelope', events: [] };
     if (response?.ok !== true) return { available: false, reason: ['response-too-large', 'unsupported-request', 'unauthorized'].includes(response?.error) ? response.error : 'service-error', events: [] };
@@ -64,7 +70,7 @@ function parseServiceEventsLine(line) {
     }));
     return { available: true, events: safeEvents };
   } catch {
-    return { available: false, reason: 'invalid-response', events: [] };
+    return { available: false, reason: 'invalid-event-list', events: [] };
   }
 }
 

@@ -49,7 +49,8 @@ test('service events parser accepts only bounded, typed event summaries', () => 
   assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: [{ ...event, risk: 'Unknown' }] } })).reason, 'invalid-event-risk');
   assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: false, error: 'response-too-large' })).reason, 'response-too-large');
   assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: Array(13).fill(event) } })).available, false);
-  assert.equal(parseServiceEventsLine('x'.repeat(32769)).available, false);
+  assert.equal(parseServiceEventsLine('x'.repeat(32769)).reason, 'response-line-too-large');
+  assert.equal(parseServiceEventsLine('{bad json').reason, 'invalid-json');
 });
 
 test('service event history and status writes use bounded versioned pipe requests', async () => {
