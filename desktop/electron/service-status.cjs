@@ -18,7 +18,27 @@ function parseServiceStatusLine(line, now = Date.now()) {
   }
 }
 
-function readServiceStatus({ platform = process.platform, connect = net.createConnection, timeoutMs = 2500 } = {}) {
+function parseServiceEventsLine(line) {
+  if (typeof line !== 'string' || line.length > 32768) return { available: false, reason: 'invalid-response', events: [] };
+  try {
+    const response = JSON.parse(line);
+    const events = response?.result?.events;
+    if (response?.version !== 1 || response?.id !== 'desktop-events' || response?.ok !== true ||
+        !Array.isArray(events) || events.length > 12 || events.some(event =>
+          !Number.isSafeInteger(event?.id) || event.id <= 0 || typeof event?.timestamp !== 'string' ||
+          !Number.isFinite(Date.parse(event.timestamp)) ||
+          !['Information', 'Low', 'Moderate', 'High', 'Critical'].includes(event?.risk) ||
+          !['New', 'Reviewed', 'FalsePositive'].includes(event?.status) ||
+          typeof event?.category !== 'string' || typeof event?.application !== 'string' ||
+          typeof event?.explanation !== 'string' || typeof event?.recommendation !== 'string'))
+      return { available: false, reason: 'invalid-response', events: [] };
+    return { available: true, events };
+  } catch {
+    return { available: false, reason: 'invalid-response', events: [] };
+  }
+}
+
+function queryServicePipe({ platform, connect, timeoutMs, request, maxResponseChars, parse }) {
   if (platform !== 'win32') return Promise.resolve({ available: false, reason: 'unsupported-platform' });
   return new Promise(resolve => {
     let settled = false;
@@ -33,16 +53,45 @@ function readServiceStatus({ platform = process.platform, connect = net.createCo
     const socket = connect(PIPE_PATH);
     const timer = setTimeout(() => finish({ available: false, reason: 'timeout' }), timeoutMs);
     socket.setEncoding('utf8');
-    socket.on('connect', () => socket.write('{"id":"desktop-health","version":1,"method":"status"}\n'));
+    socket.on('connect', () => socket.write(request));
     socket.on('data', chunk => {
       buffer += chunk;
-      if (buffer.length > 4096) return finish({ available: false, reason: 'invalid-response' });
+      if (buffer.length > maxResponseChars) return finish({ available: false, reason: 'invalid-response' });
       const newline = buffer.indexOf('\n');
-      if (newline >= 0) finish(parseServiceStatusLine(buffer.slice(0, newline).replace(/\r$/, '')));
+      if (newline >= 0) finish(parse(buffer.slice(0, newline).replace(/\r$/, '')));
     });
     socket.on('error', () => finish({ available: false, reason: 'unavailable' }));
-    socket.on('end', () => finish(parseServiceStatusLine(buffer.replace(/\r?\n$/, ''))));
+    socket.on('end', () => finish(parse(buffer.replace(/\r?\n$/, ''))));
   });
 }
 
-module.exports = { PIPE_PATH, parseServiceStatusLine, readServiceStatus };
+function readServiceStatus(options = {}) {
+  return queryServicePipe({ platform: options.platform ?? process.platform, connect: options.connect ?? net.createConnection,
+    timeoutMs: options.timeoutMs ?? 2500, request: '{"id":"desktop-health","version":1,"method":"status"}\n',
+    maxResponseChars: 4096, parse: line => parseServiceStatusLine(line, options.now ?? Date.now()) });
+}
+
+function readServiceEvents(options = {}) {
+  return queryServicePipe({ platform: options.platform ?? process.platform, connect: options.connect ?? net.createConnection,
+    timeoutMs: options.timeoutMs ?? 2500, request: '{"id":"desktop-events","version":1,"method":"recentEvents"}\n',
+    maxResponseChars: 32768, parse: parseServiceEventsLine });
+}
+
+function updateServiceEventStatus(eventId, status, options = {}) {
+  if (!Number.isSafeInteger(eventId) || eventId <= 0 || !['Reviewed', 'FalsePositive'].includes(status))
+    return Promise.resolve({ available: false, reason: 'invalid-request' });
+  const request = JSON.stringify({ id: 'desktop-event-status', version: 1, method: 'eventStatus', eventId, status }) + '\n';
+  const parse = line => {
+    if (typeof line !== 'string' || line.length > 4096) return { available: false, reason: 'invalid-response' };
+    try {
+      const response = JSON.parse(line);
+      if (response?.version !== 1 || response?.id !== 'desktop-event-status' || response?.ok !== true || response?.result?.updated !== true)
+        return { available: false, reason: 'update-failed' };
+      return { available: true };
+    } catch { return { available: false, reason: 'invalid-response' }; }
+  };
+  return queryServicePipe({ platform: options.platform ?? process.platform, connect: options.connect ?? net.createConnection,
+    timeoutMs: options.timeoutMs ?? 2500, request, maxResponseChars: 4096, parse });
+}
+
+module.exports = { PIPE_PATH, parseServiceStatusLine, parseServiceEventsLine, readServiceStatus, readServiceEvents, updateServiceEventStatus };

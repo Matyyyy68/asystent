@@ -5,6 +5,7 @@
 - F04 — nowe profile domyślnie mają AutoUpdateCertFeed=true; legacy JSON bez tej właściwości przyjmuje nowy default, a jawne false zachowuje się po restarcie magazynu. Test Engine IPC potwierdza brak pobierania przed pierwszym collect i wyłącza feed przed testowymi cyklami, więc nie wykonuje live requestu. node scripts/test-engine.cjs: PASS.
 - Aktualna bramka lokalna: .NET 450 PASS + 2 środowiskowe SKIP; desktop 90/90, lint, produkcyjny Vite build 1584 modułów; Engine publish/IPC, Setup Release build (0 warnings/errors), --wizard-self-test, checker produktu i macierzy luk PASS.
 - Po dodaniu zależności głównego statusu UI od heartbeat usługi SCM: desktop 91/91 PASS; lint TypeScript/Node oraz produkcyjny Vite build (1584 moduły) PASS. Nowy test potwierdza „Ochrona ograniczona” przy braku statusu usługi i normalny status tylko przy jej potwierdzeniu. Windows CI dla tej zmiany jest w toku.
+- Kanał historii usługi: `Sentinel.Service --self-test` weryfikuje status, limitowane zdarzenia oraz `Reviewed` przez trzy osobne połączenia pipe; desktop 93/93 pokrywa walidację zdarzeń, rozmiar odpowiedzi i status-write; Service Release build 0 warnings/errors. Rzeczywiste żądania Node do działającej SCM usługi uruchamia krok `test-service-scm.ps1` na Windows CI; nie wykonano go lokalnie, bo usługi nie instalowano na komputerze użytkownika.
 
 - `npm test --prefix desktop`: PASS, 90/90, w tym testy wersjonowanego status pipe i klienta Node przez kontrolowany transport.
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).

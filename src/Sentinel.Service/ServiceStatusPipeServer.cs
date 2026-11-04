@@ -7,11 +7,15 @@ using System.Text.Json;
 namespace Sentinel.Service;
 
 internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid, ServiceHealthSnapshot health,
-    string? pipeName = null, Action<Exception>? onError = null)
+    string? pipeName = null, Action<Exception>? onError = null,
+    Func<CancellationToken, Task<IReadOnlyList<ServiceEventSummary>>>? readRecentEvents = null,
+    Func<long, string, CancellationToken, Task<bool>>? updateEventStatus = null)
 {
     public const string PipeName = "SentinelAI.Service.Status.v1";
     private const int MaximumRequestChars = 1024;
+    private const int MaximumResponseChars = 32_768;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
+    private static readonly JsonSerializerOptions ResponseJsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string pipeName = pipeName ?? PipeName;
     private readonly Action<Exception>? onError = onError;
     private readonly PipeSecurity pipeSecurity = CreatePipeSecurity(allowedUserSid);
@@ -74,10 +78,13 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
             Console.Error.WriteLine("SELF_TEST_FAILED status-pipe-health");
             return false;
         }
-        if (ReadStatusRequestId("{\"id\":\"self_test-1\",\"version\":1,\"method\":\"status\"}") != "self_test-1" ||
-            ReadStatusRequestId("{\"id\":\"self_test-1\",\"version\":1,\"method\":\"status\",\"extra\":true}") is not null ||
-            ReadStatusRequestId("{\"id\":\"bad id\",\"version\":1,\"method\":\"status\"}") is not null ||
-            ReadStatusRequestId("not-json") is not null)
+        if (ReadPipeRequest("{\"id\":\"self_test-1\",\"version\":1,\"method\":\"status\"}")?.Method != "status" ||
+            ReadPipeRequest("{\"id\":\"self_test-2\",\"version\":1,\"method\":\"recentEvents\"}")?.Method != "recentEvents" ||
+            ReadPipeRequest("{\"id\":\"self_test-3\",\"version\":1,\"method\":\"eventStatus\",\"eventId\":1,\"status\":\"Reviewed\"}")?.EventId != 1 ||
+            ReadPipeRequest("{\"id\":\"self_test-1\",\"version\":1,\"method\":\"status\",\"extra\":true}") is not null ||
+            ReadPipeRequest("{\"id\":\"bad id\",\"version\":1,\"method\":\"status\"}") is not null ||
+            ReadPipeRequest("{\"id\":\"self_test-4\",\"version\":1,\"method\":\"eventStatus\",\"eventId\":1,\"status\":\"New\"}") is not null ||
+            ReadPipeRequest("not-json") is not null)
         {
             Console.Error.WriteLine("SELF_TEST_FAILED status-pipe-protocol-validation");
             return false;
@@ -106,23 +113,22 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         var health = new ServiceHealthSnapshot();
         health.MarkCollectionSucceeded(DateTimeOffset.UtcNow);
         var stage = "start-server";
+        var changedEventStatus = false;
         var server = new ServiceStatusPipeServer(userSid, health, testPipeName,
-            exception => Console.Error.WriteLine($"SELF_TEST_STATUS_PIPE_SERVER_ERROR {exception.Message} type={exception.InnerException?.GetType().Name} hresult=0x{exception.InnerException?.HResult:X8} message={exception.InnerException?.Message.Replace('\r', ' ').Replace('\n', ' ')}"));
+            exception => Console.Error.WriteLine($"SELF_TEST_STATUS_PIPE_SERVER_ERROR {exception.Message} type={exception.InnerException?.GetType().Name} hresult=0x{exception.InnerException?.HResult:X8} message={exception.InnerException?.Message.Replace('\r', ' ').Replace('\n', ' ')}"),
+            _ => Task.FromResult<IReadOnlyList<ServiceEventSummary>>([new(1, DateTimeOffset.UtcNow, "Low", "Fixture", "Synthetic", "Fixture event", "Review", "New", null, "service", "test", null, 1, null, null, null, [], [])]),
+            (id, status, _) => { changedEventStatus = id == 1 && status == "Reviewed"; return Task.FromResult(changedEventStatus); });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cancellation.Token);
+        bool Fail(string check) { Console.Error.WriteLine("SELF_TEST_FAILED status-pipe-runtime-" + check); return false; }
         try
         {
-            using var pipe = new NamedPipeClientStream(".", testPipeName, PipeDirection.InOut,
-                PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
             stage = "connect-client";
-            await pipe.ConnectAsync(cancellation.Token);
-            using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 1024, leaveOpen: true);
-            await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
             stage = "write-request";
-            await writer.WriteLineAsync("{\"id\":\"runtime-self-test\",\"version\":1,\"method\":\"status\"}".AsMemory(), cancellation.Token);
+            var responseLine = await SendSelfTestRequestAsync(testPipeName,
+                "{\"id\":\"runtime-self-test\",\"version\":1,\"method\":\"status\"}", cancellation.Token);
             stage = "read-response";
-            var responseLine = await reader.ReadLineAsync(cancellation.Token);
-            if (responseLine is null) return false;
+            if (responseLine is null) return Fail(stage);
             stage = "validate-response";
             using var response = JsonDocument.Parse(responseLine, new JsonDocumentOptions { MaxDepth = 4 });
             var root = response.RootElement;
@@ -134,9 +140,36 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                 !result.TryGetProperty("lastCollectionAtUtc", out var timestamp) || timestamp.ValueKind != JsonValueKind.String)
             {
                 Console.Error.WriteLine("SELF_TEST_FAILED status-pipe-runtime-response");
-                return false;
+                return Fail(stage);
             }
-            return true;
+            stage = "events-request";
+            var eventsLine = await SendSelfTestRequestAsync(testPipeName,
+                "{\"id\":\"events-self-test\",\"version\":1,\"method\":\"recentEvents\"}", cancellation.Token);
+            if (eventsLine is null) return Fail(stage);
+            using (var eventsResponse = JsonDocument.Parse(eventsLine, new JsonDocumentOptions { MaxDepth = 8 }))
+            {
+                var eventsRoot = eventsResponse.RootElement;
+                if (!eventsRoot.TryGetProperty("id", out var eventsId) || eventsId.GetString() != "events-self-test" ||
+                    !eventsRoot.TryGetProperty("ok", out var eventsOk) || eventsOk.ValueKind != JsonValueKind.True ||
+                    !eventsRoot.TryGetProperty("result", out var eventsResult) ||
+                    !eventsResult.TryGetProperty("events", out var eventItems) || eventItems.ValueKind != JsonValueKind.Array || eventItems.GetArrayLength() != 1)
+                {
+                    Console.Error.WriteLine("SELF_TEST_STATUS_PIPE_EVENTS_RESPONSE " + eventsLine[..Math.Min(eventsLine.Length, 512)]);
+                    return Fail(stage);
+                }
+            }
+            stage = "event-status-request";
+            var updateLine = await SendSelfTestRequestAsync(testPipeName,
+                "{\"id\":\"event-status-self-test\",\"version\":1,\"method\":\"eventStatus\",\"eventId\":1,\"status\":\"Reviewed\"}", cancellation.Token);
+            if (updateLine is null) return Fail(stage);
+            using (var updateResponse = JsonDocument.Parse(updateLine, new JsonDocumentOptions { MaxDepth = 8 }))
+            {
+                var updateRoot = updateResponse.RootElement;
+                if (!updateRoot.TryGetProperty("ok", out var updateOk) || updateOk.ValueKind != JsonValueKind.True ||
+                    !updateRoot.TryGetProperty("result", out var updateResult) || !updateResult.TryGetProperty("updated", out var updated) || updated.ValueKind != JsonValueKind.True)
+                    return Fail(stage);
+            }
+            return changedEventStatus || Fail(stage);
         }
         catch (Exception exception)
         {
@@ -149,6 +182,17 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
             try { await serverTask; }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         }
+    }
+
+    private static async Task<string?> SendSelfTestRequestAsync(string pipeName, string request, CancellationToken cancellationToken)
+    {
+        using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut,
+            PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
+        await pipe.ConnectAsync(cancellationToken);
+        using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 1024, leaveOpen: true);
+        await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
+        await writer.WriteLineAsync(request.AsMemory(), cancellationToken);
+        return await reader.ReadLineAsync(cancellationToken);
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -192,21 +236,21 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                     continue;
                 }
 
-                var requestId = ReadStatusRequestId(request);
-                if (requestId is null)
+                var pipeRequest = ReadPipeRequest(request);
+                if (pipeRequest is null)
                 {
                     await WriteResponseAsync(writer, new { id = "", version = 1, ok = false, error = "unsupported-request" }, timeout.Token);
                     continue;
                 }
-                var snapshot = health.GetResponse(DateTimeOffset.UtcNow);
                 stage = "write-response";
-                await WriteResponseAsync(writer, new
+                object response = pipeRequest.Method switch
                 {
-                    id = requestId,
-                    version = 1,
-                    ok = true,
-                    result = new { state = snapshot.State, lastCollectionAtUtc = snapshot.LastCollectionAtUtc }
-                }, timeout.Token);
+                    "status" => StatusResponse(pipeRequest.Id),
+                    "recentEvents" when readRecentEvents is not null => await EventsResponseAsync(pipeRequest.Id, timeout.Token),
+                    "eventStatus" when updateEventStatus is not null => await EventStatusResponseAsync(pipeRequest, timeout.Token),
+                    _ => new { id = pipeRequest.Id, version = 1, ok = false, error = "unsupported-request" }
+                };
+                await WriteResponseAsync(writer, response, timeout.Token);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             catch (Exception exception)
@@ -233,26 +277,55 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         throw new InvalidDataException("Status pipe request exceeded the size limit.");
     }
 
-    private static string? ReadStatusRequestId(string request)
+    private object StatusResponse(string requestId)
+    {
+        var snapshot = health.GetResponse(DateTimeOffset.UtcNow);
+        return new { id = requestId, version = 1, ok = true, result = new { state = snapshot.State, lastCollectionAtUtc = snapshot.LastCollectionAtUtc } };
+    }
+
+    private async Task<object> EventsResponseAsync(string requestId, CancellationToken cancellationToken)
+    {
+        var events = await readRecentEvents!(cancellationToken);
+        return new { id = requestId, version = 1, ok = true, result = new { events } };
+    }
+
+    private async Task<object> EventStatusResponseAsync(PipeRequest request, CancellationToken cancellationToken)
+    {
+        var updated = await updateEventStatus!(request.EventId!.Value, request.Status!, cancellationToken);
+        return new { id = request.Id, version = 1, ok = true, result = new { updated } };
+    }
+
+    private static PipeRequest? ReadPipeRequest(string request)
     {
         try
         {
             using var document = JsonDocument.Parse(request, new JsonDocumentOptions { MaxDepth = 4 });
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 3 ||
+            if (root.ValueKind != JsonValueKind.Object ||
                 !root.TryGetProperty("version", out var version) || version.ValueKind != JsonValueKind.Number || !version.TryGetInt32(out var versionNumber) || versionNumber != 1 ||
-                !root.TryGetProperty("method", out var method) || method.ValueKind != JsonValueKind.String || method.GetString() != "status" ||
+                !root.TryGetProperty("method", out var method) || method.ValueKind != JsonValueKind.String ||
                 !root.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String) return null;
             var value = id.GetString();
-            return value is not null && value.Length is > 0 and <= 64 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')
-                ? value
-                : null;
+            if (value is null || value.Length is 0 or > 64 || !value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')) return null;
+            var methodName = method.GetString();
+            if (methodName is "status" or "recentEvents")
+                return root.EnumerateObject().Count() == 3 ? new PipeRequest(value, methodName, null, null) : null;
+            if (methodName == "eventStatus" && root.EnumerateObject().Count() == 5 &&
+                root.TryGetProperty("eventId", out var eventId) && eventId.TryGetInt64(out var numericId) && numericId > 0 &&
+                root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String && status.GetString() is "Reviewed" or "FalsePositive")
+                return new PipeRequest(value, methodName, numericId, status.GetString());
+            return null;
         }
         catch (JsonException) { return null; }
     }
 
-    private static Task WriteResponseAsync<T>(StreamWriter writer, T response, CancellationToken cancellationToken) =>
-        writer.WriteLineAsync(JsonSerializer.Serialize(response).AsMemory(), cancellationToken);
+    private static async Task WriteResponseAsync<T>(StreamWriter writer, T response, CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(response, ResponseJsonOptions);
+        if (json.Length > MaximumResponseChars)
+            json = "{\"id\":\"\",\"version\":1,\"ok\":false,\"error\":\"response-too-large\"}";
+        await writer.WriteLineAsync(json.AsMemory(), cancellationToken);
+    }
 
     private static bool IsReservedSid(SecurityIdentifier sid) =>
         sid.Value.Equals(new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null).Value, StringComparison.OrdinalIgnoreCase) ||
@@ -262,3 +335,10 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
     private static void AddFullControl(PipeSecurity security, SecurityIdentifier sid) =>
         security.AddAccessRule(new PipeAccessRule(sid, PipeAccessRights.FullControl, AccessControlType.Allow));
 }
+
+internal sealed record PipeRequest(string Id, string Method, long? EventId, string? Status);
+internal sealed record ServiceEventSummary(long Id, DateTimeOffset Timestamp, string Risk, string Category,
+    string Application, string Explanation, string Recommendation, string Status, Guid? EventId,
+    string? Source, string? RuleVersion, int? Confidence, int SchemaVersion, int? ProcessId,
+    string? ProcessName, Guid? CorrelationId, IReadOnlyList<string> EvidenceCodes,
+    IReadOnlyList<string> AnalysisLimitations);

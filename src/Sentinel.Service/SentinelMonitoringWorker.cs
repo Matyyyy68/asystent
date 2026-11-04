@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Sentinel.Service;
 
@@ -33,7 +34,8 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         ServiceLog.Write("CORE_FIRST_COLLECTION_COMPLETED");
         if (allowedUserSid is not null)
         {
-            statusPipe = new ServiceStatusPipeServer(allowedUserSid, health);
+            statusPipe = new ServiceStatusPipeServer(allowedUserSid, health,
+                readRecentEvents: ReadRecentEventsAsync, updateEventStatus: UpdateEventStatusAsync);
             statusPipeTask = statusPipe.RunAsync(cancellationToken);
         }
     }
@@ -88,6 +90,73 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             throw new InvalidDataException("Sentinel Engine rejected a service collection cycle.");
         health.MarkCollectionSucceeded(DateTimeOffset.UtcNow);
     }
+
+    private async Task<IReadOnlyList<ServiceEventSummary>> ReadRecentEventsAsync(CancellationToken cancellationToken)
+    {
+        var process = engine ?? throw new IOException("Sentinel Engine is not available.");
+        var response = await process.SendAsync("{\"id\":\"service-history\",\"version\":1,\"method\":\"history\"}", cancellationToken);
+        using var document = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 16 });
+        if (!document.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
+            !document.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Sentinel Engine returned an invalid history response.");
+
+        var events = new List<ServiceEventSummary>(12);
+        foreach (var item in result.EnumerateArray().Take(12))
+        {
+            if (!item.TryGetProperty("id", out var id) || !id.TryGetInt64(out var eventId) || eventId <= 0 ||
+                !item.TryGetProperty("timestamp", out var timestamp) || !timestamp.TryGetDateTimeOffset(out var observedAt) ||
+                !TryText(item, "risk", 32, out var risk) || !TryText(item, "status", 32, out var status) ||
+                !TryText(item, "category", 128, out var category) || !TryText(item, "application", 128, out var application) ||
+                !TryText(item, "explanation", 768, out var explanation) || !TryText(item, "recommendation", 512, out var recommendation))
+                continue;
+            if (risk is not ("Information" or "Low" or "Moderate" or "High" or "Critical") ||
+                status is not ("New" or "Reviewed" or "FalsePositive")) continue;
+
+            events.Add(new ServiceEventSummary(eventId, observedAt, risk, category, application, explanation,
+                recommendation, status, ReadGuid(item, "eventId"), ReadText(item, "source", 64), ReadText(item, "ruleVersion", 64),
+                ReadNullableInt(item, "confidence"), ReadInt(item, "schemaVersion", 1), ReadNullableInt(item, "processId"),
+                ReadText(item, "processName", 128), ReadGuid(item, "correlationId"), ReadStringArray(item, "evidenceCodes", 12, 96),
+                ReadStringArray(item, "analysisLimitations", 8, 96)));
+        }
+        return events;
+    }
+
+    private async Task<bool> UpdateEventStatusAsync(long eventId, string status, CancellationToken cancellationToken)
+    {
+        if (eventId <= 0 || status is not ("Reviewed" or "FalsePositive")) return false;
+        var process = engine ?? throw new IOException("Sentinel Engine is not available.");
+        var request = JsonSerializer.Serialize(new { id = "service-event-status", version = 1, method = "eventStatus", eventId, status },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var response = await process.SendAsync(request, cancellationToken);
+        using var document = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 8 });
+        return document.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True;
+    }
+
+    private static bool TryText(JsonElement element, string property, int maxLength, out string value)
+    {
+        value = ReadText(element, property, maxLength) ?? string.Empty;
+        return value.Length > 0;
+    }
+
+    private static string? ReadText(JsonElement element, string property, int maxLength) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() is { } text ? text[..Math.Min(text.Length, maxLength)] : null
+            : null;
+
+    private static int ReadInt(JsonElement element, string property, int fallback) =>
+        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var parsed) ? parsed : fallback;
+
+    private static int? ReadNullableInt(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var parsed) ? parsed : null;
+
+    private static Guid? ReadGuid(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String && value.TryGetGuid(out var parsed) ? parsed : null;
+
+    private static IReadOnlyList<string> ReadStringArray(JsonElement element, string property, int maxItems, int maxLength) =>
+        element.TryGetProperty(property, out var values) && values.ValueKind == JsonValueKind.Array
+            ? values.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Take(maxItems)
+                .Select(value => value.GetString() is { } text ? text[..Math.Min(text.Length, maxLength)] : string.Empty).ToArray()
+            : Array.Empty<string>();
 
     private void StopEngine()
     {
