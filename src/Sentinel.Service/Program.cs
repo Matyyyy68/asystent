@@ -12,10 +12,12 @@ internal static class Program
             var directorySecurityValid = SecureServiceDataDirectory.ValidateDirectorySecurity();
             var restartBackoffValid = new ServiceRestartBackoff().SelfTest();
             var statusPipeValid = ServiceStatusPipeServer.SelfTest();
+            var historyFieldReadersValid = SentinelMonitoringWorker.HistoryFieldReadersSelfTest();
             if (!directorySecurityValid) Console.Error.WriteLine("SELF_TEST_FAILED directory-security");
             if (!restartBackoffValid) Console.Error.WriteLine("SELF_TEST_FAILED restart-backoff");
             if (!statusPipeValid) Console.Error.WriteLine("SELF_TEST_FAILED status-pipe");
-            return directorySecurityValid && restartBackoffValid && statusPipeValid ? 0 : 1;
+            if (!historyFieldReadersValid) Console.Error.WriteLine("SELF_TEST_FAILED history-field-readers");
+            return directorySecurityValid && restartBackoffValid && statusPipeValid && historyFieldReadersValid ? 0 : 1;
         }
         if (args.Length == 1 && args[0].Equals("--console", StringComparison.OrdinalIgnoreCase))
         {

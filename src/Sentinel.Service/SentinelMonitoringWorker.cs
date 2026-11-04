@@ -102,17 +102,17 @@ internal sealed class SentinelMonitoringWorker : IDisposable
 
         var history = result.EnumerateArray().ToArray();
         var page = afterEventId is { } after
-            ? history.Where(item => item.TryGetProperty("id", out var id) && id.TryGetInt64(out var value) && value > after)
-                .OrderBy(item => item.GetProperty("id").GetInt64()).Take(12).ToArray()
+            ? history.Where(item => TryReadEventId(item, out var value) && value > after)
+                .OrderBy(item => ReadEventId(item)).Take(12).ToArray()
             : beforeEventId is { } before
-                ? history.Where(item => item.TryGetProperty("id", out var id) && id.TryGetInt64(out var value) && value < before)
-                    .OrderByDescending(item => item.GetProperty("id").GetInt64()).Take(12).ToArray()
+                ? history.Where(item => TryReadEventId(item, out var value) && value < before)
+                    .OrderByDescending(item => ReadEventId(item)).Take(12).ToArray()
                 : history.Take(12).ToArray();
         var events = new List<ServiceEventSummary>(page.Length);
         foreach (var item in page)
         {
-            if (!item.TryGetProperty("id", out var id) || !id.TryGetInt64(out var eventId) || eventId <= 0 ||
-                !item.TryGetProperty("timestamp", out var timestamp) || !timestamp.TryGetDateTimeOffset(out var observedAt) ||
+            if (item.ValueKind != JsonValueKind.Object || !TryReadEventId(item, out var eventId) || eventId <= 0 ||
+                !item.TryGetProperty("timestamp", out var timestamp) || timestamp.ValueKind != JsonValueKind.String || !timestamp.TryGetDateTimeOffset(out var observedAt) ||
                 !TryText(item, "risk", 32, out var risk) || !TryText(item, "status", 32, out var status) ||
                 !TryText(item, "category", 128, out var category) || !TryText(item, "application", 128, out var application) ||
                 !TryText(item, "explanation", 768, out var explanation) || !TryText(item, "recommendation", 512, out var recommendation))
@@ -152,10 +152,40 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             : null;
 
     private static int ReadInt(JsonElement element, string property, int fallback) =>
-        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var parsed) ? parsed : fallback;
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var parsed) ? parsed : fallback;
 
     private static int? ReadNullableInt(JsonElement element, string property) =>
-        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var parsed) ? parsed : null;
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var parsed) ? parsed : null;
+
+    private static bool TryReadEventId(JsonElement item, out long eventId)
+    {
+        eventId = 0;
+        return item.ValueKind == JsonValueKind.Object && item.TryGetProperty("id", out var id) &&
+            id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out eventId);
+    }
+
+    private static long ReadEventId(JsonElement item) =>
+        TryReadEventId(item, out var eventId) ? eventId : throw new InvalidDataException("Service history page contains an invalid event id.");
+
+    public static bool HistoryFieldReadersSelfTest()
+    {
+        using var document = JsonDocument.Parse("""{"valid":17,"numericString":"18","object":{"value":19},"array":[20],"nullValue":null}""");
+        using var eventId = JsonDocument.Parse("""{"id":21}""");
+        using var stringEventId = JsonDocument.Parse("""{"id":"21"}""");
+        using var objectEventId = JsonDocument.Parse("""{"id":{"value":21}}""");
+        using var nonObject = JsonDocument.Parse("[]");
+        var root = document.RootElement;
+        return ReadInt(root, "valid", -1) == 17 && ReadInt(root, "numericString", -1) == -1 &&
+            ReadInt(root, "object", -1) == -1 && ReadInt(root, "array", -1) == -1 &&
+            ReadNullableInt(root, "valid") == 17 && ReadNullableInt(root, "numericString") is null &&
+            ReadNullableInt(root, "object") is null && ReadNullableInt(root, "array") is null &&
+            ReadNullableInt(root, "nullValue") is null && ReadNullableInt(nonObject.RootElement, "valid") is null &&
+            TryReadEventId(eventId.RootElement, out var numericId) && numericId == 21 &&
+            !TryReadEventId(stringEventId.RootElement, out _) && !TryReadEventId(objectEventId.RootElement, out _) &&
+            !TryReadEventId(nonObject.RootElement, out _);
+    }
 
     private static Guid? ReadGuid(JsonElement element, string property) =>
         element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String && value.TryGetGuid(out var parsed) ? parsed : null;
