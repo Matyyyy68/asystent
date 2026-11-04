@@ -6,7 +6,9 @@ readServiceStatus({ timeoutMs: 5000 }).then(async status => {
     process.exitCode = 1;
     return;
   }
-  const history = await readServiceEvents({ timeoutMs: 5000 });
+  const history = await readServiceEvents({ timeoutMs: 5000, onDiagnostic: diagnostic => {
+    console.error(`DIAGNOSTIC: service history parse failure ${JSON.stringify(diagnostic)}`);
+  } });
   if (!history.available || !Array.isArray(history.events) || history.events.length > 12) {
     console.error(`FAIL: Electron named-pipe client could not read bounded Service history (${history.reason || 'invalid response'}).`);
     process.exitCode = 1;

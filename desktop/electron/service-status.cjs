@@ -18,13 +18,20 @@ function parseServiceStatusLine(line, now = Date.now()) {
   }
 }
 
-function parseServiceEventsLine(line) {
+function parseServiceEventsLine(line, framing = 'unknown', onDiagnostic = null) {
   if (typeof line !== 'string') return { available: false, reason: 'invalid-response', events: [] };
   if (line.length > 32768) return { available: false, reason: 'response-line-too-large', events: [] };
   let response;
   try {
     response = JSON.parse(line);
-  } catch {
+  } catch (error) {
+    const position = typeof error?.message === 'string' ? /position (\d+)/i.exec(error.message)?.[1] : undefined;
+    try {
+      onDiagnostic?.({ reason: 'invalid-json', responseLength: line.length, framing,
+        firstCharacterCode: line.length ? line.charCodeAt(0) : null,
+        lastCharacterCode: line.length ? line.charCodeAt(line.length - 1) : null,
+        parseErrorPosition: position === undefined ? null : Number(position) });
+    } catch { /* Diagnostics must never affect parsing or pipe handling. */ }
     return { available: false, reason: 'invalid-json', events: [] };
   }
   try {
@@ -96,12 +103,12 @@ function queryServicePipe({ platform, connect, timeoutMs, request, maxResponseCh
       if (newline >= 0) {
         const lineLength = newline - (buffer[newline - 1] === '\r' ? 1 : 0);
         if (lineLength > maxResponseChars) return finish({ available: false, reason: 'response-line-too-large' });
-        return finish(parse(buffer.slice(0, newline).replace(/\r$/, '')));
+        return finish(parse(buffer.slice(0, newline).replace(/\r$/, ''), 'newline'));
       }
       if (buffer.length > maxResponseChars + 1) finish({ available: false, reason: 'response-line-too-large' });
     });
     socket.on('error', () => finish({ available: false, reason: 'unavailable' }));
-    socket.on('end', () => finish(parse(buffer.replace(/\r?\n$/, ''))));
+    socket.on('end', () => finish(parse(buffer.replace(/\r?\n$/, ''), 'end')));
   });
 }
 
@@ -118,7 +125,7 @@ function readServiceEvents(options = {}) {
     ...(options.afterEventId === undefined ? {} : { afterEventId: options.afterEventId }) }) + '\n';
   return queryServicePipe({ platform: options.platform ?? process.platform, connect: options.connect ?? net.createConnection,
     timeoutMs: options.timeoutMs ?? 2500, request,
-    maxResponseChars: 32768, parse: parseServiceEventsLine });
+    maxResponseChars: 32768, parse: (line, framing) => parseServiceEventsLine(line, framing, options.onDiagnostic) });
 }
 
 function updateServiceEventStatus(eventId, status, options = {}) {

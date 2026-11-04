@@ -116,3 +116,23 @@ test('service pipe rejects oversized response lines with a safe reason code', as
   };
   assert.equal((await readServiceEvents({ platform: 'win32', connect })).reason, 'response-line-too-large');
 });
+
+test('service history diagnostics report framing and parse position without response contents', async () => {
+  const connect = () => {
+    const socket = new EventEmitter();
+    socket.setEncoding = () => {};
+    socket.destroy = () => {};
+    socket.write = () => process.nextTick(() => socket.emit('data', '{"broken":\n'));
+    process.nextTick(() => socket.emit('connect'));
+    return socket;
+  };
+  let diagnostic;
+  const result = await readServiceEvents({ platform: 'win32', connect, onDiagnostic: value => { diagnostic = value; } });
+  assert.equal(result.reason, 'invalid-json');
+  assert.equal(diagnostic.reason, 'invalid-json');
+  assert.equal(diagnostic.responseLength, 10);
+  assert.equal(diagnostic.framing, 'newline');
+  assert.equal(diagnostic.firstCharacterCode, 123);
+  assert.ok(diagnostic.parseErrorPosition === null || Number.isSafeInteger(diagnostic.parseErrorPosition));
+  assert.equal(Object.hasOwn(diagnostic, 'response'), false);
+});
