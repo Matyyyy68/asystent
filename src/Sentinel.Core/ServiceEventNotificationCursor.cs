@@ -8,6 +8,8 @@ public sealed class ServiceEventNotificationCursor
 {
     private readonly string path;
     public long LastEventId { get; private set; }
+    public bool IsInitialized { get; private set; }
+    public bool CanNotifyForNewEvents => IsInitialized;
 
     public ServiceEventNotificationCursor(string path)
     {
@@ -21,6 +23,7 @@ public sealed class ServiceEventNotificationCursor
             var value = Encoding.ASCII.GetString(buffer, 0, length);
             if (length <= 24 && long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0)
                 LastEventId = parsed;
+                IsInitialized = true;
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -29,7 +32,7 @@ public sealed class ServiceEventNotificationCursor
     public bool TryAdvance(long eventId)
     {
         if (eventId < 0) throw new ArgumentOutOfRangeException(nameof(eventId));
-        if (eventId <= LastEventId) return true;
+        if (eventId < LastEventId || (eventId == LastEventId && IsInitialized)) return true;
         var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("Cursor path has no parent directory.");
         var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -38,6 +41,7 @@ public sealed class ServiceEventNotificationCursor
             File.WriteAllText(temporaryPath, eventId.ToString(CultureInfo.InvariantCulture), new UTF8Encoding(false));
             File.Move(temporaryPath, path, overwrite: true);
             LastEventId = eventId;
+            IsInitialized = true;
             return true;
         }
         catch (IOException) { return false; }

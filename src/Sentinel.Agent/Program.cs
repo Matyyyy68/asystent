@@ -325,10 +325,12 @@ internal static class Program
             if (!serviceEventPollingGate.TryBegin(DateTimeOffset.UtcNow, serviceEventNotificationPreferenceKnown, shutdown.IsCancellationRequested)) return;
             try
             {
-                var events = notificationsEnabled
+                var notifyForNewEvents = notificationsEnabled && serviceEventNotificationCursor.CanNotifyForNewEvents;
+                var initializeNotificationCursor = notificationsEnabled && !notifyForNewEvents;
+                var events = notifyForNewEvents
                     ? await SystemServiceEventsClient.ReadRecentAsync(serviceEventNotificationCursor.LastEventId, shutdown.Token)
                     : await SystemServiceEventsClient.ReadLatestAsync(shutdown.Token);
-                if (notificationsEnabled)
+                if (notifyForNewEvents)
                 {
                     foreach (var eventId in events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
                     {
@@ -340,6 +342,8 @@ internal static class Program
                 }
                 if (events.Count > 0)
                     _ = serviceEventNotificationCursor.TryAdvance(events.Max(item => item.Id));
+                else if (initializeNotificationCursor)
+                    _ = serviceEventNotificationCursor.TryAdvance(serviceEventNotificationCursor.LastEventId);
             }
             catch { /* Service event notifications are best-effort and never interrupt user-session collection. */ }
             finally { serviceEventPollingGate.Complete(); }

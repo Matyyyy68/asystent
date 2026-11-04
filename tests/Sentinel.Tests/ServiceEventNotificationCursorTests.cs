@@ -14,8 +14,12 @@ public sealed class ServiceEventNotificationCursorTests
         {
             var first = new ServiceEventNotificationCursor(path);
             Assert.Equal(0, first.LastEventId);
+            Assert.False(first.IsInitialized);
+            Assert.False(first.CanNotifyForNewEvents);
             Assert.True(first.TryAdvance(12));
             Assert.Equal(12, first.LastEventId);
+            Assert.True(first.IsInitialized);
+            Assert.True(first.CanNotifyForNewEvents);
 
             var restarted = new ServiceEventNotificationCursor(path);
             Assert.Equal(12, restarted.LastEventId);
@@ -41,7 +45,13 @@ public sealed class ServiceEventNotificationCursorTests
         {
             Directory.CreateDirectory(directory);
             File.WriteAllText(path, new string('9', 10_000));
-            Assert.Equal(0, new ServiceEventNotificationCursor(path).LastEventId);
+            var cursor = new ServiceEventNotificationCursor(path);
+            Assert.Equal(0, cursor.LastEventId);
+            Assert.False(cursor.IsInitialized);
+            Assert.False(cursor.CanNotifyForNewEvents);
+            Assert.True(cursor.TryAdvance(0));
+            Assert.True(cursor.IsInitialized);
+            Assert.True(cursor.CanNotifyForNewEvents);
         }
         finally
         {
