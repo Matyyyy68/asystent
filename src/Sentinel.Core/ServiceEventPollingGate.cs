@@ -7,9 +7,9 @@ public sealed class ServiceEventPollingGate
     private DateTimeOffset? lastAttemptAtUtc;
     private bool inFlight;
 
-    public bool TryBegin(DateTimeOffset nowUtc, bool notificationsEnabled, bool shutdownRequested)
+    public bool TryBegin(DateTimeOffset nowUtc, bool preferenceKnown, bool shutdownRequested)
     {
-        if (!notificationsEnabled || shutdownRequested || inFlight ||
+        if (!preferenceKnown || shutdownRequested || inFlight ||
             (lastAttemptAtUtc is { } last && nowUtc - last < MinimumInterval))
             return false;
 

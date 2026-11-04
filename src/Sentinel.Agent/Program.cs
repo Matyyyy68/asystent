@@ -41,6 +41,7 @@ internal static class Program
             try
             {
                 _ = await SystemServiceEventsClient.ReadRecentAsync(0, CancellationToken.None);
+                _ = await SystemServiceEventsClient.ReadLatestAsync(CancellationToken.None);
                 return 0;
             }
             catch { return 1; }
@@ -157,6 +158,7 @@ internal static class Program
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
         private bool notificationsEnabled;
+        private bool serviceEventNotificationPreferenceKnown;
         private bool collecting;
         private bool disposed;
 
@@ -164,7 +166,9 @@ internal static class Program
         {
             var appRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
             engine = new EngineProxy(Path.Combine(AppContext.BaseDirectory, "Sentinel.Engine.exe"));
-            notificationsEnabled = serviceEventNotificationPreferences.Read() ?? false;
+            var savedNotificationPreference = serviceEventNotificationPreferences.Read();
+            notificationsEnabled = savedNotificationPreference ?? false;
+            serviceEventNotificationPreferenceKnown = savedNotificationPreference.HasValue;
             _ = dispatcher.Handle;
             var menu = new ContextMenuStrip();
             menu.Items.Add("Otwórz Sentinel AI", null, (_, _) => OpenUi(appRoot));
@@ -267,8 +271,9 @@ internal static class Program
                 tray.Text = "Sentinel AI — silnik działa w tle";
                 var notifications = result.TryGetProperty("notifications", out var enabled) && enabled.GetBoolean();
                 notificationsEnabled = notifications;
+                serviceEventNotificationPreferenceKnown = true;
                 _ = serviceEventNotificationPreferences.TryWrite(notifications);
-                if (notifications) await CheckSystemServiceEventsAsync();
+                await CheckSystemServiceEventsAsync();
                 var detections = result.TryGetProperty("detections", out var count) && count.TryGetInt32(out var total) ? total : 0;
                 if (notifications && detections > 0)
                     NotifyOnce("dns-reputation", "Sentinel AI — ostrzeżenie", "W cache DNS wykryto adres z lokalnie sprawdzanej listy reputacji. Ruch nie został zablokowany.", ToolTipIcon.Warning);
@@ -317,17 +322,21 @@ internal static class Program
 
         private async Task CheckSystemServiceEventsAsync()
         {
-            if (!serviceEventPollingGate.TryBegin(DateTimeOffset.UtcNow, notificationsEnabled, shutdown.IsCancellationRequested)) return;
+            if (!serviceEventPollingGate.TryBegin(DateTimeOffset.UtcNow, serviceEventNotificationPreferenceKnown, shutdown.IsCancellationRequested)) return;
             try
             {
-                var events = await SystemServiceEventsClient.ReadRecentAsync(serviceEventNotificationCursor.LastEventId, shutdown.Token);
-                if (!notificationsEnabled) return;
-                foreach (var eventId in events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
+                var events = notificationsEnabled
+                    ? await SystemServiceEventsClient.ReadRecentAsync(serviceEventNotificationCursor.LastEventId, shutdown.Token)
+                    : await SystemServiceEventsClient.ReadLatestAsync(shutdown.Token);
+                if (notificationsEnabled)
                 {
-                    if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
-                    NotifyOnce("service-event-" + eventId, "Sentinel AI — nowe zdarzenie",
-                        "Usługa ochrony systemowej wykryła zdarzenie wymagające sprawdzenia. Otwórz Sentinel AI, aby zobaczyć szczegóły.",
-                        ToolTipIcon.Warning);
+                    foreach (var eventId in events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
+                    {
+                        if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
+                        NotifyOnce("service-event-" + eventId, "Sentinel AI — nowe zdarzenie",
+                            "Usługa ochrony systemowej wykryła zdarzenie wymagające sprawdzenia. Otwórz Sentinel AI, aby zobaczyć szczegóły.",
+                            ToolTipIcon.Warning);
+                    }
                 }
                 if (events.Count > 0)
                     _ = serviceEventNotificationCursor.TryAdvance(events.Max(item => item.Id));

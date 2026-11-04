@@ -13,6 +13,14 @@ internal static class SystemServiceEventsClient
     public static async Task<IReadOnlyList<SystemServiceEvent>> ReadRecentAsync(long afterEventId, CancellationToken cancellationToken)
     {
         if (afterEventId < 0) throw new ArgumentOutOfRangeException(nameof(afterEventId));
+        return await ReadAsync(new { id = "agent-events", version = 1, method = "recentEvents", afterEventId }, cancellationToken);
+    }
+
+    public static async Task<IReadOnlyList<SystemServiceEvent>> ReadLatestAsync(CancellationToken cancellationToken) =>
+        await ReadAsync(new { id = "agent-events", version = 1, method = "recentEvents" }, cancellationToken);
+
+    private static async Task<IReadOnlyList<SystemServiceEvent>> ReadAsync(object requestPayload, CancellationToken cancellationToken)
+    {
         await using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
         await pipe.ConnectAsync(1_500, cancellationToken);
@@ -20,7 +28,7 @@ internal static class SystemServiceEventsClient
         timeout.CancelAfter(TimeSpan.FromSeconds(2));
         using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 1024, leaveOpen: true);
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
-        var request = JsonSerializer.Serialize(new { id = "agent-events", version = 1, method = "recentEvents", afterEventId });
+        var request = JsonSerializer.Serialize(requestPayload);
         await writer.WriteLineAsync(request.AsMemory(), timeout.Token);
         var line = await reader.ReadLineAsync(timeout.Token) ?? throw new EndOfStreamException("System service returned no event response.");
         if (line.Length > MaximumResponseChars) throw new InvalidDataException("System service event response exceeded its size limit.");
