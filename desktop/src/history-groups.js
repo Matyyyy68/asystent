@@ -34,3 +34,4 @@ export function groupHistoryEvents(events, query = '') {
   return [...groups.values()].filter(group => !normalizedQuery ||
     group.events.some(event => JSON.stringify(event).toLocaleLowerCase().includes(normalizedQuery)));
 }
+

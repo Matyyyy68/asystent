@@ -38,3 +38,4 @@ test('wires the information toggle into the history UI without changing exports'
   assert.match(ui, /call\('historyExport'\)/);
   assert.match(ui, /call\('historyExportCsv'\)/);
 });
+

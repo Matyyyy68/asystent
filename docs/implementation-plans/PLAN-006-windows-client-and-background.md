@@ -35,3 +35,4 @@
 
 
 **F13 — naprawa odczytu autostartu dla ścieżek ze spacjami (2026-10-26):** oficjalny Electron v45.0.0 zawiera poprawkę, której brak w używanym 44.9.1 powodował, że `app.getLoginItemSettings()` nie znajdował wpisu Run dla ścieżki typu `...\Sentinel AI.exe` ([PR 54419](https://releases.electronjs.org/pr/54419)). Zaktualizowano Electron do 45.0.0; sprawdzony `preload.cjs` nie używa sandboxowanych globali usuniętych w tej wersji. Dodano runner-only test integracyjny, który z jawną zgodą środowiska CI włącza, odczytuje ścieżkę z odstępami i argument `--minimized`, po czym wyłącza oraz weryfikuje usunięcie własnego wpisu HKCU; test odmówi nadpisania istniejącego wpisu. Lokalne testy statyczne i 53/53 PASS, pełny Windows CI oczekuje. To nie symuluje rzeczywistego logowania/restartu Windows.
+

@@ -77,3 +77,4 @@ function call(method, data = {}) {
   }
   process.exitCode = outcome;
 })();
+

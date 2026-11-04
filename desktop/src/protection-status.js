@@ -33,3 +33,4 @@ export function getProtectionStatus(status, firstRun, firstAssessment, machineSe
   }
   return { title: 'Monitorowanie działa', description: 'Dostępne źródła działają lokalnie. Sentinel nie blokuje ruchu ani nie zastępuje ochrony antywirusowej Windows.' };
 }
+

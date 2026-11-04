@@ -36,8 +36,10 @@ function parseServiceEventsLine(line, framing = 'unknown', onDiagnostic = null) 
   }
   try {
     const events = response?.result?.events;
+    const latestEventId = response?.result?.latestEventId;
     if (response?.version !== 1 || response?.id !== 'desktop-events') return { available: false, reason: 'invalid-envelope', events: [] };
     if (response?.ok !== true) return { available: false, reason: ['response-too-large', 'unsupported-request', 'unauthorized'].includes(response?.error) ? response.error : 'service-error', events: [] };
+    if (!Number.isSafeInteger(latestEventId) || latestEventId < 0) return { available: false, reason: 'invalid-latest-event-id', events: [] };
     if (!Array.isArray(events) || events.length > 12) return { available: false, reason: 'invalid-event-list', events: [] };
     const invalidField = events.map(event => {
       if (!Number.isSafeInteger(event?.id) || event.id <= 0) return 'event-id';
@@ -75,7 +77,7 @@ function parseServiceEventsLine(line, framing = 'unknown', onDiagnostic = null) 
       evidenceCodes: stringList(event.evidenceCodes, 12, 96),
       analysisLimitations: stringList(event.analysisLimitations, 8, 96)
     }));
-    return { available: true, events: safeEvents };
+    return { available: true, latestEventId, events: safeEvents };
   } catch {
     return { available: false, reason: 'invalid-event-list', events: [] };
   }
@@ -149,3 +151,4 @@ function updateServiceEventStatus(eventId, status, options = {}) {
 }
 
 module.exports = { PIPE_PATH, parseServiceStatusLine, parseServiceEventsLine, readServiceStatus, readServiceEvents, updateServiceEventStatus };
+

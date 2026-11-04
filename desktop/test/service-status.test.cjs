@@ -38,17 +38,18 @@ test('service events parser accepts only bounded, typed event summaries', () => 
   const event = { id: 1, timestamp: '2026-11-04T12:00:00.000Z', risk: 'Moderate', status: 'New',
     category: 'Process', application: 'Synthetic', explanation: 'Test only', recommendation: 'Review',
     processImagePath: 'C:\\private\\secret.exe', processImageSha256: 'private-hash', quarantined: true, serviceEventId: 77 };
-  const valid = parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: [event] } }));
+  const valid = parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { latestEventId: 2, events: [event] } }));
   assert.equal(valid.available, true);
   assert.equal(valid.events[0].application, 'Synthetic');
   assert.equal(valid.events[0].processImagePath, undefined);
   assert.equal(valid.events[0].processImageSha256, undefined);
   assert.equal(valid.events[0].quarantined, undefined);
   assert.equal(valid.events[0].serviceEventId, undefined);
-  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: [{ ...event, risk: 'Unknown' }] } })).available, false);
-  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: [{ ...event, risk: 'Unknown' }] } })).reason, 'invalid-event-risk');
+  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { latestEventId: 2, events: [{ ...event, risk: 'Unknown' }] } })).available, false);
+  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { latestEventId: 2, events: [{ ...event, risk: 'Unknown' }] } })).reason, 'invalid-event-risk');
   assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: false, error: 'response-too-large' })).reason, 'response-too-large');
-  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: Array(13).fill(event) } })).available, false);
+  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { latestEventId: 20, events: Array(13).fill(event) } })).available, false);
+  assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { latestEventId: -1, events: [] } })).reason, 'invalid-latest-event-id');
   assert.equal(parseServiceEventsLine('x'.repeat(32769)).reason, 'response-line-too-large');
   assert.equal(parseServiceEventsLine('{bad json').reason, 'invalid-json');
 });
@@ -57,7 +58,7 @@ test('service event history and status writes use bounded versioned pipe request
   const event = { id: 2, timestamp: '2026-11-04T12:00:00.000Z', risk: 'Low', status: 'New',
     category: 'Synthetic', application: 'Test', explanation: 'Fixture', recommendation: 'Review' };
   let request = '';
-  let response = { id: 'desktop-events', version: 1, ok: true, result: { events: [event] } };
+  let response = { id: 'desktop-events', version: 1, ok: true, result: { latestEventId: 2, events: [event] } };
   const connect = pipe => {
     assert.equal(pipe, PIPE_PATH);
     const socket = new EventEmitter();
@@ -90,7 +91,7 @@ test('service event history and status writes use bounded versioned pipe request
 test('service pipe response limit excludes Windows CRLF line terminators', async () => {
   const event = { id: 3, timestamp: '2026-11-04T12:00:00.000Z', risk: 'Low', status: 'New',
     category: 'Synthetic', application: 'Fixture', explanation: 'Fixture', recommendation: 'Review' };
-  const base = { id: 'desktop-events', version: 1, ok: true, result: { events: [event] }, padding: '' };
+  const base = { id: 'desktop-events', version: 1, ok: true, result: { latestEventId: 2, events: [event] }, padding: '' };
   const emptyLine = JSON.stringify(base);
   const line = JSON.stringify({ ...base, padding: 'x'.repeat(32768 - emptyLine.length) });
   assert.equal(line.length, 32768);
@@ -141,3 +142,4 @@ test('service history diagnostics report framing and parse position without resp
   assert.ok(diagnostic.parseErrorPosition === null || Number.isSafeInteger(diagnostic.parseErrorPosition));
   assert.equal(Object.hasOwn(diagnostic, 'response'), false);
 });
+

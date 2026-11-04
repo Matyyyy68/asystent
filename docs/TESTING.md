@@ -46,3 +46,4 @@ Lokalny pełny packaging pozostaje niedostępny bez przywrócenia wymaganej zale
 - `npm test --prefix desktop`: 87/87 PASS; testy sprawdzają grupowanie równoległych wezwań z Explorera, deduplikację, limit 15 elementów, kolejkę podczas aktywnego sprawdzania, rozdzielenie SHA-256 od Authenticode, brak listy i sanitację nazwy.
 - `dotnet build installer/Sentinel.Setup/Sentinel.Setup.csproj --no-restore`: PASS, 0 ostrzeżeń i błędów.
 - Testy nie odtwarzają rzeczywistego wielokrotnego zaznaczenia w Explorerze ani widoczności pozycji menu na czystych Windows 10/11; ten gate pozostaje wymagany.
+

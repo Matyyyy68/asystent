@@ -20,3 +20,4 @@ public sealed class ServiceEventPollingGate
 
     public void Complete() => inFlight = false;
 }
+

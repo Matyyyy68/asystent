@@ -25,10 +25,13 @@ public sealed class ServiceEventNotificationCursorTests
             Assert.Equal(12, restarted.LastEventId);
             Assert.True(restarted.TryAdvance(11));
             Assert.Equal(12, restarted.LastEventId);
+            Assert.True(restarted.TryResetToLatest(3));
+            Assert.Equal(3, restarted.LastEventId);
             Assert.True(restarted.TryAdvance(24));
 
             Assert.Equal(24, new ServiceEventNotificationCursor(path).LastEventId);
             Assert.Throws<ArgumentOutOfRangeException>(() => restarted.TryAdvance(-1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => restarted.TryResetToLatest(-1));
         }
         finally
         {
@@ -59,3 +62,4 @@ public sealed class ServiceEventNotificationCursorTests
         }
     }
 }
+

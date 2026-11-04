@@ -327,12 +327,15 @@ internal static class Program
             {
                 var notifyForNewEvents = notificationsEnabled && serviceEventNotificationCursor.CanNotifyForNewEvents;
                 var initializeNotificationCursor = notificationsEnabled && !notifyForNewEvents;
-                var events = notifyForNewEvents
+                var batch = notifyForNewEvents
                     ? await SystemServiceEventsClient.ReadRecentAsync(serviceEventNotificationCursor.LastEventId, shutdown.Token)
                     : await SystemServiceEventsClient.ReadLatestAsync(shutdown.Token);
-                if (notifyForNewEvents)
+                var historyReset = notifyForNewEvents && batch.LatestEventId < serviceEventNotificationCursor.LastEventId;
+                if (historyReset)
+                    _ = serviceEventNotificationCursor.TryResetToLatest(batch.LatestEventId);
+                else if (notifyForNewEvents)
                 {
-                    foreach (var eventId in events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
+                    foreach (var eventId in batch.Events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
                     {
                         if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
                         NotifyOnce("service-event-" + eventId, "Sentinel AI — nowe zdarzenie",
@@ -340,10 +343,12 @@ internal static class Program
                             ToolTipIcon.Warning);
                     }
                 }
-                if (events.Count > 0)
-                    _ = serviceEventNotificationCursor.TryAdvance(events.Max(item => item.Id));
+                if (!notificationsEnabled)
+                    _ = serviceEventNotificationCursor.TryResetToLatest(batch.LatestEventId);
+                else if (batch.Events.Count > 0 && !historyReset)
+                    _ = serviceEventNotificationCursor.TryAdvance(batch.Events.Max(item => item.Id));
                 else if (initializeNotificationCursor)
-                    _ = serviceEventNotificationCursor.TryAdvance(serviceEventNotificationCursor.LastEventId);
+                    _ = serviceEventNotificationCursor.TryResetToLatest(batch.LatestEventId);
             }
             catch { /* Service event notifications are best-effort and never interrupt user-session collection. */ }
             finally { serviceEventPollingGate.Complete(); }
@@ -575,3 +580,4 @@ internal static class Program
         }
     }
 }
+

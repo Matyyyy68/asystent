@@ -91,7 +91,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         health.MarkCollectionSucceeded(DateTimeOffset.UtcNow);
     }
 
-    private async Task<IReadOnlyList<ServiceEventSummary>> ReadRecentEventsAsync(long? afterEventId, long? beforeEventId, CancellationToken cancellationToken)
+    private async Task<ServiceEventPage> ReadRecentEventsAsync(long? afterEventId, long? beforeEventId, CancellationToken cancellationToken)
     {
         var process = engine ?? throw new IOException("Sentinel Engine is not available.");
         var response = await process.SendAsync("{\"id\":\"service-history\",\"version\":1,\"method\":\"history\"}", cancellationToken);
@@ -101,6 +101,8 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             throw new InvalidDataException("Sentinel Engine returned an invalid history response.");
 
         var history = result.EnumerateArray().ToArray();
+        var latestEventId = history.Where(item => TryReadEventId(item, out _))
+            .Select(ReadEventId).DefaultIfEmpty(0).Max();
         var page = afterEventId is { } after
             ? history.Where(item => TryReadEventId(item, out var value) && value > after)
                 .OrderBy(item => ReadEventId(item)).Take(12).ToArray()
@@ -126,7 +128,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
                 ReadText(item, "processName", 128), ReadGuid(item, "correlationId"), ReadStringArray(item, "evidenceCodes", 12, 96),
                 ReadStringArray(item, "analysisLimitations", 8, 96)));
         }
-        return events;
+        return new ServiceEventPage(latestEventId, events);
     }
 
     private async Task<bool> UpdateEventStatusAsync(long eventId, string status, CancellationToken cancellationToken)
@@ -279,3 +281,4 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         }
     }
 }
+

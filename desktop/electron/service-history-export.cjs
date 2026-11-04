@@ -102,3 +102,4 @@ async function includeServiceHistoryInCsvExport(filePath, readPage) {
 }
 
 module.exports = { PAGE_SIZE, SERVICE_HISTORY_LIMIT, readRetainedServiceHistory, includeServiceHistoryInJsonExport, includeServiceHistoryInCsvExport };
+

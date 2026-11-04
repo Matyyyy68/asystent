@@ -4,3 +4,4 @@ export interface VisibleHistoryEvent {
 }
 
 export function visibleHistoryEvents<T extends VisibleHistoryEvent>(events: T[], includeInformational?: boolean): T[];
+

@@ -31,3 +31,4 @@ Jeżeli inne urządzenie pokazuje zupełnie inny, systemowy interfejs, w pierwsz
 Ilustracje stron kreatora są kompilowane jako `EmbeddedResource`: `welcome`, `prepare`, `configure`, `installing`, `complete`, `error`, `system-check` i `rollback-ready`. Brak lub uszkodzenie zasobu zapisuje diagnostykę i blokuje przejście dalej zamiast pokazywać niekompletny interfejs. `--self-test` sprawdza wszystkie zasoby oraz ikonę w opublikowanym pliku.
 
 Build sprawdza źródłowe pliki ikony i ilustracji przed usunięciem poprzednich wyników. Odrzuca niekompletną bibliotekę, a `scripts/build-user.ps1` czyści współdzielony katalog silników przed publikacją obu programów, aby pozostałości poprzedniego buildu nie trafiały do instalatora.
+

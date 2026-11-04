@@ -111,5 +111,6 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - Rozszerzyć wspólną korelację między źródłami, inwentaryzację informacji dostępnych podczas pierwszej analizy oraz bezpieczne, uzasadnione reakcje. Nie implementować twierdzeń o blokadzie bez działającego mechanizmu.
 - Dodać podpisany manifest i bezpieczny updater aplikacji; aktualny check jedynie wskazuje stronę stabilnego wydania. WSC nie określa nazwy alternatywnego AV; szczegółowe sygnatury Defendera są zależne od dostępu WMI.
 - Zweryfikować widoczność menu Explorer i dźwięk w aktywnej sesji na czystym fizycznym Windows. Bieżące CI testuje runner izolowany.
-- Licencję źródeł wskaże właściciel później; nie wybierać jej bez jego decyzji. Prerelease v0.15.39 opublikowano 2026-10-29 jako niepodpisany instalator; nowsze zmiany `main` nie są jeszcze w tym artefakcie. Licencję produktu wskaże właściciel później.
+- Licencję źródeł wskaże właściciel później; nie wybierać jej bez jego decyzji. CI zbudował artefakt v0.15.39, ale nie został on podpisany ani opublikowany; publicznym wydaniem pozostaje v0.15.38.
 - Nie oznaczać celu jako ukończonego do czasu domknięcia pozostałych punktów lub jawnego zawężenia zlecenia przez właściciela.
+

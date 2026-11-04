@@ -62,3 +62,4 @@ test('groups matching event ids from user and service stores without dropping ei
   assert.deepEqual(groups[1].events.map(event => event.id), [45]);
   assert.equal(groups.flatMap(group => group.events).length, events.length);
 });
+

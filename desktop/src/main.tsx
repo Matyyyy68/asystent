@@ -142,3 +142,4 @@ function App() {
     <footer>Analiza lokalna · Brak wykrycia nie potwierdza bezpieczeństwa</footer></main></div>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);
+

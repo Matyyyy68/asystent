@@ -22,3 +22,4 @@ export interface HistoryGroup {
 }
 
 export function groupHistoryEvents(events: readonly HistoryEvent[], query?: string): HistoryGroup[];
+

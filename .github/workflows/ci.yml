@@ -152,3 +152,4 @@ jobs:
           if ($LASTEXITCODE) { throw 'Enterprise API build failed' }
           python server/scripts/test-api.py
           if ($LASTEXITCODE) { throw 'Enterprise API HTTP smoke test failed' }
+

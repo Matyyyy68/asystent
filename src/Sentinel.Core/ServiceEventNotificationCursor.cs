@@ -18,12 +18,20 @@ public sealed class ServiceEventNotificationCursor
         try
         {
             using var stream = new FileStream(this.path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var buffer = new byte[25];
-            var length = stream.Read(buffer, 0, buffer.Length);
+            var buffer = new byte[20];
+            var length = 0;
+            while (length < buffer.Length)
+            {
+                var read = stream.Read(buffer, length, buffer.Length - length);
+                if (read == 0) break;
+                length += read;
+            }
             var value = Encoding.ASCII.GetString(buffer, 0, length);
-            if (length <= 24 && long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0)
+            if (length is > 0 and <= 19 && long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) && parsed >= 0)
+            {
                 LastEventId = parsed;
                 IsInitialized = true;
+            }
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -33,6 +41,18 @@ public sealed class ServiceEventNotificationCursor
     {
         if (eventId < 0) throw new ArgumentOutOfRangeException(nameof(eventId));
         if (eventId < LastEventId || (eventId == LastEventId && IsInitialized)) return true;
+        return TryWrite(eventId);
+    }
+
+    public bool TryResetToLatest(long latestEventId)
+    {
+        if (latestEventId < 0) throw new ArgumentOutOfRangeException(nameof(latestEventId));
+        if (latestEventId == LastEventId && IsInitialized) return true;
+        return TryWrite(latestEventId);
+    }
+
+    private bool TryWrite(long eventId)
+    {
         var directory = Path.GetDirectoryName(path) ?? throw new InvalidOperationException("Cursor path has no parent directory.");
         var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
@@ -52,3 +72,4 @@ public sealed class ServiceEventNotificationCursor
         }
     }
 }
+

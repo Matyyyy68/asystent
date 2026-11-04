@@ -61,3 +61,4 @@ public interface ISettingsRepository
     Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default);
     Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default);
 }
+

@@ -33,3 +33,4 @@ readServiceStatus({ timeoutMs: 5000 }).then(async status => {
   console.error(`FAIL: Electron named-pipe client failed (${error.name}).`);
   process.exitCode = 1;
 });
+

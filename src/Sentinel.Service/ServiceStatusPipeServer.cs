@@ -9,7 +9,7 @@ namespace Sentinel.Service;
 
 internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid, ServiceHealthSnapshot health,
     string? pipeName = null, Action<Exception>? onError = null,
-    Func<long?, long?, CancellationToken, Task<IReadOnlyList<ServiceEventSummary>>>? readRecentEvents = null,
+    Func<long?, long?, CancellationToken, Task<ServiceEventPage>>? readRecentEvents = null,
     Func<long, string, CancellationToken, Task<bool>>? updateEventStatus = null)
 {
     public const string PipeName = "SentinelAI.Service.Status.v1";
@@ -122,8 +122,8 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         var changedEventStatus = false;
         var server = new ServiceStatusPipeServer(userSid, health, testPipeName,
             exception => Console.Error.WriteLine($"SELF_TEST_STATUS_PIPE_SERVER_ERROR {exception.Message} type={exception.InnerException?.GetType().Name} hresult=0x{exception.InnerException?.HResult:X8} message={exception.InnerException?.Message.Replace('\r', ' ').Replace('\n', ' ')}"),
-            (afterEventId, beforeEventId, _) => Task.FromResult<IReadOnlyList<ServiceEventSummary>>(
-                (beforeEventId is { } before
+            (afterEventId, beforeEventId, _) => Task.FromResult(
+                new ServiceEventPage(12, (beforeEventId is { } before
                     ? Enumerable.Range(1, 12).Where(id => id < before).OrderByDescending(id => id).Select(id => new ServiceEventSummary(id, DateTimeOffset.UtcNow, "Low",
                         "older", "fixture", "cursor page", "review", "New", null,
                         "service", "test", null, 1, null, null, null, [], []))
@@ -131,7 +131,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                         ? Enumerable.Range(1, 12).Select(id => new ServiceEventSummary(id, DateTimeOffset.UtcNow, "Low",
                             new string('ż', 128), new string('ą', 128), new string('ł', 768), new string('ź', 512), "New", null,
                             "service", "test", null, 1, null, null, null, [], []))
-                        : Enumerable.Empty<ServiceEventSummary>()).ToArray()),
+                        : Enumerable.Empty<ServiceEventSummary>()).ToArray())),
             (id, status, _) => { changedEventStatus = id == 1 && status == "Reviewed"; return Task.FromResult(changedEventStatus); });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cancellation.Token);
@@ -167,6 +167,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                 if (!eventsRoot.TryGetProperty("id", out var eventsId) || eventsId.GetString() != "events-self-test" ||
                     !eventsRoot.TryGetProperty("ok", out var eventsOk) || eventsOk.ValueKind != JsonValueKind.True ||
                     !eventsRoot.TryGetProperty("result", out var eventsResult) ||
+                    !eventsResult.TryGetProperty("latestEventId", out var latestEventId) || !latestEventId.TryGetInt64(out var latestId) || latestId != 12 ||
                     !eventsResult.TryGetProperty("events", out var eventItems) || eventItems.ValueKind != JsonValueKind.Array ||
                     eventItems.GetArrayLength() is < 1 or > 12 || eventsLine.Length > MaximumResponseChars)
                 {
@@ -342,10 +343,11 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
 
     private async Task<object> EventsResponseAsync(string requestId, long? afterEventId, long? beforeEventId, CancellationToken cancellationToken)
     {
-        var events = (await readRecentEvents!(afterEventId, beforeEventId, cancellationToken)).Take(12).ToArray();
+        var page = await readRecentEvents!(afterEventId, beforeEventId, cancellationToken);
+        var events = page.Events.Take(12).ToArray();
         while (true)
         {
-            var response = new { id = requestId, version = 1, ok = true, result = new { events } };
+            var response = new { id = requestId, version = 1, ok = true, result = new { latestEventId = page.LatestEventId, events } };
             if (JsonSerializer.Serialize(response, ResponseJsonOptions).Length <= MaximumResponseChars) return response;
             if (events.Length == 0) return new { id = requestId, version = 1, ok = false, error = "response-too-large" };
             events = events[..^1];
@@ -414,8 +416,10 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
 }
 
 internal sealed record PipeRequest(string Id, string Method, long? EventId, string? Status, long? AfterEventId, long? BeforeEventId);
+internal sealed record ServiceEventPage(long LatestEventId, IReadOnlyList<ServiceEventSummary> Events);
 internal sealed record ServiceEventSummary(long Id, DateTimeOffset Timestamp, string Risk, string Category,
     string Application, string Explanation, string Recommendation, string Status, Guid? EventId,
     string? Source, string? RuleVersion, int? Confidence, int SchemaVersion, int? ProcessId,
     string? ProcessName, Guid? CorrelationId, IReadOnlyList<string> EvidenceCodes,
     IReadOnlyList<string> AnalysisLimitations);
+

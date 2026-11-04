@@ -16,3 +16,4 @@ export function getProtectionStatus(
   firstAssessment: 'waiting' | 'running' | 'complete' | 'failed',
   machineService?: MachineServiceStatus | null
 ): ProtectionStatusView;
+

@@ -437,3 +437,4 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
  } catch (error) { console.error(error); process.exitCode = 1; }
  finally { clearTimeout(timeout); if (tcpMonitorClient) tcpMonitorClient.destroy(); if (tcpMonitorServer) await new Promise(resolve => tcpMonitorServer.close(resolve)); if (udpSocket) udpSocket.close(); if (ollamaServer) await new Promise(resolve => ollamaServer.close(resolve)); child.stdin.end(); child.on('exit', () => rmSync(root, { recursive: true, force: true })); }
 })();
+

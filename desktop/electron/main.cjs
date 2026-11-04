@@ -236,3 +236,4 @@ app.whenReady().then(() => {
 });
 app.on('before-quit', () => { quitting = true; });
 }
+

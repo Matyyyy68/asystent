@@ -68,3 +68,4 @@ test('CSV export appends service events with source labels, formula neutralizati
   assert.match(csv, /"service-9".*"'=?HYPERLINK/u);
   assert.match(csv, /"system-service"\r\n/u);
 });
+

@@ -10,16 +10,16 @@ internal static class SystemServiceEventsClient
     private const string PipeName = "SentinelAI.Service.Status.v1";
     private const int MaximumResponseChars = 32_768;
 
-    public static async Task<IReadOnlyList<SystemServiceEvent>> ReadRecentAsync(long afterEventId, CancellationToken cancellationToken)
+    public static async Task<SystemServiceEventBatch> ReadRecentAsync(long afterEventId, CancellationToken cancellationToken)
     {
         if (afterEventId < 0) throw new ArgumentOutOfRangeException(nameof(afterEventId));
         return await ReadAsync(new { id = "agent-events", version = 1, method = "recentEvents", afterEventId }, cancellationToken);
     }
 
-    public static async Task<IReadOnlyList<SystemServiceEvent>> ReadLatestAsync(CancellationToken cancellationToken) =>
+    public static async Task<SystemServiceEventBatch> ReadLatestAsync(CancellationToken cancellationToken) =>
         await ReadAsync(new { id = "agent-events", version = 1, method = "recentEvents" }, cancellationToken);
 
-    private static async Task<IReadOnlyList<SystemServiceEvent>> ReadAsync(object requestPayload, CancellationToken cancellationToken)
+    private static async Task<SystemServiceEventBatch> ReadAsync(object requestPayload, CancellationToken cancellationToken)
     {
         await using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut,
             PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
@@ -38,7 +38,9 @@ internal static class SystemServiceEventsClient
         if (!root.TryGetProperty("id", out var id) || id.GetString() != "agent-events" ||
             !root.TryGetProperty("version", out var version) || version.GetInt32() != 1 ||
             !root.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
-            !root.TryGetProperty("result", out var result) || !result.TryGetProperty("events", out var events) ||
+            !root.TryGetProperty("result", out var result) ||
+            !result.TryGetProperty("latestEventId", out var latestEventId) || !latestEventId.TryGetInt64(out var latestId) || latestId < 0 ||
+            !result.TryGetProperty("events", out var events) ||
             events.ValueKind != JsonValueKind.Array || events.GetArrayLength() > 12)
             throw new InvalidDataException("System service returned an invalid event response.");
 
@@ -53,8 +55,10 @@ internal static class SystemServiceEventsClient
                 throw new InvalidDataException("System service returned an unknown event status.");
             parsed.Add(new SystemServiceEvent(value, statusValue));
         }
-        return parsed;
+        return new SystemServiceEventBatch(latestId, parsed);
     }
 }
 
 internal sealed record SystemServiceEvent(long Id, string Status);
+internal sealed record SystemServiceEventBatch(long LatestEventId, IReadOnlyList<SystemServiceEvent> Events);
+

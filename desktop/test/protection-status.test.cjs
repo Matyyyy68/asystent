@@ -92,3 +92,4 @@ test('reflects Windows Security Center attention and unknown health in the main 
   status.windowsSecurityCenter.firewall = 'stan dobry według Windows Security Center';
   assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
 });
+
