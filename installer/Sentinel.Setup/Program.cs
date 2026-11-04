@@ -53,6 +53,8 @@ internal static class Program
     private const int NtFileRenameInformationClass = 10;
     private const int ErrorNoMoreFiles = 18;
     private const int FileIdBothDirectoryInfoFileNameOffset = 104;
+    private const int MaximumTransientDirectoryRenameAttempts = 20;
+    private const int DirectoryRenameRetryDelayMilliseconds = 250;
     private const uint ObjectAttributesCaseInsensitive = 0x00000040;
     private const uint FileAttributeDirectory = 0x00000010;
     private const uint FileDirectoryFile = 0x00000001;
@@ -280,7 +282,7 @@ internal static class Program
                 || !uninstallMessage.Contains("simulated file lock", StringComparison.Ordinal)
                 || !uninstallMessage.Contains(LogPath, StringComparison.Ordinal))
                 throw new InvalidDataException("Okno błędu deinstalacji pomija etap, typ, HRESULT, przyczynę lub log.");
-            Console.WriteLine("UNINSTALL_GUARD_SELF_TEST_SUCCESS missingRegistrationRejected=true mismatchedPathRejected=true matchingPathAccepted=true autostartOwnership=true unrelatedAutostartPreserved=true failureLogging=true reparsePointRejected=true junctionTreeRejected=true handleEnumeration=true paginatedEnumeration=true handleContainment=true safeDirectoryCreation=true safeRename=true safeFileCreation=true safeCopy=true safeDeletion=true");
+            Console.WriteLine("UNINSTALL_GUARD_SELF_TEST_SUCCESS missingRegistrationRejected=true mismatchedPathRejected=true matchingPathAccepted=true autostartOwnership=true unrelatedAutostartPreserved=true failureLogging=true reparsePointRejected=true junctionTreeRejected=true handleEnumeration=true paginatedEnumeration=true handleContainment=true safeDirectoryCreation=true safeRename=true transientRenameRetry=true safeFileCreation=true safeCopy=true safeDeletion=true");
             return 0;
         }
         catch (Exception exception)
@@ -363,6 +365,12 @@ internal static class Program
             var safeRenameSucceeded = !Directory.Exists(renameSource)
                 && File.ReadAllText(Path.Combine(renameDestination, "marker.txt")) == "rename";
             DeleteInstallTreeSafely(renameDestination, trustedRoot);
+            if (!ShouldRetryDirectoryRename(5, 1)
+                || !ShouldRetryDirectoryRename(32, 1)
+                || !ShouldRetryDirectoryRename(33, 1)
+                || ShouldRetryDirectoryRename(5, MaximumTransientDirectoryRenameAttempts)
+                || ShouldRetryDirectoryRename(87, 1))
+                throw new InvalidDataException("Reguła ponawiania zmiany nazwy katalogu nie ogranicza się do przejściowych błędów Windows.");
             var conflictSource = Path.Combine(install, "rename-conflict-source");
             var conflictDestination = Path.Combine(install, "rename-conflict-destination");
             CreateInstallDirectorySafely(conflictSource, install, trustedRoot);
@@ -1720,12 +1728,16 @@ internal static class Program
             Marshal.Copy(encodedName, 0, IntPtr.Add(information, nameOffset), encodedName.Length);
 
             parentHandle.DangerousAddRef(ref parentReferenceAdded);
-            var status = NtSetInformationFile(sourceHandle, out _, information, (uint)bufferSize, NtFileRenameInformationClass);
-            if (status < 0)
+            for (var attempt = 1; ; attempt++)
             {
-                var error = RtlNtStatusToDosError(status);
-                throw new IOException($"Nie można bezpiecznie zmienić nazwy katalogu instalacji (Win32 {error}).",
-                    new Win32Exception((int)error));
+                var status = NtSetInformationFile(sourceHandle, out _, information, (uint)bufferSize, NtFileRenameInformationClass);
+                if (status >= 0) break;
+                var error = (int)RtlNtStatusToDosError(status);
+                if (!ShouldRetryDirectoryRename(error, attempt))
+                    throw new IOException($"Nie można bezpiecznie zmienić nazwy katalogu instalacji (Win32 {error}).",
+                        new Win32Exception(error));
+                Log($"INSTALL_RENAME_RETRY attempt={attempt} error={error}");
+                Thread.Sleep(DirectoryRenameRetryDelayMilliseconds);
             }
             EnsurePathWithinRoot(GetFinalPath(sourceHandle), finalParent, destinationPath);
         }
@@ -1735,6 +1747,9 @@ internal static class Program
             Marshal.FreeHGlobal(information);
         }
     }
+
+    internal static bool ShouldRetryDirectoryRename(int win32Error, int attempt) =>
+        attempt < MaximumTransientDirectoryRenameAttempts && win32Error is 5 or 32 or 33;
 
     private static FileStream CreateInstallFileSafely(string path, string installRoot, string? trustedRoot = null)
     {
@@ -2383,18 +2398,20 @@ internal static class Program
                     throw;
                 }
             }
-            setStage("replace", "swap_install_directory");
+            setStage("replace", "backup_existing_install");
             try { if (Directory.Exists(target)) { RenameInstallDirectorySafely(target, backup, localApplicationData); oldMoved = true; } }
             catch
             {
                 if (backgroundAgentWasRunning) try { StartBackgroundAgent(target); } catch (Exception restartError) { Log($"CORE_AGENT_RESTART_FAILED message={Clean(restartError.Message)}"); }
                 throw;
             }
+            setStage("replace", "activate_staged_install");
             try { RenameInstallDirectorySafely(staging, target, localApplicationData); }
             catch
             {
                 if (oldMoved && Directory.Exists(backup) && !Directory.Exists(target))
                 {
+                    setStage("rollback", "restore_previous_install");
                     RenameInstallDirectorySafely(backup, target, localApplicationData);
                     oldMoved = false;
                 }
