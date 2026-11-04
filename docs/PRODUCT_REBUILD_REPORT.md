@@ -2,7 +2,7 @@
 
 **Stan: etap pośredni, cel z promptu nie jest ukończony.** Raport opisuje wyłącznie aktualny kod i wyniki testów; nie potwierdza pełnej ochrony ani gotowości wydania.
 
-**Najnowszy pełny Windows CI:** [41891594622](https://github.com/Matyyyy68/asystent/actions/runs/41891594622) dla `83e1b7f` zakończył PASS: .NET 459/459, live SCM status/history pipe i Agent pipe, Electron smoke, Downloads + soak junctionów, autostart, Chrome/Edge, headless i widoczny cykl instalatora oraz Enterprise API 23/23 + HTTP smoke. CI poprzedza eksport stronicowanej historii Service i grupowanie EventId, opublikowane w commitach [`5b37e03`](https://github.com/Matyyyy68/asystent/commit/5b37e03646cc38c1146e87e164e24de155d4af95) i [`6165ca3`](https://github.com/Matyyyy68/asystent/commit/6165ca3fcde4361551fa34aebb04d5053a9355f0). Statusy dla najnowszych commitów nie zwracają jeszcze checków, więc ich Windows CI pozostaje niepotwierdzone. Wynik starszego CI nie zastępuje testu czystego, fizycznego komputera Windows.
+**Najnowszy pełny Windows CI:** [41891594622](https://github.com/Matyyyy68/asystent/actions/runs/41891594622) dla `83e1b7f` zakończył PASS: .NET 459/459, live SCM status/history pipe i Agent pipe, Electron smoke, Downloads + soak junctionów, autostart, Chrome/Edge, headless i widoczny cykl instalatora oraz Enterprise API 23/23 + HTTP smoke. CI poprzedza eksport stronicowanej historii Service (`5b37e03`), grupowanie EventId (`6165ca3`) i filtrowanie rutynowych informacji (`9a3a593`). Statusy checków dla nowych commitów pozostają puste, więc te zmiany wymagają Windows CI. Wynik starszego CI nie zastępuje testu czystego, fizycznego komputera Windows.
 
 ## 1. Interfejs
 
