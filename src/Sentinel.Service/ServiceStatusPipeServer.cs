@@ -275,7 +275,12 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
             catch (Exception exception)
             {
                 if (onError is not null) onError(new IOException("stage=" + stage, exception));
-                else ServiceLog.Write("STATUS_PIPE_REQUEST_FAILED stage=" + stage + " type=" + exception.GetType().Name);
+                else
+                {
+                    var cause = exception.InnerException ?? exception;
+                    ServiceLog.Write("STATUS_PIPE_REQUEST_FAILED stage=" + stage + " type=" + exception.GetType().Name +
+                        " causeType=" + cause.GetType().Name + " causeHResult=0x" + cause.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
+                }
                 try { await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
             }

@@ -143,7 +143,12 @@ try {
 
   $electronPipeTest = Join-Path $PSScriptRoot 'test-service-status-pipe.cjs'
   $electronPipeOutput = & node $electronPipeTest 2>&1
-  if ($LASTEXITCODE -ne 0) { throw "Electron named-pipe health client failed: $($electronPipeOutput -join ' ')" }
+  if ($LASTEXITCODE -ne 0) {
+    $pipeFailure = if (Test-Path -LiteralPath $logPath) {
+      Get-Content -LiteralPath $logPath | Where-Object { $_ -match 'STATUS_PIPE_REQUEST_FAILED' } | Select-Object -Last 1
+    } else { $null }
+    throw "Electron named-pipe health client failed: $($electronPipeOutput -join ' '); service pipe diagnostic: $pipeFailure"
+  }
   Write-Host ($electronPipeOutput -join ' ')
 
   $agentPipeClient = Join-Path $enginePublish 'Sentinel.Agent.exe'
