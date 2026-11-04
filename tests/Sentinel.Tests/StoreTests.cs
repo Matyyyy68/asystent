@@ -12,14 +12,14 @@ public sealed class StoreTests : IDisposable
     private readonly string dir = Path.Combine(Path.GetTempPath(), "sentinel-test-" + Guid.NewGuid());
     private async Task<LocalStore> Store() { var s = new LocalStore(dir); await s.InitializeAsync(); return s; }
     private static SecurityEvent Event(DateTimeOffset? time = null) => new(0,time ?? DateTimeOffset.UtcNow,RiskLevel.Information,"Test","Synthetic","Synthetic test only","No action",EventStatus.New);
-    [Fact] public async Task CertFeedAutomaticRefreshIsOptInAndSurvivesRestart()
+    [Fact] public async Task CertFeedAutomaticRefreshDefaultsOnAndAnExplicitOptOutSurvivesRestart()
     {
         var store = await Store();
-        Assert.False((await store.LoadSettingsAsync()).AutoUpdateCertFeed);
+        Assert.True((await store.LoadSettingsAsync()).AutoUpdateCertFeed);
 
-        await store.SaveSettingsAsync(new AppSettings(AutoUpdateCertFeed: true));
+        await store.SaveSettingsAsync(new AppSettings(AutoUpdateCertFeed: false));
 
-        Assert.True((await (await Store()).LoadSettingsAsync()).AutoUpdateCertFeed);
+        Assert.False((await (await Store()).LoadSettingsAsync()).AutoUpdateCertFeed);
     }
 
     [Fact] public async Task DataDirectoryPointerBoundsReadsAndRejectsInvalidOrNonLocalPaths()
@@ -1286,6 +1286,7 @@ public sealed class StoreTests : IDisposable
         Assert.True(settings.MonitorNetworkConnections);
         Assert.True(settings.MonitorDownloadedFiles);
         Assert.True(settings.MonitorPersistenceChanges);
+        Assert.True(settings.AutoUpdateCertFeed);
         Assert.Equal(10, settings.MinimumIntervalSeconds); Assert.Contains("bitwarden",settings.ExcludedApplications);
     }
     [Fact] public async Task FreshSettingsEnableLocalMonitoringWithoutCapturingForegroundText()
@@ -1297,7 +1298,7 @@ public sealed class StoreTests : IDisposable
         Assert.True(settings.MonitorPersistenceChanges);
         Assert.False(settings.MonitorForegroundChanges);
         Assert.False(settings.CollectStaticText);
-        Assert.False(settings.AutoUpdateCertFeed);
+        Assert.True(settings.AutoUpdateCertFeed);
     }
     [Theory] [InlineData(0)] [InlineData(301)]
     public async Task InvalidCollectionIntervalIsRejected(int seconds)

@@ -1,5 +1,7 @@
 # Postęp projektu Sentinel AI
 
+**F04 — automatyczna aktualizacja lokalnego feedu (2026-11-04):** nowe profile domyślnie pobierają stały feed domen CERT Polska co 24 h; nie wysyłają analizowanych adresów. Wcześniejsze ustawienie AutoUpdateCertFeed=false jest zachowywane, a opcja wyłączenia pozostaje dostępna w narzędziach zaawansowanych. Harmonogram nadal ogranicza retry do co najmniej 6 h, feed wygasa po 48 h, a testy potwierdzają domyślną wartość i zachowanie jawnego wyłączenia.
+
 ## Rejestracja usługi SCM przez instalator — 2026-11-03 (Windows CI PASS)
 
 - Instalator ma podniesiony przez jawne UAC helperowy tryb rejestracji/wyrejestrowania usługi. Helper weryfikuje SHA-256 osadzonego pakietu i kopiuje wyłącznie `resources/service` do `Program Files\Sentinel AI\Service`; katalog otrzymuje chroniony DACL (SYSTEM/Administratorzy pełna kontrola, LocalService odczyt/uruchamianie). Odrzuca punkty ponownej analizy, nieznany wpis SCM i nieznane pliki w docelowym katalogu.
@@ -53,7 +55,7 @@
 
 - Wdrożono Sentinel.Agent per-user z zasobnikiem, watchdogiem z backoffem, HKCU Run, named pipe `CurrentUserOnly`, cyklicznym `collect` i silnikiem potomnym niezależnym od okna Electron. Watchdog wznawia awarię agenta, lecz sam działa w sesji użytkownika; to **nie jest usługa Windows SCM**.
 - Instalator uruchamia agenta po świeżej instalacji i aktualizacji; przed wymianą żąda zamknięcia, a przy rollbacku próbuje przywrócić poprzedni proces.
-- Nowe profile włączają domyślnie lokalne monitorowanie procesów, Downloads, zmian trwałości i TCP/UDP oraz nie są wstrzymane; tekst aktywnego okna i automatyczne pobieranie list pozostają wyłączone. Ustawienia już zapisane nie są nadpisywane.
+- Nowe profile włączają domyślnie lokalne monitorowanie procesów, Downloads, zmian trwałości i TCP/UDP oraz nie są wstrzymane; tekst aktywnego okna pozostaje wyłączony; nowy profil odświeża stały feed domen CERT przez HTTPS co 24 godziny bez wysyłania danych analizy. Ustawienia już zapisane nie są nadpisywane.
 - Główny status bazuje na ukończeniu pierwszego sprawdzenia, pauzie i stanach wymaganych monitorów. Pokaże „Ochrona ograniczona”, gdy źródło nie działa lub jest wyłączone.
 - Aktualizacja/deinstalacja zatrzymuje agenta przez IPC przed wymianą plików. Electron odłącza się od agenta przy zamykaniu UI. Asynchroniczny błąd startu agenta jest obsługiwany.
 - Alerty lokalnych dopasowań DNS/hashy, obrazów nowych procesów, nowych połączeń TCP do lokalnej listy IP oraz zmian autostartu w lokalizacji zapisywalnej przez użytkownika mają 10-minutową deduplikację per typ i krótki dźwięk systemowy. Agent ostrzega też o stanach antywirusa/zapory oznaczonych przez Windows Security Center jako nieobserwowane, wstrzymane, wymagające uwagi lub niedostępne.

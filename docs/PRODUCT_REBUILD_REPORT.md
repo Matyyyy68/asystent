@@ -72,9 +72,11 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - `Sentinel.Agent` i jego watchdog działają w sesji użytkownika; agent odpytuje Engine niezależnie od okna Electron.
 - Watchdog wznawia awarię procesu agenta z backoffem 1–30 s; agent odtwarza proces Engine po błędzie.
 - Zamknięcie UI nie kończy Core. Instalator zatrzymuje i próbuje wznowić Core przy zmianie plików.
-- Watchdog sam nie jest odzyskiwany po awarii. Bieżący kod dodaje instalację hosta SCM jako LocalService z chronionym Program Files/ProgramData oraz oddzielny heartbeat usługi w UI. Instalator żąda jawnego UAC; UI odczytuje jedynie wersjonowany status pipe, nie przekazuje zdarzeń. Kod tej integracji nie był jeszcze zweryfikowany na Windows CI ani czystym systemie; bieżące zainstalowane wydanie nadal nie potwierdza działania przed logowaniem. Agent i usługa prowadzą oddzielne silniki i bazy, więc wspólne monitorowanie może się dublować.
+- Watchdog sam nie jest odzyskiwany po awarii. Bieżący kod dodaje instalację hosta SCM jako LocalService z chronionym Program Files/ProgramData oraz oddzielny heartbeat usługi w UI. Instalator żąda jawnego UAC; UI odczytuje jedynie wersjonowany status pipe, nie przekazuje zdarzeń. Windows CI 41734288659 i 41856785028 zweryfikował SCM, LocalService, status pipe, pełny cykl install/repair/update/uninstall i wymuszony rollback na izolowanym runnerze; start przed logowaniem nie był testowany na fizycznym systemie, a publiczne wydanie v0.15.38 nie zawiera tej nowej usługi. Agent i usługa prowadzą oddzielne silniki i bazy, więc wspólne monitorowanie może się dublować.
 
 ## 10. Prywatność i ograniczenia
+
+- Nowe profile odświeżają lokalny feed domen CERT przez stały HTTPS endpoint co 24 h; żądanie nie zawiera analizowanych adresów. Użytkownik może wyłączyć tę funkcję w narzędziach zaawansowanych; zapisane ustawienie false jest zachowane. To nie jest reputacja plików/IP ani niezależna weryfikacja wydawcy.
 
 - Domyślne obserwacje oraz historia są lokalne; SQLite nie jest szyfrowana.
 - Tekst okien, hasła, klawiatura, ekran, treść HTTPS i prywatne pliki nie są ukrycie przechwytywane ani wysyłane.

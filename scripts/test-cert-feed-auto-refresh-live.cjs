@@ -40,7 +40,7 @@ function call(method, data = {}) {
 (async () => {
   let outcome = 1;
   try {
-    assert.equal((await call('status')).result.settings.autoUpdateCertFeed, false, 'auto-refresh must be opt-in');
+    assert.equal((await call('status')).result.settings.autoUpdateCertFeed, true, 'new profiles must enable the fixed-source auto-refresh by default');
     const settings = (await call('status')).result.settings;
     const saved = await call('settings', { retentionDays: settings.retentionDays,
       notifications: settings.notifications, autoUpdateCertFeed: true });
@@ -62,7 +62,7 @@ function call(method, data = {}) {
     assert.equal(status.settings.autoUpdateCertFeed, true);
     console.log(JSON.stringify({ result: 'PASS', domainCount: status.reputation.count,
       feedFetchedAt: status.reputation.fetchedAt, feedSha256: status.reputation.version, schedulerState: status.certFeedRefresh.state,
-      autoRefreshOptIn: status.settings.autoUpdateCertFeed, analyzedUrlsSent: 0 }));
+      autoRefreshEnabled: status.settings.autoUpdateCertFeed, analyzedUrlsSent: 0 }));
     outcome = 0;
   } catch (error) {
     console.error(`CERT auto-refresh live E2E failed: ${error.message}`);

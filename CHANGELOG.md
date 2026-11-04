@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased — automatyczne reguły reputacji (2026-11-04)
+- Nowe profile domyślnie odświeżają feed domen CERT Polska co 24 godziny przez stały endpoint HTTPS. Zapytanie nie wysyła analizowanych adresów; zapisane ustawienia, w tym jawne wyłączenie, są zachowywane. Feed jest oznaczany jako wygasły po 48 godzinach, a błąd ponawia próbę nie wcześniej niż po 6 godzinach.
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
 - Instalator dodaje chronioną usługę Windows SCM działającą jako LocalService przez jawnie potwierdzany UAC; sprawdza hash payloadu, ACL, świeży pierwszy cykl, aktualizuje usługę i usuwa ją przy deinstalacji, zachowując lokalne dane. Windows CI `41731627812` ujawnił dodatkowy bit `Synchronize` w odczytanym ACE; walidator normalizuje tylko ten bit, nadal dokładnie porównując SID-y i pozostałe prawa. Pełny Windows CI `41734288659` potwierdził instalację, naprawę, aktualizację i deinstalację na izolowanym runnerze.
 - UI pobiera osobny heartbeat usługi przez wersjonowany named pipe i pokazuje go obok cyklu agenta użytkownika. Stan usługi nie jest mylony ze stanem wszystkich monitorów; nie ma jeszcze przekazywania zdarzeń Service/Agent ani wspólnej historii.

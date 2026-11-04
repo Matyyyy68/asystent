@@ -60,12 +60,13 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.deepEqual(initialStatus.result.ipReputation, { networkCount: 0, importedAt: null }, 'IP reputation must start empty and local');
   assert.equal(initialStatus.result.settings.monitorDownloadedFiles, true, 'local Downloads monitoring must default on');
   assert.equal(initialStatus.result.settings.monitorPersistenceChanges, true, 'local persistence monitoring must default on');
-  assert.equal(initialStatus.result.settings.autoUpdateCertFeed, false, 'CERT feed auto-refresh must default to off');
+  assert.equal(initialStatus.result.settings.autoUpdateCertFeed, true, 'fresh profiles must enable automatic refresh of the fixed CERT feed');
+  assert.equal(initialStatus.result.certFeedRefresh.enabled, false, 'CERT refresh begins on first collect, not while the engine is only starting');
   assert.deepEqual(initialStatus.result.certFeedRefresh, { enabled: false, state: 'Wyłączone', lastAttemptAt: null, lastErrorCode: null });
   const enabledFeedRefresh = await call('settings', { retentionDays: initialStatus.result.settings.retentionDays,
     notifications: initialStatus.result.settings.notifications, autoUpdateCertFeed: true });
   assert.equal(enabledFeedRefresh.ok, true, enabledFeedRefresh.error);
-  assert.equal((await call('status')).result.settings.autoUpdateCertFeed, true, 'explicit opt-in must be saved');
+  assert.equal((await call('status')).result.settings.autoUpdateCertFeed, true, 'automatic CERT refresh preference must be saved');
   const disabledFeedRefresh = await call('settings', { retentionDays: initialStatus.result.settings.retentionDays,
     notifications: initialStatus.result.settings.notifications, autoUpdateCertFeed: false });
   assert.equal(disabledFeedRefresh.ok, true, disabledFeedRefresh.error);

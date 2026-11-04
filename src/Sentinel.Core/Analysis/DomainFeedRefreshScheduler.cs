@@ -3,7 +3,7 @@ namespace Sentinel.Core.Analysis;
 public sealed record DomainFeedRefreshStatus(bool Enabled, string State, DateTimeOffset? LastAttemptAt,
     string? LastErrorCode);
 
-/// <summary>Runs an explicitly opted-in, fixed-source CERT refresh without blocking the Engine request loop.</summary>
+/// <summary>Runs a fixed-source CERT refresh without blocking the Engine request loop.</summary>
 public sealed class DomainFeedRefreshScheduler
 {
     public static readonly TimeSpan RefreshInterval = TimeSpan.FromHours(24);

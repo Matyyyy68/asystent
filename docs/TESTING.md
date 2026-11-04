@@ -1,6 +1,9 @@
 # Testowanie i walidacja
 
-## Zweryfikowane w bieżącym checkoutcie (2026-11-03)
+## Zweryfikowane w bieżącym checkoutcie (2026-11-04)
+
+- F04 — nowe profile domyślnie mają AutoUpdateCertFeed=true; legacy JSON bez tej właściwości przyjmuje nowy default, a jawne false zachowuje się po restarcie magazynu. Test Engine IPC potwierdza brak pobierania przed pierwszym collect i wyłącza feed przed testowymi cyklami, więc nie wykonuje live requestu. node scripts/test-engine.cjs: PASS.
+- Aktualna bramka lokalna: .NET 450 PASS + 2 środowiskowe SKIP; desktop 90/90, lint, produkcyjny Vite build 1584 modułów; Engine publish/IPC, Setup Release build (0 warnings/errors), --wizard-self-test, checker produktu i macierzy luk PASS.
 
 - `npm test --prefix desktop`: PASS, 90/90, w tym testy wersjonowanego status pipe i klienta Node przez kontrolowany transport.
 - `npm run lint --prefix desktop`: PASS (TypeScript i kontrola składni Electron).

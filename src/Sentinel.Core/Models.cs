@@ -39,7 +39,7 @@ public sealed record AppSettings(int RetentionDays = 30, bool Notifications = tr
     bool MonitorDownloadedFiles = true,
     bool MonitorPersistenceChanges = true,
     string LocalAIEmbeddingModel = "",
-    bool AutoUpdateCertFeed = false);
+    bool AutoUpdateCertFeed = true);
 public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys,
     bool TcpTruncated = false, bool UdpTruncated = false);
 public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false, long DroppedChanges = 0);
