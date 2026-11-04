@@ -119,10 +119,13 @@ function readServiceStatus(options = {}) {
 }
 
 function readServiceEvents(options = {}) {
-  if (options.afterEventId !== undefined && (!Number.isSafeInteger(options.afterEventId) || options.afterEventId < 0))
+  if ((options.afterEventId !== undefined && (!Number.isSafeInteger(options.afterEventId) || options.afterEventId < 0)) ||
+      (options.beforeEventId !== undefined && (!Number.isSafeInteger(options.beforeEventId) || options.beforeEventId <= 0)) ||
+      (options.afterEventId !== undefined && options.beforeEventId !== undefined))
     return Promise.resolve({ available: false, reason: 'invalid-request', events: [] });
   const request = JSON.stringify({ id: 'desktop-events', version: 1, method: 'recentEvents',
-    ...(options.afterEventId === undefined ? {} : { afterEventId: options.afterEventId }) }) + '\n';
+    ...(options.afterEventId !== undefined ? { afterEventId: options.afterEventId } : {}),
+    ...(options.beforeEventId === undefined ? {} : { beforeEventId: options.beforeEventId }) }) + '\n';
   return queryServicePipe({ platform: options.platform ?? process.platform, connect: options.connect ?? net.createConnection,
     timeoutMs: options.timeoutMs ?? 2500, request,
     maxResponseChars: 32768, parse: (line, framing) => parseServiceEventsLine(line, framing, options.onDiagnostic) });

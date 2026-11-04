@@ -2,6 +2,8 @@
 
 **Stan: etap pośredni, cel z promptu nie jest ukończony.** Raport opisuje wyłącznie aktualny kod i wyniki testów; nie potwierdza pełnej ochrony ani gotowości wydania.
 
+**Najnowsze potwierdzenie:** pełny Windows CI [41891594622](https://github.com/Matyyyy68/asystent/actions/runs/41891594622) dla `83e1b7f` zakończył PASS: .NET 459/459, live SCM status/history pipe i Agent pipe, Electron smoke, Downloads + soak junctionów, autostart, Chrome/Edge, headless i widoczny cykl instalatora oraz Enterprise API 23/23 + HTTP smoke. Wcześniejsze błędy pipe w tym cyklu diagnostycznym zostały rozwiązane dla zatwierdzonego commita; rezultat nie zastępuje testu czystego, fizycznego komputera Windows. Nierozwiązane ograniczenia wymieniono niżej.
+
 ## 1. Interfejs
 
 - Usunięto wybór profilu DNS z pierwszego uruchomienia.
@@ -72,7 +74,7 @@ Nowe profile domyślnie włączają lokalne monitorowanie procesów, Downloads, 
 - `Sentinel.Agent` i jego watchdog działają w sesji użytkownika; agent odpytuje Engine niezależnie od okna Electron.
 - Watchdog wznawia awarię procesu agenta z backoffem 1–30 s; agent odtwarza proces Engine po błędzie.
 - Zamknięcie UI nie kończy Core. Instalator zatrzymuje i próbuje wznowić Core przy zmianie plików.
-- Watchdog sam nie jest odzyskiwany po awarii. Host SCM działa jako LocalService z chronionym Program Files/ProgramData. Instalator żąda jawnego UAC; UI odczytuje heartbeat i do 12 ostatnich wpisów usługi, pozwala zmienić ich status, lecz nie scala baz, nie deduplikuje wspólnych sygnałów i nie eksportuje historii usługi. Windows CI 41734288659 i 41856785028 zweryfikował wcześniejszy cykl SCM i rollback; CI dla nowego kanału historii oczekuje. Start przed logowaniem nie był testowany na fizycznym systemie, a publiczne wydanie v0.15.38 nie zawiera aktualnego hosta. Agent i usługa prowadzą oddzielne silniki i bazy, więc wspólne monitorowanie może się dublować.
+- Watchdog sam nie jest odzyskiwany po awarii. Host SCM działa jako LocalService z chronionym Program Files/ProgramData. Instalator żąda jawnego UAC; UI odczytuje heartbeat i do 12 ostatnich wpisów usługi, pozwala zmienić ich status, Połączona lista pozwala pobierać starsze strony po 12 wpisów (odczyt Engine do 500 retained); pełny live pipe przeszło w CI 41891594622. Nadal nie scala baz ani nie deduplikuje wspólnych sygnałów. Lokalna zmiana dodaje maksymalnie 500 zachowanych zdarzeń usługi do JSON i CSV eksportów z kolumną origin; .NET 457/459 (2 środowiskowe SKIP), desktop 101/101, lint i UI build przechodzą. Windows CI tej integracji jeszcze nie sprawdził. Start przed logowaniem nie był testowany na fizycznym systemie, a publiczne wydanie v0.15.38 nie zawiera aktualnego hosta. Agent i usługa prowadzą oddzielne silniki i bazy, więc wspólne monitorowanie może się dublować.
 
 ## 10. Prywatność i ograniczenia
 

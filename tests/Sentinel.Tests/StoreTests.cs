@@ -1093,6 +1093,8 @@ public sealed class StoreTests : IDisposable
         var bytes = await File.ReadAllBytesAsync(export);
         Assert.True(bytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }));
         var csv = await File.ReadAllTextAsync(export);
+        Assert.Contains(",origin", csv.Split('\n')[0]);
+        Assert.Contains("\"user-engine\"", csv);
         Assert.Contains("\"'=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
         Assert.Contains("\"'-SUM(A1:A2)\"", csv);
         Assert.Contains("\"' \t=HYPERLINK(\"\"https://evil.test\"\")\"", csv);

@@ -21,7 +21,14 @@ readServiceStatus({ timeoutMs: 5000 }).then(async status => {
     process.exitCode = 1;
     return;
   }
-  console.log(`PASS: Electron named-pipe client received a fresh Service heartbeat (${status.state}), ${history.events.length} recent events, and ${pagedHistory.events.length} cursor-filtered events.`);
+  const olderHistory = await readServiceEvents({ timeoutMs: 5000, beforeEventId: Number.MAX_SAFE_INTEGER });
+  if (!olderHistory.available || !Array.isArray(olderHistory.events) || olderHistory.events.length > 12 ||
+      olderHistory.events.some(event => event.id >= Number.MAX_SAFE_INTEGER)) {
+    console.error(`FAIL: Electron named-pipe client could not read before-cursor Service history (${olderHistory.reason || 'invalid response'}).`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`PASS: Electron named-pipe client received a fresh Service heartbeat (${status.state}), ${history.events.length} recent events, ${pagedHistory.events.length} after-cursor events, and ${olderHistory.events.length} before-cursor events.`);
 }).catch(error => {
   console.error(`FAIL: Electron named-pipe client failed (${error.name}).`);
   process.exitCode = 1;

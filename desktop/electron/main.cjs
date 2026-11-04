@@ -7,6 +7,7 @@ const { watchSmokeTestWindow } = require('./smoke-test.cjs');
 const { shouldShowInitialWindow } = require('./window-visibility.cjs');
 const { requestedFileCheck } = require('./file-check-args.cjs');
 const { readServiceStatus, readServiceEvents, updateServiceEventStatus } = require('./service-status.cjs');
+const { includeServiceHistoryInJsonExport, includeServiceHistoryInCsvExport } = require('./service-history-export.cjs');
 const { createFileCheckBatcher } = require('./file-check-batch.cjs');
 const { formatFileCheckResult } = require('./file-check-format.cjs');
 const { quarantineDownloadedFile, restoreDownloadedFile } = require('./downloaded-file-actions.cjs');
@@ -61,7 +62,7 @@ app.whenReady().then(() => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
     if (method === 'engineStatus') return { ...engine.diagnostics(), lastFailure: readLastFailure(lifecycleLogDirectory) };
     if (method === 'machineServiceStatus') return readServiceStatus();
-    if (method === 'machineServiceEvents') return readServiceEvents();
+    if (method === 'machineServiceEvents') return readServiceEvents({ beforeEventId: data?.beforeEventId });
     if (method === 'machineServiceEventStatus') return updateServiceEventStatus(data?.eventId, data?.status);
     if (method === 'autostart') {
       const loginItem = { path: process.execPath, args: ['--minimized'], name: 'Sentinel AI' };
@@ -102,7 +103,17 @@ app.whenReady().then(() => {
       const choice = await dialog.showSaveDialog(win, { defaultPath: names[method], filters: [{ name: isHistoryExport ? extension.toUpperCase() : 'SQLite', extensions: [extension] }] });
       if (choice.canceled || !choice.filePath) return null;
       if (fs.existsSync(choice.filePath)) throw new Error('Plik już istnieje. Wybierz inną nazwę, aby nie nadpisać kopii.');
-      return call(method, { path: choice.filePath });
+      const result = await call(method, { path: choice.filePath });
+      if ((method === 'historyExport' || method === 'historyExportCsv') && result?.exported === true) {
+        let serviceHistory;
+        try {
+          const include = method === 'historyExport' ? includeServiceHistoryInJsonExport : includeServiceHistoryInCsvExport;
+          serviceHistory = await include(choice.filePath, options => readServiceEvents(options));
+        }
+        catch { serviceHistory = { included: false, count: 0, available: false }; }
+        return { ...result, serviceHistoryIncluded: serviceHistory.included, serviceHistoryCount: serviceHistory.count, serviceHistoryAvailable: serviceHistory.available };
+      }
+      return result;
     }
     if (method === 'diagnosticsExport') {
       const date = new Date().toISOString().replace(/[:.]/g, '-');
