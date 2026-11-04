@@ -80,3 +80,38 @@ test('service event history and status writes use bounded versioned pipe request
   assert.equal(JSON.parse(request).status, 'Reviewed');
   assert.equal((await updateServiceEventStatus(0, 'New', { platform: 'win32', connect })).reason, 'invalid-request');
 });
+
+test('service pipe response limit excludes Windows CRLF line terminators', async () => {
+  const event = { id: 3, timestamp: '2026-11-04T12:00:00.000Z', risk: 'Low', status: 'New',
+    category: 'Synthetic', application: 'Fixture', explanation: 'Fixture', recommendation: 'Review' };
+  const base = { id: 'desktop-events', version: 1, ok: true, result: { events: [event] }, padding: '' };
+  const emptyLine = JSON.stringify(base);
+  const line = JSON.stringify({ ...base, padding: 'x'.repeat(32768 - emptyLine.length) });
+  assert.equal(line.length, 32768);
+  const connect = () => {
+    const socket = new EventEmitter();
+    socket.setEncoding = () => {};
+    socket.destroy = () => {};
+    socket.write = request => {
+      assert.equal(request, '{"id":"desktop-events","version":1,"method":"recentEvents"}\n');
+      process.nextTick(() => socket.emit('data', line + '\r\n'));
+    };
+    process.nextTick(() => socket.emit('connect'));
+    return socket;
+  };
+  const result = await readServiceEvents({ platform: 'win32', connect });
+  assert.equal(result.available, true);
+  assert.equal(result.events[0].id, event.id);
+});
+
+test('service pipe rejects oversized response lines with a safe reason code', async () => {
+  const connect = () => {
+    const socket = new EventEmitter();
+    socket.setEncoding = () => {};
+    socket.destroy = () => {};
+    socket.write = () => process.nextTick(() => socket.emit('data', 'x'.repeat(32769) + '\r\n'));
+    process.nextTick(() => socket.emit('connect'));
+    return socket;
+  };
+  assert.equal((await readServiceEvents({ platform: 'win32', connect })).reason, 'response-line-too-large');
+});

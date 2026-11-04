@@ -146,9 +146,17 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Electron named-pipe health client failed: $($electronPipeOutput -join ' ')" }
   Write-Host ($electronPipeOutput -join ' ')
 
+  $agentPipeClient = Join-Path $enginePublish 'Sentinel.Agent.exe'
+  $agentPipeTest = Start-Process -FilePath $agentPipeClient -ArgumentList '--self-test-service-events' -PassThru -WindowStyle Hidden
+  if (-not $agentPipeTest.WaitForExit(10000)) {
+    Stop-Process -Id $agentPipeTest.Id -Force -ErrorAction SilentlyContinue
+    throw 'Sentinel.Agent event-pipe client did not complete its bounded smoke test.'
+  }
+  if ($agentPipeTest.ExitCode -ne 0) { throw "Sentinel.Agent event-pipe client failed with exit code $($agentPipeTest.ExitCode)." }
+
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
-  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status pipe.'
+  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent event client.'
 }
 finally {
   if ($serviceCreated) {

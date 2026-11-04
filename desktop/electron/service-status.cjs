@@ -86,9 +86,13 @@ function queryServicePipe({ platform, connect, timeoutMs, request, maxResponseCh
     socket.on('connect', () => socket.write(request));
     socket.on('data', chunk => {
       buffer += chunk;
-      if (buffer.length > maxResponseChars) return finish({ available: false, reason: 'invalid-response' });
       const newline = buffer.indexOf('\n');
-      if (newline >= 0) finish(parse(buffer.slice(0, newline).replace(/\r$/, '')));
+      if (newline >= 0) {
+        const lineLength = newline - (buffer[newline - 1] === '\r' ? 1 : 0);
+        if (lineLength > maxResponseChars) return finish({ available: false, reason: 'response-line-too-large' });
+        return finish(parse(buffer.slice(0, newline).replace(/\r$/, '')));
+      }
+      if (buffer.length > maxResponseChars + 1) finish({ available: false, reason: 'response-line-too-large' });
     });
     socket.on('error', () => finish({ available: false, reason: 'unavailable' }));
     socket.on('end', () => finish(parse(buffer.replace(/\r?\n$/, ''))));

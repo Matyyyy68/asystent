@@ -36,6 +36,15 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         if (!OperatingSystem.IsWindows()) return 2;
+        if (args.Contains("--self-test-service-events", StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                _ = await SystemServiceEventsClient.ReadRecentAsync(0, CancellationToken.None);
+                return 0;
+            }
+            catch { return 1; }
+        }
         if (args.Contains("--shutdown", StringComparer.OrdinalIgnoreCase)) return await RequestShutdownAsync();
         if (!args.Contains("--agent-process", StringComparer.OrdinalIgnoreCase)) return await RunWatchdogAsync();
         AgentLog("AGENT_PROCESS_START");
