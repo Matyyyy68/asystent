@@ -8,7 +8,7 @@ namespace Sentinel.Service;
 
 internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid, ServiceHealthSnapshot health,
     string? pipeName = null, Action<Exception>? onError = null,
-    Func<CancellationToken, Task<IReadOnlyList<ServiceEventSummary>>>? readRecentEvents = null,
+    Func<long?, CancellationToken, Task<IReadOnlyList<ServiceEventSummary>>>? readRecentEvents = null,
     Func<long, string, CancellationToken, Task<bool>>? updateEventStatus = null)
 {
     public const string PipeName = "SentinelAI.Service.Status.v1";
@@ -80,6 +80,8 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         }
         if (ReadPipeRequest("{\"id\":\"self_test-1\",\"version\":1,\"method\":\"status\"}")?.Method != "status" ||
             ReadPipeRequest("{\"id\":\"self_test-2\",\"version\":1,\"method\":\"recentEvents\"}")?.Method != "recentEvents" ||
+            ReadPipeRequest("{\"id\":\"self_test-5\",\"version\":1,\"method\":\"recentEvents\",\"afterEventId\":7}")?.AfterEventId != 7 ||
+            ReadPipeRequest("{\"id\":\"self_test-6\",\"version\":1,\"method\":\"recentEvents\",\"afterEventId\":-1}") is not null ||
             ReadPipeRequest("{\"id\":\"self_test-3\",\"version\":1,\"method\":\"eventStatus\",\"eventId\":1,\"status\":\"Reviewed\"}")?.EventId != 1 ||
             ReadPipeRequest("{\"id\":\"self_test-1\",\"version\":1,\"method\":\"status\",\"extra\":true}") is not null ||
             ReadPipeRequest("{\"id\":\"bad id\",\"version\":1,\"method\":\"status\"}") is not null ||
@@ -116,7 +118,11 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         var changedEventStatus = false;
         var server = new ServiceStatusPipeServer(userSid, health, testPipeName,
             exception => Console.Error.WriteLine($"SELF_TEST_STATUS_PIPE_SERVER_ERROR {exception.Message} type={exception.InnerException?.GetType().Name} hresult=0x{exception.InnerException?.HResult:X8} message={exception.InnerException?.Message.Replace('\r', ' ').Replace('\n', ' ')}"),
-            _ => Task.FromResult<IReadOnlyList<ServiceEventSummary>>([new(1, DateTimeOffset.UtcNow, "Low", "Fixture", "Synthetic", "Fixture event", "Review", "New", null, "service", "test", null, 1, null, null, null, [], [])]),
+            (afterEventId, _) => Task.FromResult<IReadOnlyList<ServiceEventSummary>>(afterEventId is null or < 1
+                ? Enumerable.Range(1, 12).Select(id => new ServiceEventSummary(id, DateTimeOffset.UtcNow, "Low",
+                    new string('ż', 128), new string('ą', 128), new string('ł', 768), new string('ź', 512), "New", null,
+                    "service", "test", null, 1, null, null, null, [], [])).ToArray()
+                : []),
             (id, status, _) => { changedEventStatus = id == 1 && status == "Reviewed"; return Task.FromResult(changedEventStatus); });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cancellation.Token);
@@ -144,7 +150,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
             }
             stage = "events-request";
             var eventsLine = await SendSelfTestRequestAsync(testPipeName,
-                "{\"id\":\"events-self-test\",\"version\":1,\"method\":\"recentEvents\"}", cancellation.Token);
+                "{\"id\":\"events-self-test\",\"version\":1,\"method\":\"recentEvents\",\"afterEventId\":0}", cancellation.Token);
             if (eventsLine is null) return Fail(stage);
             using (var eventsResponse = JsonDocument.Parse(eventsLine, new JsonDocumentOptions { MaxDepth = 8 }))
             {
@@ -152,11 +158,24 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                 if (!eventsRoot.TryGetProperty("id", out var eventsId) || eventsId.GetString() != "events-self-test" ||
                     !eventsRoot.TryGetProperty("ok", out var eventsOk) || eventsOk.ValueKind != JsonValueKind.True ||
                     !eventsRoot.TryGetProperty("result", out var eventsResult) ||
-                    !eventsResult.TryGetProperty("events", out var eventItems) || eventItems.ValueKind != JsonValueKind.Array || eventItems.GetArrayLength() != 1)
+                    !eventsResult.TryGetProperty("events", out var eventItems) || eventItems.ValueKind != JsonValueKind.Array ||
+                    eventItems.GetArrayLength() is < 1 or > 12 || eventsLine.Length > MaximumResponseChars)
                 {
                     Console.Error.WriteLine("SELF_TEST_STATUS_PIPE_EVENTS_RESPONSE " + eventsLine[..Math.Min(eventsLine.Length, 512)]);
                     return Fail(stage);
                 }
+            }
+            stage = "events-cursor-request";
+            var cursorLine = await SendSelfTestRequestAsync(testPipeName,
+                "{\"id\":\"events-cursor-self-test\",\"version\":1,\"method\":\"recentEvents\",\"afterEventId\":12}", cancellation.Token);
+            if (cursorLine is null) return Fail(stage);
+            using (var cursorResponse = JsonDocument.Parse(cursorLine, new JsonDocumentOptions { MaxDepth = 8 }))
+            {
+                var cursorRoot = cursorResponse.RootElement;
+                if (!cursorRoot.TryGetProperty("ok", out var cursorOk) || cursorOk.ValueKind != JsonValueKind.True ||
+                    !cursorRoot.TryGetProperty("result", out var cursorResult) || !cursorResult.TryGetProperty("events", out var cursorItems) ||
+                    cursorItems.ValueKind != JsonValueKind.Array || cursorItems.GetArrayLength() != 0)
+                    return Fail(stage);
             }
             stage = "event-status-request";
             var updateLine = await SendSelfTestRequestAsync(testPipeName,
@@ -246,7 +265,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                 object response = pipeRequest.Method switch
                 {
                     "status" => StatusResponse(pipeRequest.Id),
-                    "recentEvents" when readRecentEvents is not null => await EventsResponseAsync(pipeRequest.Id, timeout.Token),
+                    "recentEvents" when readRecentEvents is not null => await EventsResponseAsync(pipeRequest.Id, pipeRequest.AfterEventId, timeout.Token),
                     "eventStatus" when updateEventStatus is not null => await EventStatusResponseAsync(pipeRequest, timeout.Token),
                     _ => new { id = pipeRequest.Id, version = 1, ok = false, error = "unsupported-request" }
                 };
@@ -283,10 +302,16 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         return new { id = requestId, version = 1, ok = true, result = new { state = snapshot.State, lastCollectionAtUtc = snapshot.LastCollectionAtUtc } };
     }
 
-    private async Task<object> EventsResponseAsync(string requestId, CancellationToken cancellationToken)
+    private async Task<object> EventsResponseAsync(string requestId, long? afterEventId, CancellationToken cancellationToken)
     {
-        var events = await readRecentEvents!(cancellationToken);
-        return new { id = requestId, version = 1, ok = true, result = new { events } };
+        var events = (await readRecentEvents!(afterEventId, cancellationToken)).Take(12).ToArray();
+        while (true)
+        {
+            var response = new { id = requestId, version = 1, ok = true, result = new { events } };
+            if (JsonSerializer.Serialize(response, ResponseJsonOptions).Length <= MaximumResponseChars) return response;
+            if (events.Length == 0) return new { id = requestId, version = 1, ok = false, error = "response-too-large" };
+            events = events[..^1];
+        }
     }
 
     private async Task<object> EventStatusResponseAsync(PipeRequest request, CancellationToken cancellationToken)
@@ -308,12 +333,17 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
             var value = id.GetString();
             if (value is null || value.Length is 0 or > 64 || !value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_')) return null;
             var methodName = method.GetString();
-            if (methodName is "status" or "recentEvents")
-                return root.EnumerateObject().Count() == 3 ? new PipeRequest(value, methodName, null, null) : null;
+            if (methodName == "status")
+                return root.EnumerateObject().Count() == 3 ? new PipeRequest(value, methodName, null, null, null) : null;
+            if (methodName == "recentEvents" && (root.EnumerateObject().Count() == 3 ||
+                (root.EnumerateObject().Count() == 4 && root.TryGetProperty("afterEventId", out var cursorProperty) &&
+                 cursorProperty.TryGetInt64(out var cursor) && cursor >= 0)))
+                return new PipeRequest(value, methodName, null, null,
+                    root.TryGetProperty("afterEventId", out var requestedCursorProperty) && requestedCursorProperty.TryGetInt64(out var requestedCursor) ? requestedCursor : null);
             if (methodName == "eventStatus" && root.EnumerateObject().Count() == 5 &&
                 root.TryGetProperty("eventId", out var eventId) && eventId.TryGetInt64(out var numericId) && numericId > 0 &&
                 root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String && status.GetString() is "Reviewed" or "FalsePositive")
-                return new PipeRequest(value, methodName, numericId, status.GetString());
+                return new PipeRequest(value, methodName, numericId, status.GetString(), null);
             return null;
         }
         catch (JsonException) { return null; }
@@ -336,7 +366,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         security.AddAccessRule(new PipeAccessRule(sid, PipeAccessRights.FullControl, AccessControlType.Allow));
 }
 
-internal sealed record PipeRequest(string Id, string Method, long? EventId, string? Status);
+internal sealed record PipeRequest(string Id, string Method, long? EventId, string? Status, long? AfterEventId);
 internal sealed record ServiceEventSummary(long Id, DateTimeOffset Timestamp, string Risk, string Category,
     string Application, string Explanation, string Recommendation, string Status, Guid? EventId,
     string? Source, string? RuleVersion, int? Confidence, int SchemaVersion, int? ProcessId,

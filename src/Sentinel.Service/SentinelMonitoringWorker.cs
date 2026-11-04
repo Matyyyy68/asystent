@@ -91,7 +91,7 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         health.MarkCollectionSucceeded(DateTimeOffset.UtcNow);
     }
 
-    private async Task<IReadOnlyList<ServiceEventSummary>> ReadRecentEventsAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<ServiceEventSummary>> ReadRecentEventsAsync(long? afterEventId, CancellationToken cancellationToken)
     {
         var process = engine ?? throw new IOException("Sentinel Engine is not available.");
         var response = await process.SendAsync("{\"id\":\"service-history\",\"version\":1,\"method\":\"history\"}", cancellationToken);
@@ -100,8 +100,13 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             !document.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Array)
             throw new InvalidDataException("Sentinel Engine returned an invalid history response.");
 
-        var events = new List<ServiceEventSummary>(12);
-        foreach (var item in result.EnumerateArray().Take(12))
+        var history = result.EnumerateArray().ToArray();
+        var page = afterEventId is null
+            ? history.Take(12).ToArray()
+            : history.Where(item => item.TryGetProperty("id", out var id) && id.TryGetInt64(out var value) && value > afterEventId.Value)
+                .OrderBy(item => item.GetProperty("id").GetInt64()).Take(12).ToArray();
+        var events = new List<ServiceEventSummary>(page.Length);
+        foreach (var item in page)
         {
             if (!item.TryGetProperty("id", out var id) || !id.TryGetInt64(out var eventId) || eventId <= 0 ||
                 !item.TryGetProperty("timestamp", out var timestamp) || !timestamp.TryGetDateTimeOffset(out var observedAt) ||

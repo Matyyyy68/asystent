@@ -134,12 +134,16 @@ internal static class Program
         private readonly Task server;
         private readonly System.Windows.Forms.Timer collector = new() { Interval = 1000 };
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
+        private readonly NotificationDeduplicator serviceEventNotificationDeduplicator = new(TimeSpan.FromDays(7), capacity: 512);
+        private readonly ServiceEventNotificationCursor serviceEventNotificationCursor = new(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-notification.cursor"));
         private readonly InitialAnalysisCompletionMarker initialAnalysisCompletion = new(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "first-analysis-completed.v1"));
         private readonly List<(string Key, string Title, string Message, ToolTipIcon Icon, NotificationToneKind Tone)> pendingNotifications = [];
         private readonly Icon normalIcon;
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
+        private DateTimeOffset lastServiceEventCheckAtUtc;
         private bool collecting;
         private bool disposed;
 
@@ -246,6 +250,8 @@ internal static class Program
                 var result = response.RootElement.GetProperty("result");
                 tray.Text = "Sentinel AI — silnik działa w tle";
                 var notifications = result.TryGetProperty("notifications", out var enabled) && enabled.GetBoolean();
+                if (notifications && DateTimeOffset.UtcNow - lastServiceEventCheckAtUtc >= TimeSpan.FromSeconds(30))
+                    await CheckSystemServiceEventsAsync();
                 var detections = result.TryGetProperty("detections", out var count) && count.TryGetInt32(out var total) ? total : 0;
                 if (notifications && detections > 0)
                     NotifyOnce("dns-reputation", "Sentinel AI — ostrzeżenie", "W cache DNS wykryto adres z lokalnie sprawdzanej listy reputacji. Ruch nie został zablokowany.", ToolTipIcon.Warning);
@@ -290,6 +296,25 @@ internal static class Program
                     NotificationSoundPlayer.Play(NotificationToneKind.AnalysisComplete);
                 collecting = false;
             }
+        }
+
+        private async Task CheckSystemServiceEventsAsync()
+        {
+            lastServiceEventCheckAtUtc = DateTimeOffset.UtcNow;
+            try
+            {
+                var events = await SystemServiceEventsClient.ReadRecentAsync(serviceEventNotificationCursor.LastEventId, shutdown.Token);
+                foreach (var eventId in events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
+                {
+                    if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
+                    NotifyOnce("service-event-" + eventId, "Sentinel AI — nowe zdarzenie",
+                        "Usługa ochrony systemowej wykryła zdarzenie wymagające sprawdzenia. Otwórz Sentinel AI, aby zobaczyć szczegóły.",
+                        ToolTipIcon.Warning);
+                }
+                if (events.Count > 0)
+                    _ = serviceEventNotificationCursor.TryAdvance(events.Max(item => item.Id));
+            }
+            catch { /* Service event notifications are best-effort and never interrupt user-session collection. */ }
         }
 
         private async Task CheckWindowsSecurityCenterAsync()

@@ -65,11 +65,12 @@ test('service event history and status writes use bounded versioned pipe request
     return socket;
   };
 
-  const history = await readServiceEvents({ platform: 'win32', connect });
+  const history = await readServiceEvents({ platform: 'win32', connect, afterEventId: 10 });
   assert.equal(history.available, true);
   assert.equal(history.events[0].id, event.id);
   assert.equal(history.events[0].category, event.category);
-  assert.equal(request, '{"id":"desktop-events","version":1,"method":"recentEvents"}\n');
+  assert.equal(request, '{"id":"desktop-events","version":1,"method":"recentEvents","afterEventId":10}\n');
+  assert.equal((await readServiceEvents({ afterEventId: -1 })).reason, 'invalid-request');
 
   response = { id: 'desktop-event-status', version: 1, ok: true, result: { updated: true } };
   assert.deepEqual(await updateServiceEventStatus(2, 'Reviewed', { platform: 'win32', connect }), { available: true });

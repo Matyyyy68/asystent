@@ -97,8 +97,12 @@ function readServiceStatus(options = {}) {
 }
 
 function readServiceEvents(options = {}) {
+  if (options.afterEventId !== undefined && (!Number.isSafeInteger(options.afterEventId) || options.afterEventId < 0))
+    return Promise.resolve({ available: false, reason: 'invalid-request', events: [] });
+  const request = JSON.stringify({ id: 'desktop-events', version: 1, method: 'recentEvents',
+    ...(options.afterEventId === undefined ? {} : { afterEventId: options.afterEventId }) }) + '\n';
   return queryServicePipe({ platform: options.platform ?? process.platform, connect: options.connect ?? net.createConnection,
-    timeoutMs: options.timeoutMs ?? 2500, request: '{"id":"desktop-events","version":1,"method":"recentEvents"}\n',
+    timeoutMs: options.timeoutMs ?? 2500, request,
     maxResponseChars: 32768, parse: parseServiceEventsLine });
 }
 
