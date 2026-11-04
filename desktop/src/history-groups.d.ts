@@ -17,7 +17,7 @@ export interface HistoryEvent {
 
 export interface HistoryGroup {
   key: string;
-  kind: 'domain' | 'process' | 'single';
+  kind: 'domain' | 'process' | 'duplicate' | 'single';
   events: HistoryEvent[];
 }
 

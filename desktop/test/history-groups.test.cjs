@@ -46,3 +46,19 @@ test('a search match keeps its entire correlated group available', async () => {
   assert.equal(groups.length, 1);
   assert.deepEqual(groups[0].events.map(event => event.id), [2, 1]);
 });
+
+test('groups matching event ids from user and service stores without dropping either record', async () => {
+  const { groupHistoryEvents } = await import('../src/history-groups.js');
+  const eventId = 'ba5b4950-bd6a-4c82-bb7b-479a9e26827d';
+  const events = [
+    { id: 'service-12', serviceEventId: 12, eventId, source: 'dns-operational', status: 'New' },
+    { id: 44, eventId: eventId.toUpperCase(), source: 'dns-operational', status: 'Reviewed' },
+    { id: 45, eventId: '4bd9c089-1f98-40ec-9bb0-22e88e7a47e2', source: 'dns-operational' }
+  ];
+  const groups = groupHistoryEvents(events);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].kind, 'duplicate');
+  assert.deepEqual(groups[0].events.map(event => event.id), ['service-12', 44]);
+  assert.deepEqual(groups[1].events.map(event => event.id), [45]);
+  assert.equal(groups.flatMap(group => group.events).length, events.length);
+});

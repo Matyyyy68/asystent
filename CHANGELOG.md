@@ -6,7 +6,8 @@
 ## Unreleased — widoczność ochrony usługi systemowej (2026-11-04)
 - Główny status UI pokazuje „Ochrona ograniczona”, gdy usługa SCM lub jej świeży heartbeat nie są potwierdzone.
 - UI pokazuje do 12 najnowszych zdarzeń zapisanych przez usługę i kieruje zmianę statusu do właściwego silnika. Pipe ogranicza rozmiar i pola zdarzeń, weryfikuje SID użytkownika, a statusy można zmienić tylko na `Reviewed` albo `FalsePositive`.
-- Service i Agent nadal przechowują osobne bazy; historia nie jest w pełni scalona, eksport nie obejmuje zdarzeń usługi, a deduplikacja między silnikami pozostaje otwarta.
+- JSON i CSV eksportują do 500 zachowanych zdarzeń Service z polem `origin`; eksport kontynuuje się lokalnie, gdy usługa jest niedostępna.
+- Historia grupuje wspólny `EventId` z obu baz w jednym rozwijanym widoku bez usuwania rekordów. To grupowanie dotyczy wyłącznie identycznych identyfikatorów; odrębne ID i osobne bazy nadal nie mają pełnej deduplikacji.
 ## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
 - Instalator dodaje chronioną usługę Windows SCM działającą jako LocalService przez jawnie potwierdzany UAC; sprawdza hash payloadu, ACL, świeży pierwszy cykl, aktualizuje usługę i usuwa ją przy deinstalacji, zachowując lokalne dane. Windows CI `41731627812` ujawnił dodatkowy bit `Synchronize` w odczytanym ACE; walidator normalizuje tylko ten bit, nadal dokładnie porównując SID-y i pozostałe prawa. Pełny Windows CI `41734288659` potwierdził instalację, naprawę, aktualizację i deinstalację na izolowanym runnerze.
 - UI pobiera osobny heartbeat usługi przez wersjonowany named pipe i pokazuje go obok cyklu agenta użytkownika. Stan usługi nie jest mylony ze stanem wszystkich monitorów; nie ma jeszcze przekazywania zdarzeń Service/Agent ani wspólnej historii.
