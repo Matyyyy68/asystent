@@ -2,7 +2,7 @@
 
 **F04 — automatyczna aktualizacja lokalnego feedu (2026-11-04):** nowe profile domyślnie pobierają stały feed domen CERT Polska co 24 h; nie wysyłają analizowanych adresów. Wcześniejsze ustawienie AutoUpdateCertFeed=false jest zachowywane, a opcja wyłączenia pozostaje dostępna w narzędziach zaawansowanych. Harmonogram nadal ogranicza retry do co najmniej 6 h, feed wygasa po 48 h, a testy potwierdzają domyślną wartość i zachowanie jawnego wyłączenia.
 
-**Prawdziwy status usługi (2026-11-04):** główny status UI uwzględnia teraz uwierzytelniony heartbeat usługi SCM. Gdy usługa lub świeży cykl nie są potwierdzone, UI pokazuje „Ochrona ograniczona”, nawet jeśli monitory sesji użytkownika odpowiadają. Testy desktop 91/91, TypeScript/lint i produkcyjny build UI PASS. Windows CI dla commita tej zmiany oczekuje na wynik. Service i Agent nadal mają odrębne Engine/bazy i historie; ta zmiana wykrywa awarię usługi, ale nie scala monitorowania.
+**Prawdziwy status usługi (2026-11-04):** główny status UI uwzględnia uwierzytelniony heartbeat SCM. Gdy usługa lub świeży cykl nie są potwierdzone, UI pokazuje „Ochrona ograniczona”, nawet jeśli monitory sesji odpowiadają. Windows CI [41864826701](https://github.com/Matyyyy68/asystent/actions/runs/41864826701) PASS dla automatycznego feedu CERT i obniżania statusu przy braku heartbeat; desktop i build przechodzą, CI potwierdził .NET 452/452. Desktop 93/93, TypeScript/lint i Vite 1584 moduły PASS dla najnowszego kodu. Rozszerzenie pipe o historię usługi oczekuje na nowy Windows CI. Service i Agent nadal mają odrębne Engine/bazy i historie.
 
 ## Rejestracja usługi SCM przez instalator — 2026-11-03 (Windows CI PASS)
 
