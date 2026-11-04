@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -278,8 +279,14 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                 else
                 {
                     var cause = exception.InnerException ?? exception;
+                    var frames = new StackTrace(cause, fNeedFileInfo: false).GetFrames() ?? [];
+                    var methods = frames.Select(frame => frame.GetMethod() is { } method
+                            ? (method.DeclaringType?.Name ?? "?") + "." + method.Name
+                            : null)
+                        .Where(name => name is not null).Take(6);
                     ServiceLog.Write("STATUS_PIPE_REQUEST_FAILED stage=" + stage + " type=" + exception.GetType().Name +
-                        " causeType=" + cause.GetType().Name + " causeHResult=0x" + cause.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
+                        " causeType=" + cause.GetType().Name + " causeHResult=0x" + cause.HResult.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) +
+                        " methods=" + string.Join(',', methods));
                 }
                 try { await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
