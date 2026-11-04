@@ -73,7 +73,7 @@ function App() {
   }, [firstRun, status?.engine]);
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('theme', theme); }, [theme]);
   const settings = status?.settings;
-  const protectionStatus = getProtectionStatus(status, firstRun, firstAssessment);
+  const protectionStatus = getProtectionStatus(status, firstRun, firstAssessment, machineService);
   const historyGroups = groupHistoryEvents(events, query);
   if (firstRun) return <main className="first-run-screen" aria-live="polite">
     <Shield size={72}/><h1>Sentinel AI</h1>

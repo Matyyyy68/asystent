@@ -1,6 +1,6 @@
 const unavailable = /niedostępny|niedostępna|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione|jeszcze nie wykonano/i;
 
-export function getProtectionStatus(status, firstRun, firstAssessment) {
+export function getProtectionStatus(status, firstRun, firstAssessment, machineService) {
   if (!status) return { title: 'Ochrona niedostępna', description: 'Silnik nie odpowiada. Nie można potwierdzić działania monitorowania.' };
   if (firstRun && firstAssessment === 'failed')
     return { title: 'Ochrona ograniczona', description: 'Pierwsze sprawdzenie nie powiodło się; stan źródeł monitorowania nie jest potwierdzony.' };
@@ -8,6 +8,8 @@ export function getProtectionStatus(status, firstRun, firstAssessment) {
     return { title: 'Sprawdzanie ochrony', description: 'Sentinel sprawdza dostępne źródła na tym komputerze.' };
   if (status.settings?.paused)
     return { title: 'Ochrona wstrzymana', description: 'Monitorowanie jest wstrzymane. Nie można potwierdzić bieżącej ochrony.' };
+  if (machineService !== undefined && machineService?.available !== true)
+    return { title: 'Ochrona ograniczona', description: 'Nie mogę potwierdzić działania chronionej usługi systemowej. Monitorowanie w tej sesji może działać, ale nie potwierdzono ochrony w tle.' };
 
   const monitors = [
     ['Procesy', status.processes, true],

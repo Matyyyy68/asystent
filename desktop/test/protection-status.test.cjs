@@ -41,6 +41,19 @@ test('claims background monitoring only when all required sources report healthy
   assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
 });
 
+test('does not report healthy protection when the required system service is unavailable', async () => {
+  const status = {
+    settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },
+    processes: 'Snapshot procesów działa; 80 PID',
+    downloadedFiles: 'Monitoring Downloads działa; brak lokalnej listy hashy.',
+    persistence: 'Monitor zmian autostartu działa; baseline ustawiony.',
+    tcpConnections: 'Ciągła migawka TCP/UDP działa; 4 połączenia.'
+  };
+  assert.equal((await getStatus(status, false, 'complete', { available: false, reason: 'unavailable' })).title, 'Ochrona ograniczona');
+  assert.match((await getStatus(status, false, 'complete', { available: false })).description, /usługi systemowej/);
+  assert.equal((await getStatus(status, false, 'complete', { available: true, lastCollectionAtUtc: new Date().toISOString() })).title, 'Monitorowanie działa');
+});
+
 test('reports DNS cache failures and uncollected DNS state as limited protection', async () => {
   const status = {
     settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },

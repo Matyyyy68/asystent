@@ -2,6 +2,8 @@
 
 **F04 — automatyczna aktualizacja lokalnego feedu (2026-11-04):** nowe profile domyślnie pobierają stały feed domen CERT Polska co 24 h; nie wysyłają analizowanych adresów. Wcześniejsze ustawienie AutoUpdateCertFeed=false jest zachowywane, a opcja wyłączenia pozostaje dostępna w narzędziach zaawansowanych. Harmonogram nadal ogranicza retry do co najmniej 6 h, feed wygasa po 48 h, a testy potwierdzają domyślną wartość i zachowanie jawnego wyłączenia.
 
+**Prawdziwy status usługi (2026-11-04):** główny status UI uwzględnia teraz uwierzytelniony heartbeat usługi SCM. Gdy usługa lub świeży cykl nie są potwierdzone, UI pokazuje „Ochrona ograniczona”, nawet jeśli monitory sesji użytkownika odpowiadają. Testy desktop 91/91, TypeScript/lint i produkcyjny build UI PASS. Windows CI dla commita tej zmiany oczekuje na wynik. Service i Agent nadal mają odrębne Engine/bazy i historie; ta zmiana wykrywa awarię usługi, ale nie scala monitorowania.
+
 ## Rejestracja usługi SCM przez instalator — 2026-11-03 (Windows CI PASS)
 
 - Instalator ma podniesiony przez jawne UAC helperowy tryb rejestracji/wyrejestrowania usługi. Helper weryfikuje SHA-256 osadzonego pakietu i kopiuje wyłącznie `resources/service` do `Program Files\Sentinel AI\Service`; katalog otrzymuje chroniony DACL (SYSTEM/Administratorzy pełna kontrola, LocalService odczyt/uruchamianie). Odrzuca punkty ponownej analizy, nieznany wpis SCM i nieznane pliki w docelowym katalogu.
