@@ -36,10 +36,15 @@ test('Windows service query sends only the versioned status request and returns 
 
 test('service events parser accepts only bounded, typed event summaries', () => {
   const event = { id: 1, timestamp: '2026-11-04T12:00:00.000Z', risk: 'Moderate', status: 'New',
-    category: 'Process', application: 'Synthetic', explanation: 'Test only', recommendation: 'Review' };
+    category: 'Process', application: 'Synthetic', explanation: 'Test only', recommendation: 'Review',
+    processImagePath: 'C:\\private\\secret.exe', processImageSha256: 'private-hash', quarantined: true, serviceEventId: 77 };
   const valid = parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: [event] } }));
   assert.equal(valid.available, true);
-  assert.deepEqual(valid.events, [event]);
+  assert.equal(valid.events[0].application, 'Synthetic');
+  assert.equal(valid.events[0].processImagePath, undefined);
+  assert.equal(valid.events[0].processImageSha256, undefined);
+  assert.equal(valid.events[0].quarantined, undefined);
+  assert.equal(valid.events[0].serviceEventId, undefined);
   assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: [{ ...event, risk: 'Unknown' }] } })).available, false);
   assert.equal(parseServiceEventsLine(JSON.stringify({ id: 'desktop-events', version: 1, ok: true, result: { events: Array(13).fill(event) } })).available, false);
   assert.equal(parseServiceEventsLine('x'.repeat(32769)).available, false);
@@ -60,7 +65,10 @@ test('service event history and status writes use bounded versioned pipe request
     return socket;
   };
 
-  assert.deepEqual(await readServiceEvents({ platform: 'win32', connect }), { available: true, events: [event] });
+  const history = await readServiceEvents({ platform: 'win32', connect });
+  assert.equal(history.available, true);
+  assert.equal(history.events[0].id, event.id);
+  assert.equal(history.events[0].category, event.category);
   assert.equal(request, '{"id":"desktop-events","version":1,"method":"recentEvents"}\n');
 
   response = { id: 'desktop-event-status', version: 1, ok: true, result: { updated: true } };

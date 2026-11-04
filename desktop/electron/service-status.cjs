@@ -26,13 +26,38 @@ function parseServiceEventsLine(line) {
     if (response?.version !== 1 || response?.id !== 'desktop-events' || response?.ok !== true ||
         !Array.isArray(events) || events.length > 12 || events.some(event =>
           !Number.isSafeInteger(event?.id) || event.id <= 0 || typeof event?.timestamp !== 'string' ||
+          event.timestamp.length > 64 ||
           !Number.isFinite(Date.parse(event.timestamp)) ||
           !['Information', 'Low', 'Moderate', 'High', 'Critical'].includes(event?.risk) ||
           !['New', 'Reviewed', 'FalsePositive'].includes(event?.status) ||
           typeof event?.category !== 'string' || typeof event?.application !== 'string' ||
           typeof event?.explanation !== 'string' || typeof event?.recommendation !== 'string'))
       return { available: false, reason: 'invalid-response', events: [] };
-    return { available: true, events };
+    const truncate = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : undefined;
+    const guid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : undefined;
+    const stringList = (value, count, length) => Array.isArray(value)
+      ? value.filter(item => typeof item === 'string').slice(0, count).map(item => item.slice(0, length)) : [];
+    const safeEvents = events.map(event => ({
+      id: event.id,
+      timestamp: event.timestamp,
+      risk: event.risk,
+      status: event.status,
+      category: truncate(event.category, 128),
+      application: truncate(event.application, 128),
+      explanation: truncate(event.explanation, 768),
+      recommendation: truncate(event.recommendation, 512),
+      eventId: guid(event.eventId),
+      source: truncate(event.source, 64),
+      ruleVersion: truncate(event.ruleVersion, 64),
+      confidence: Number.isInteger(event.confidence) && event.confidence >= 0 && event.confidence <= 100 ? event.confidence : undefined,
+      schemaVersion: Number.isInteger(event.schemaVersion) && event.schemaVersion > 0 ? event.schemaVersion : 1,
+      processId: Number.isSafeInteger(event.processId) && event.processId > 0 ? event.processId : undefined,
+      processName: truncate(event.processName, 128),
+      correlationId: guid(event.correlationId),
+      evidenceCodes: stringList(event.evidenceCodes, 12, 96),
+      analysisLimitations: stringList(event.analysisLimitations, 8, 96)
+    }));
+    return { available: true, events: safeEvents };
   } catch {
     return { available: false, reason: 'invalid-response', events: [] };
   }
