@@ -709,7 +709,7 @@ Zaliczono uproszczenie głównego UI, pojedynczą rzeczywistą analizę startow�
 5. **Aktualizacje i reputacja:** aktualizacje aplikacji są sprawdzane ręcznie przez GitHub API; brakuje podpisanego manifestu i automatycznego aktualizatora. Lokalna reputacja zależy od listy importowanej przez użytkownika; brak przypisania do niezależnie potwierdzonego feedu nie może być przedstawiany jako weryfikacja wydawcy.
 6. **Stan ochrony Windows:** WSC zwraca stan zbiorczy antywirusa i zapory, ale nie podaje nazwy alternatywnego AV. Szczegółowy odczyt Defendera jest wdrożony warunkowo przez `Get-MpComputerStatus`; na bieżącym środowisku WMI zwróciło Access Denied, więc stan jest pokazywany jako niedostępny.
 7. **Walidacja fizyczna:** UI, dźwięki i Explorer nie zostały sprawdzone na czystym fizycznym Windows 10/11. Windows CI obejmuje izolowany runner, nie komputer użytkownika.
-8. **Licencja i wydanie:** właściciel projektu zdecydował, że wskaże licencję później. Nie dodawać jej samodzielnie. Bieżąca zmiana nie tworzy nowego opublikowanego/podpisanego instalatora; publicznym wydaniem pozostaje v0.15.38.
+8. **Licencja i wydanie:** właściciel projektu zdecydował, że wskaże licencję później. Nie dodawać jej samodzielnie. Bieżąca zmiana nie tworzy nowego instalatora; prerelease v0.15.39 opublikowano 2026-10-29 bez podpisu Authenticode. Nowszy kod `main` nie jest częścią tego artefaktu.
 
 **Status całości: NIEUKOŃCZONE.** Testy dla aktualnego commita kwarantanny są zielone, ale powyższe luki pozostają częścią głównego zlecenia i wymagają dalszej pracy albo jawnej decyzji właściciela tam, gdzie wskazano.
 
