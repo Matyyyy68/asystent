@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased — prostsza historia zdarzeń (2026-11-04)
+- Przegląd i historia domyślnie pomijają rutynowe wpisy `Information`; przełącznik pozwala pokazać je bez usuwania z historii ani eksportu.
+
 ## Unreleased — automatyczne reguły reputacji (2026-11-04)
 - Nowe profile domyślnie odświeżają feed domen CERT Polska co 24 godziny przez stały endpoint HTTPS. Zapytanie nie wysyła analizowanych adresów; zapisane ustawienia, w tym jawne wyłączenie, są zachowywane. Feed jest oznaczany jako wygasły po 48 godzinach, a błąd ponawia próbę nie wcześniej niż po 6 godzinach.
 

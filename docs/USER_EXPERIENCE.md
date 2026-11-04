@@ -8,9 +8,10 @@
 4. Agent kontynuuje cykle lokalnie niezależnie od otwartego okna.
 5. Ekran główny pokazuje stan ochrony, najważniejsze wykrycia i czas ostatniego udanego cyklu monitorowania z silnika. Szczegółowe statusy monitorów i Windows Security Center są zwinięte pod „Szczegóły monitorowania”. Nie deklaruje pełnego skanu.
 6. Zdarzenia wymagające uwagi można zobaczyć w historii. Narzędzia techniczne są dostępne po rozwinięciu „Narzędzia zaawansowane”.
-7. Lista zdarzeń używa polskich etykiet ryzyka i statusu. Szczegóły źródła, wersji reguł i dowodów są domyślnie zwinięte; zdarzenie można oznaczyć jako sprawdzone lub fałszywy alarm. Dla nowego pliku z Downloads dopasowanego do lokalnej listy hashy można jawnie zatwierdzić przeniesienie wybranego, ponownie zweryfikowanego pliku do kwarantanny i później go przywrócić.
+7. Lista zdarzeń używa polskich etykiet ryzyka i statusu. Zdarzenia informacyjne są domyślnie ukryte w przeglądzie i historii; przełącznik pokazuje je bez zmiany zapisanych rekordów ani eksportu. Szczegóły źródła, wersji reguł i dowodów są domyślnie zwinięte; zdarzenie można oznaczyć jako sprawdzone lub fałszywy alarm. Dla nowego pliku z Downloads dopasowanego do lokalnej listy hashy można jawnie zatwierdzić przeniesienie wybranego, ponownie zweryfikowanego pliku do kwarantanny i później go przywrócić.
 8. Menu ikony Sentinel przy zegarze zawiera skrót „Ostatnie alerty” oraz ręczne „Sprawdź aktualizacje”. Sprawdzenie pyta publiczne GitHub API o stabilne wydanie; jeśli jest nowsze, użytkownik może otworzyć jego oficjalną stronę. Sentinel nie pobiera i nie instaluje aktualizacji automatycznie.
-9. Pierwszy cykl odczytuje też lokalnie wyłącznie nazwę, wersję i wydawcę aplikacji z wpisów deinstalacji rejestru Windows. Lista pojawia się dopiero na żądanie w zwiniętych szczegółach monitorowania; nie jest przesyłana ani zapisywana w historii.\r\n10. Nowe profile odświeżają automatycznie co 24 godziny stały feed domen CERT Polska przez HTTPS. Zapytanie nie wysyła analizowanych adresów. Gdy feed jest aktualny, ponowne pobranie nie jest wykonywane.
+9. Pierwszy cykl odczytuje też lokalnie wyłącznie nazwę, wersję i wydawcę aplikacji z wpisów deinstalacji rejestru Windows. Lista pojawia się dopiero na żądanie w zwiniętych szczegółach monitorowania; nie jest przesyłana ani zapisywana w historii.
+10. Nowe profile odświeżają automatycznie co 24 godziny stały feed domen CERT Polska przez HTTPS. Zapytanie nie wysyła analizowanych adresów. Gdy feed jest aktualny, ponowne pobranie nie jest wykonywane.
 
 ## Co się zmieniło
 
