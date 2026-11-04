@@ -142,6 +142,7 @@ internal static class Program
         private readonly Control dispatcher = new();
         private readonly Task server;
         private readonly System.Windows.Forms.Timer collector = new() { Interval = 1000 };
+        private readonly System.Windows.Forms.Timer serviceEventCollector = new() { Interval = 30_000 };
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
         private readonly NotificationDeduplicator serviceEventNotificationDeduplicator = new(TimeSpan.FromDays(7), capacity: 512);
         private readonly ServiceEventNotificationCursor serviceEventNotificationCursor = new(Path.Combine(
@@ -153,7 +154,9 @@ internal static class Program
         private DateTimeOffset alertUntil;
         private DateTimeOffset lastWindowsSecurityCheckAtUtc;
         private DateTimeOffset lastServiceEventCheckAtUtc;
+        private bool notificationsEnabled;
         private bool collecting;
+        private bool checkingServiceEvents;
         private bool disposed;
 
         public AgentContext()
@@ -180,7 +183,9 @@ internal static class Program
             tray.DoubleClick += (_, _) => OpenUi(appRoot);
             tray.BalloonTipClicked += (_, _) => OpenUi(appRoot);
             collector.Tick += async (_, _) => await CollectAsync();
+            serviceEventCollector.Tick += async (_, _) => await CheckSystemServiceEventsAsync();
             collector.Start();
+            serviceEventCollector.Start();
             server = Task.Run(() => ServeClientsAsync(shutdown.Token));
             AgentLog("AGENT_CONTEXT_READY");
         }
@@ -259,6 +264,7 @@ internal static class Program
                 var result = response.RootElement.GetProperty("result");
                 tray.Text = "Sentinel AI — silnik działa w tle";
                 var notifications = result.TryGetProperty("notifications", out var enabled) && enabled.GetBoolean();
+                notificationsEnabled = notifications;
                 if (notifications && DateTimeOffset.UtcNow - lastServiceEventCheckAtUtc >= TimeSpan.FromSeconds(30))
                     await CheckSystemServiceEventsAsync();
                 var detections = result.TryGetProperty("detections", out var count) && count.TryGetInt32(out var total) ? total : 0;
@@ -309,10 +315,13 @@ internal static class Program
 
         private async Task CheckSystemServiceEventsAsync()
         {
+            if (!notificationsEnabled || checkingServiceEvents || shutdown.IsCancellationRequested) return;
+            checkingServiceEvents = true;
             lastServiceEventCheckAtUtc = DateTimeOffset.UtcNow;
             try
             {
                 var events = await SystemServiceEventsClient.ReadRecentAsync(serviceEventNotificationCursor.LastEventId, shutdown.Token);
+                if (!notificationsEnabled) return;
                 foreach (var eventId in events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
                 {
                     if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
@@ -324,6 +333,7 @@ internal static class Program
                     _ = serviceEventNotificationCursor.TryAdvance(events.Max(item => item.Id));
             }
             catch { /* Service event notifications are best-effort and never interrupt user-session collection. */ }
+            finally { checkingServiceEvents = false; }
         }
 
         private async Task CheckWindowsSecurityCenterAsync()
@@ -443,6 +453,7 @@ internal static class Program
                                 Environment.ExitCode = AgentShutdownExitCode;
                                 try { shutdown.Cancel(); } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_CANCEL_FAILED type=" + exception.GetType().Name); }
                                 try { collector.Stop(); } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_TIMER_STOP_FAILED type=" + exception.GetType().Name); }
+                                try { serviceEventCollector.Stop(); } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_SERVICE_TIMER_STOP_FAILED type=" + exception.GetType().Name); }
                                 try { tray.Visible = false; } catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_TRAY_STOP_FAILED type=" + exception.GetType().Name); }
                                 AgentLog("AGENT_SHUTDOWN_EXIT_THREAD");
                                 ExitThread();
@@ -467,6 +478,8 @@ internal static class Program
                 AgentLog("AGENT_CONTEXT_DISPOSE_BEGIN");
                 shutdown.Cancel();
                 collector.Stop();
+                serviceEventCollector.Stop();
+                serviceEventCollector.Dispose();
                 tray.Visible = false;
                 tray.Dispose();
                 dispatcher.Dispose();
