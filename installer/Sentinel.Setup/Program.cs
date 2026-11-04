@@ -536,6 +536,24 @@ internal static class Program
             const string preservedContents = "preserve across installed update and uninstall";
             File.WriteAllText(preservedFile, preservedContents);
 
+            Log("INTEGRATION_TEST_ROLLBACK_START");
+            try
+            {
+                Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
+                    (_, _) => { }, CancellationToken.None, injectMachineServiceUpdateFailureForTest: true);
+                throw new InvalidDataException("Kontrolowany błąd aktualizacji usługi nie przerwał instalacji.");
+            }
+            catch (IOException exception) when (exception.Message.Contains("Windows nie zainstalował usługi Sentinel AI (kod 10)", StringComparison.Ordinal))
+            {
+                Log("INTEGRATION_TEST_ROLLBACK_FAILURE_OBSERVED");
+            }
+            MachineServiceInstaller.VerifyRollbackForIntegrationTest();
+            VerifyInstallation(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
+                verifyFileContextMenu: false, verifyCoreAutoStart: false, verifyMachineService: true);
+            if (!File.Exists(preservedFile) || File.ReadAllText(preservedFile) != preservedContents)
+                throw new InvalidDataException("Nieudana aktualizacja nie przywróciła plików użytkownika.");
+            Log("INTEGRATION_TEST_ROLLBACK_SUCCESS previousService=true previousApplication=true userFilePreserved=true");
+
             Log("INTEGRATION_TEST_UPDATE_START");
             Install(root, startMenuShortcut: false, desktopShortcut: false, autoStart: false,
                 (_, _) => { }, CancellationToken.None);
@@ -2177,7 +2195,8 @@ internal static class Program
     }
 
     internal static void Install(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart, Action<string, int> progress,
-        CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null)
+        CancellationToken cancellationToken, bool testMode = false, string? registeredInstallOverride = null,
+        bool injectMachineServiceUpdateFailureForTest = false)
     {
         var stage = "preflight";
         var operation = "verify_payload";
@@ -2189,7 +2208,7 @@ internal static class Program
                     stage = nextStage;
                     operation = nextOperation;
                     Log($"INSTALL_STAGE stage={stage} operation={operation}");
-                }, testMode, registeredInstallOverride);
+                }, testMode, registeredInstallOverride, injectMachineServiceUpdateFailureForTest);
         }
         catch (OperationCanceledException)
         {
@@ -2230,7 +2249,7 @@ internal static class Program
 
     private static void InstallCore(string target, bool startMenuShortcut, bool desktopShortcut, bool autoStart,
         Action<string, int> progress, CancellationToken cancellationToken, Action<string, string> setStage,
-        bool testMode, string? registeredInstallOverride)
+        bool testMode, string? registeredInstallOverride, bool injectMachineServiceUpdateFailureForTest)
     {
         setStage("preflight", "verify_payload");
         if (!VerifyPayload(showErrors: true)) throw new InvalidDataException("Weryfikacja instalatora nie powiodła się.");
@@ -2409,7 +2428,7 @@ internal static class Program
                     RunHostCommand(Path.Combine(target, "resources", "engine", "Sentinel.UrlHost.exe"), "--register", 8000);
                     setStage("configure", "install_machine_service");
                     progress("Konfiguruję ochronę działającą w tle…", 96);
-                    MachineServiceInstaller.InstallForCurrentUser();
+                    MachineServiceInstaller.InstallForCurrentUser(injectMachineServiceUpdateFailureForTest);
                     machineServiceInstalled = true;
                 }
                 setStage("complete", "report_installation_success");

@@ -120,6 +120,10 @@ jobs:
             }
             throw "Isolated installer integration test failed with exit code $($test.ExitCode)."
           }
+          $log = Join-Path $env:LOCALAPPDATA 'Sentinel AI/Logs/installer.log'
+          if (Test-Path -LiteralPath $log -PathType Leaf) {
+            Get-Content -LiteralPath $log -Tail 160 | Select-String 'INTEGRATION_TEST_(ROLLBACK|UPDATE|SUCCESS)|MACHINE_SERVICE_TEST_FAULT_INJECTED|MACHINE_SERVICE_INSTALL_FAILED stage=test_injected'
+          }
       - name: Run visible installer wizard install-repair-uninstall integration test
         shell: pwsh
         run: |

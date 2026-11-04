@@ -63,9 +63,15 @@ internal static class MachineServiceInstaller
             if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) return 3;
             var operation = args.FirstOrDefault(x => x.StartsWith("--machine-service-helper=", StringComparison.OrdinalIgnoreCase))?
                 ["--machine-service-helper=".Length..];
+            const string testFaultArgument = "--machine-service-test-fault=after-payload-activation";
+            var testFaultArguments = args.Where(x => x.StartsWith("--machine-service-test-fault=", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (testFaultArguments.Length > 1 || (testFaultArguments.Length == 1 &&
+                !testFaultArguments[0].Equals(testFaultArgument, StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("Nieprawidłowy etap kontrolowanego testu rollbacku usługi.");
+            var injectUpdateFailure = testFaultArguments.Length == 1;
             return operation?.ToLowerInvariant() switch
             {
-                "install" => Install(ParseAllowedUserSid(args)),
+                "install" => Install(ParseAllowedUserSid(args), injectUpdateFailure),
                 "uninstall" => Uninstall(),
                 _ => 2
             };
@@ -77,11 +83,11 @@ internal static class MachineServiceInstaller
         }
     }
 
-    public static void InstallForCurrentUser()
+    public static void InstallForCurrentUser(bool injectUpdateFailureForIntegrationTest = false)
     {
         using var identity = WindowsIdentity.GetCurrent();
         var sid = identity.User ?? throw new InvalidOperationException("Nie można ustalić konta użytkownika instalacji.");
-        RunElevated("install", sid.Value);
+        RunElevated("install", sid.Value, injectUpdateFailureForIntegrationTest);
     }
 
     public static void UninstallElevated()
@@ -130,12 +136,23 @@ internal static class MachineServiceInstaller
             throw new InvalidDataException("Deinstalacja testowa pozostawiła usługę SCM lub jej chronione pliki.");
     }
 
-    private static void RunElevated(string operation, string? userSid)
+    public static void VerifyRollbackForIntegrationTest()
+    {
+        EnsureOwnedService();
+        if (!Directory.Exists(ServiceDirectory))
+            throw new InvalidDataException("Rollback testowy nie przywrócił poprzedniego payloadu usługi.");
+        WaitForServiceState(4, TimeSpan.FromSeconds(60));
+        if (!WaitForCurrentUserServiceHealth(TimeSpan.FromSeconds(30)))
+            throw new InvalidDataException("Rollback testowy nie przywrócił działającej usługi i świeżego status pipe.");
+    }
+
+    private static void RunElevated(string operation, string? userSid, bool injectUpdateFailureForIntegrationTest = false)
     {
         var executable = Environment.ProcessPath ?? throw new IOException("Nie można ustalić ścieżki instalatora.");
         var start = new ProcessStartInfo(executable) { UseShellExecute = true, Verb = "runas", WindowStyle = ProcessWindowStyle.Hidden };
         start.ArgumentList.Add("--machine-service-helper=" + operation);
         if (userSid is not null) start.ArgumentList.Add("--service-user-sid=" + userSid);
+        if (injectUpdateFailureForIntegrationTest) start.ArgumentList.Add("--machine-service-test-fault=after-payload-activation");
         Process process;
         try { process = Process.Start(start) ?? throw new IOException("Windows nie uruchomił konfiguracji usługi."); }
         catch (System.ComponentModel.Win32Exception exception) when (exception.NativeErrorCode == 1223)
@@ -154,7 +171,7 @@ internal static class MachineServiceInstaller
         }
     }
 
-    private static int Install(string userSidText)
+    private static int Install(string userSidText, bool injectUpdateFailureForIntegrationTest = false)
     {
         var stage = "validate_user_sid";
         var userSid = new SecurityIdentifier(userSidText);
@@ -167,6 +184,8 @@ internal static class MachineServiceInstaller
         VerifyEmbeddedPayload();
         stage = "inspect_existing_service";
         var serviceExisted = QueryService().ExitCode == 0;
+        if (injectUpdateFailureForIntegrationTest && !serviceExisted)
+            throw new InvalidOperationException("Kontrolowany rollback wymaga istniejącej usługi, aby można było sprawdzić przywrócenie.");
         if (serviceExisted)
         {
             EnsureOwnedService();
@@ -214,6 +233,12 @@ internal static class MachineServiceInstaller
             stage = "activate_service_payload";
             MoveDirectoryWithRetry(staging, ServiceDirectory);
             ApplySecureAcl(ServiceDirectory, allowLocalServiceExecute: true);
+            if (injectUpdateFailureForIntegrationTest)
+            {
+                stage = "test_injected_after_payload_activation";
+                Program.Log("MACHINE_SERVICE_TEST_FAULT_INJECTED stage=after_payload_activation existingService=true");
+                throw new IOException("Kontrolowany błąd testowy po podmianie payloadu usługi.");
+            }
 
             var binaryPath = "\"" + ServiceExecutable + "\" --allowed-user-sid=" + userSid.Value;
             if (serviceExisted)
