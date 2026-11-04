@@ -23,16 +23,21 @@ function parseServiceEventsLine(line) {
   try {
     const response = JSON.parse(line);
     const events = response?.result?.events;
-    if (response?.version !== 1 || response?.id !== 'desktop-events' || response?.ok !== true ||
-        !Array.isArray(events) || events.length > 12 || events.some(event =>
-          !Number.isSafeInteger(event?.id) || event.id <= 0 || typeof event?.timestamp !== 'string' ||
-          event.timestamp.length > 64 ||
-          !Number.isFinite(Date.parse(event.timestamp)) ||
-          !['Information', 'Low', 'Moderate', 'High', 'Critical'].includes(event?.risk) ||
-          !['New', 'Reviewed', 'FalsePositive'].includes(event?.status) ||
-          typeof event?.category !== 'string' || typeof event?.application !== 'string' ||
-          typeof event?.explanation !== 'string' || typeof event?.recommendation !== 'string'))
-      return { available: false, reason: 'invalid-response', events: [] };
+    if (response?.version !== 1 || response?.id !== 'desktop-events') return { available: false, reason: 'invalid-envelope', events: [] };
+    if (response?.ok !== true) return { available: false, reason: ['response-too-large', 'unsupported-request', 'unauthorized'].includes(response?.error) ? response.error : 'service-error', events: [] };
+    if (!Array.isArray(events) || events.length > 12) return { available: false, reason: 'invalid-event-list', events: [] };
+    const invalidField = events.map(event => {
+      if (!Number.isSafeInteger(event?.id) || event.id <= 0) return 'event-id';
+      if (typeof event?.timestamp !== 'string' || event.timestamp.length > 64 || !Number.isFinite(Date.parse(event.timestamp))) return 'event-timestamp';
+      if (!['Information', 'Low', 'Moderate', 'High', 'Critical'].includes(event?.risk)) return 'event-risk';
+      if (!['New', 'Reviewed', 'FalsePositive'].includes(event?.status)) return 'event-status';
+      if (typeof event?.category !== 'string') return 'event-category';
+      if (typeof event?.application !== 'string') return 'event-application';
+      if (typeof event?.explanation !== 'string') return 'event-explanation';
+      if (typeof event?.recommendation !== 'string') return 'event-recommendation';
+      return null;
+    }).find(Boolean);
+    if (invalidField) return { available: false, reason: `invalid-${invalidField}`, events: [] };
     const truncate = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : undefined;
     const guid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value) ? value : undefined;
     const stringList = (value, count, length) => Array.isArray(value)

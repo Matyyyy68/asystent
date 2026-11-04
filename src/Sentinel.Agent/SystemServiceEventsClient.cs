@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
@@ -12,7 +13,8 @@ internal static class SystemServiceEventsClient
     public static async Task<IReadOnlyList<SystemServiceEvent>> ReadRecentAsync(long afterEventId, CancellationToken cancellationToken)
     {
         if (afterEventId < 0) throw new ArgumentOutOfRangeException(nameof(afterEventId));
-        await using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut,
+            PipeOptions.Asynchronous, TokenImpersonationLevel.Impersonation);
         await pipe.ConnectAsync(1_500, cancellationToken);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(2));
