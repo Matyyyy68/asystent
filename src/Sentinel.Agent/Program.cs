@@ -146,6 +146,8 @@ internal static class Program
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
         private readonly NotificationDeduplicator serviceEventNotificationDeduplicator = new(TimeSpan.FromDays(7), capacity: 512);
         private readonly ServiceEventPollingGate serviceEventPollingGate = new();
+        private readonly ServiceEventNotificationPreferences serviceEventNotificationPreferences = new(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-notifications.enabled"));
         private readonly ServiceEventNotificationCursor serviceEventNotificationCursor = new(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-notification.cursor"));
         private readonly InitialAnalysisCompletionMarker initialAnalysisCompletion = new(Path.Combine(
@@ -162,6 +164,7 @@ internal static class Program
         {
             var appRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
             engine = new EngineProxy(Path.Combine(AppContext.BaseDirectory, "Sentinel.Engine.exe"));
+            notificationsEnabled = serviceEventNotificationPreferences.Read() ?? false;
             _ = dispatcher.Handle;
             var menu = new ContextMenuStrip();
             menu.Items.Add("Otwórz Sentinel AI", null, (_, _) => OpenUi(appRoot));
@@ -264,6 +267,7 @@ internal static class Program
                 tray.Text = "Sentinel AI — silnik działa w tle";
                 var notifications = result.TryGetProperty("notifications", out var enabled) && enabled.GetBoolean();
                 notificationsEnabled = notifications;
+                _ = serviceEventNotificationPreferences.TryWrite(notifications);
                 if (notifications) await CheckSystemServiceEventsAsync();
                 var detections = result.TryGetProperty("detections", out var count) && count.TryGetInt32(out var total) ? total : 0;
                 if (notifications && detections > 0)
