@@ -213,6 +213,10 @@ internal static class Program
                 _ => retryDelays++, _ => { });
             if (!retriedShutdown || stopAttempts != 2 || retryDelays != 1)
                 throw new InvalidOperationException("Transient Core shutdown failure was not retried safely.");
+            if (NormalizeProcessImagePath(null) is not null || NormalizeProcessImagePath(string.Empty) is not null
+                || NormalizeProcessImagePath("  ") is not null
+                || !PathsEqual(NormalizeProcessImagePath(Environment.ProcessPath), Environment.ProcessPath))
+                throw new InvalidOperationException("Unavailable process image paths were not handled safely.");
             var absentAgentAttempts = 0;
             var alreadyStopped = StopAgentWithRetry(() => { absentAgentAttempts++; return 1; }, () => false,
                 _ => { }, _ => { });
@@ -2116,7 +2120,8 @@ internal static class Program
             {
                 try
                 {
-                    var path = Path.GetFullPath(candidate.MainModule?.FileName ?? string.Empty);
+                    var path = NormalizeProcessImagePath(candidate.MainModule?.FileName);
+                    if (path is null) continue;
                     if (string.Equals(path, expected, StringComparison.OrdinalIgnoreCase))
                         descriptions.Add($"pid={candidate.Id},path={Clean(Path.GetFileName(path))}");
                 }
@@ -2124,10 +2129,14 @@ internal static class Program
                 {
                     descriptions.Add($"pid={candidate.Id},path=unavailable");
                 }
+                catch (InvalidOperationException) { /* The process may exit while its image path is being read. */ }
             }
         }
         return descriptions.Count == 0 ? "none" : string.Join(";", descriptions);
     }
+
+    internal static string? NormalizeProcessImagePath(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
 
     private static void StartBackgroundAgent(string installPath)
     {
@@ -2152,10 +2161,13 @@ internal static class Program
             {
                 try
                 {
-                    if (string.Equals(Path.GetFullPath(candidate.MainModule?.FileName ?? string.Empty), Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase))
+                    var imagePath = NormalizeProcessImagePath(candidate.MainModule?.FileName);
+                    if (imagePath is null) continue;
+                    if (string.Equals(imagePath, Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase))
                         return true;
                 }
                 catch (System.ComponentModel.Win32Exception) { return true; }
+                catch (InvalidOperationException) { /* The process exited during enumeration; continue with remaining matches. */ }
             }
         }
         return false;
