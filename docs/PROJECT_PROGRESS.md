@@ -815,3 +815,8 @@ Rozszerzono wynik RiskEngine do trwałych zdarzeń ręcznej analizy: SQLite v41,
 ### Windows CI regression fix (2026-11-05)
 
 Run [42104537763](https://github.com/Matyyyy68/asystent/actions/runs/42104537763) confirmed a product bug in CSV export: the SQL query selected `risk_score`, but the row mapper omitted it, so CSV always exported an empty score. Added the missing SQLite-column-to-model mapping. The assertion now accepts standard quoted or unquoted numeric CSV fields; local targeted regression passes. Awaiting a full Windows CI run on the fix.
+
+
+### Aktualizacja asercji eksportu IPC (2026-11-05)
+
+Po poprawieniu mapowania `risk_score` Windows CI [42105753012](https://github.com/Matyyyy68/asystent/actions/runs/42105753012) zaliczył pełny .NET suite (508 testów, bez błędów; w tym runie testy środowiskowe nie zostały oznaczone jako skip), po czym wykrył nieaktualny oczekiwany nagłówek CSV w `scripts/test-engine.cjs`. Zaktualizowano asercję o nową kolumnę. Ponowny pełny CI dla tego commita jest wymagany.
