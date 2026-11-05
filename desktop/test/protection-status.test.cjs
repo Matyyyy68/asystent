@@ -14,6 +14,23 @@ test('shows unavailable and first-run states before claiming monitoring is activ
   assert.equal((await getStatus({ settings: { paused: true } }, false, 'complete')).title, 'Ochrona wstrzymana');
 });
 
+test('prefers the engine-owned health assessment while preserving service failure override', async () => {
+  const status = {
+    settings: { paused: false },
+    protectionStatus: {
+      state: 'ATTENTION_REQUIRED',
+      title: 'Wymagana uwaga',
+      description: 'Silnik wykrył nieaktualny cykl monitorowania.'
+    }
+  };
+  assert.deepEqual(await getStatus(status, false, 'complete'), {
+    title: 'Wymagana uwaga',
+    description: 'Silnik wykrył nieaktualny cykl monitorowania.'
+  });
+  assert.match((await getStatus(status, false, 'complete', { available: false })).description,
+    /usługi systemowej/);
+});
+
 test('reports limited protection when a required local monitor is disabled or unavailable', async () => {
   const status = {
     settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },

@@ -32,7 +32,7 @@ Engine i Agent działają w sesji użytkownika; usługa SCM jest osobnym procese
 
 **Działa:** lokalny magazyn i retencja, IPC procesu Engine, obserwacja procesów WMI z kolejką ograniczoną i snapshotowym fallbackiem, monitor Downloads, snapshoty TCP/DNS/persistence, reguły detekcji, inspekcja SHA-256/Authenticode asynchronicznie, lokalna kwarantanna i powiadomienia tray.
 
-**Częściowo działa:** ciągła ochrona wymaga uruchomionego Agenta, bo to Agent utrzymuje Engine użytkownika i wywołuje cykl `collect`; WMI nie gwarantuje odbioru zdarzeń podczas awarii/restartu; status opisuje komponenty, ale nie jest jednolitym, niezależnym od UI stanem wszystkich kolektorów. Korelacja jest ograniczona do dostępnych kluczy i okien czasu.
+**Częściowo działa:** ciągła ochrona wymaga uruchomionego Agenta, bo to Agent utrzymuje Engine użytkownika i wywołuje cykl `collect`; WMI nie gwarantuje odbioru zdarzeń podczas awarii/restartu. Engine publikuje jednolity, obliczany w Core stan zdrowia źródeł, świeżości kolekcji i Windows Security Center; UI zachowuje nadrzędny sygnał dostępności uprzywilejowanej usługi. Korelacja jest ograniczona do dostępnych kluczy i okien czasu.
 
 **Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalny risk engine 0–100, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna niezależna od sesji użytkownika usługa kolektorów i czysty test Windows po instalacji.
 

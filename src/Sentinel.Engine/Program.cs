@@ -345,7 +345,20 @@ while (await Console.In.ReadLineAsync() is { } line)
             case "status":
                 windowsDefenderStatusReader.RefreshIfDue();
                 var installedApplicationInventory = await GetInstalledApplicationInventoryAsync();
+                var statusCheckedAtUtc = DateTimeOffset.UtcNow;
+                var windowsSecurityStatus = WindowsSecurityCenterReader.Read();
+                var protectionStatus = ProtectionHealthEvaluator.Evaluate(settings, lastCollectionAtUtc, statusCheckedAtUtc,
+                    new Dictionary<string, string?>
+                    {
+                        ["processes"] = processMonitor.State,
+                        ["processEvents"] = processTraceSource.State,
+                        ["downloadedFiles"] = downloadedFileMonitor.State,
+                        ["persistence"] = persistenceMonitor.State,
+                        ["tcpConnections"] = tcpConnectionMonitor.State,
+                        ["dns"] = dnsState
+                    }, windowsSecurityStatus.Antivirus, windowsSecurityStatus.Firewall);
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
+                    protectionStatus,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     lastCollectionAtUtc,
                     processes = processMonitor.State, processEvents = processTraceSource.State,
@@ -353,7 +366,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
-                    windowsSecurityCenter = WindowsSecurityCenterReader.Read(),
+                    windowsSecurityCenter = windowsSecurityStatus,
                     windowsDefender = windowsDefenderStatusReader.Snapshot,
                     installedApplications = new { count = installedApplicationInventory.Applications.Count,
                         complete = installedApplicationInventory.Complete, scannedAtUtc = installedApplicationInventory.ScannedAtUtc,

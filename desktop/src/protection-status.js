@@ -10,6 +10,10 @@ export function getProtectionStatus(status, firstRun, firstAssessment, machineSe
     return { title: 'Ochrona wstrzymana', description: 'Monitorowanie jest wstrzymane. Nie można potwierdzić bieżącej ochrony.' };
   if (machineService !== undefined && machineService?.available !== true)
     return { title: 'Ochrona ograniczona', description: 'Nie mogę potwierdzić działania chronionej usługi systemowej. Monitorowanie w tej sesji może działać, ale nie potwierdzono ochrony w tle.' };
+  const engineStatus = status.protectionStatus;
+  if (engineStatus && ['INITIALIZING', 'LIMITED_PROTECTION', 'ATTENTION_REQUIRED', 'DISABLED'].includes(engineStatus.state) &&
+      typeof engineStatus.title === 'string' && typeof engineStatus.description === 'string')
+    return { title: engineStatus.title, description: engineStatus.description };
 
   const monitors = [
     ['Procesy', status.processes, true],
