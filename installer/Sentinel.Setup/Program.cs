@@ -215,7 +215,10 @@ internal static class Program
                 throw new InvalidOperationException("Transient Core shutdown failure was not retried safely.");
             if (NormalizeProcessImagePath(null) is not null || NormalizeProcessImagePath(string.Empty) is not null
                 || NormalizeProcessImagePath("  ") is not null
-                || !PathsEqual(NormalizeProcessImagePath(Environment.ProcessPath), Environment.ProcessPath))
+                || !PathsEqual(NormalizeProcessImagePath(Environment.ProcessPath), Environment.ProcessPath)
+                || !ProcessImageMayMatchExpected(null, Environment.ProcessPath!)
+                || !ProcessImageMayMatchExpected(string.Empty, Environment.ProcessPath!)
+                || ProcessImageMayMatchExpected(Path.Combine(Path.GetTempPath(), "other-agent.exe"), Environment.ProcessPath!))
                 throw new InvalidOperationException("Unavailable process image paths were not handled safely.");
             var absentAgentAttempts = 0;
             var alreadyStopped = StopAgentWithRetry(() => { absentAgentAttempts++; return 1; }, () => false,
@@ -2121,8 +2124,9 @@ internal static class Program
                 try
                 {
                     var path = NormalizeProcessImagePath(candidate.MainModule?.FileName);
-                    if (path is null) continue;
-                    if (string.Equals(path, expected, StringComparison.OrdinalIgnoreCase))
+                    if (path is null)
+                        descriptions.Add($"pid={candidate.Id},path=unavailable");
+                    else if (string.Equals(path, expected, StringComparison.OrdinalIgnoreCase))
                         descriptions.Add($"pid={candidate.Id},path={Clean(Path.GetFileName(path))}");
                 }
                 catch (System.ComponentModel.Win32Exception)
@@ -2137,6 +2141,12 @@ internal static class Program
 
     internal static string? NormalizeProcessImagePath(string? path) =>
         string.IsNullOrWhiteSpace(path) ? null : Path.GetFullPath(path);
+
+    internal static bool ProcessImageMayMatchExpected(string? imagePath, string expectedPath)
+    {
+        var normalized = NormalizeProcessImagePath(imagePath);
+        return normalized is null || string.Equals(normalized, Path.GetFullPath(expectedPath), StringComparison.OrdinalIgnoreCase);
+    }
 
     private static void StartBackgroundAgent(string installPath)
     {
@@ -2162,8 +2172,7 @@ internal static class Program
                 try
                 {
                     var imagePath = NormalizeProcessImagePath(candidate.MainModule?.FileName);
-                    if (imagePath is null) continue;
-                    if (string.Equals(imagePath, Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase))
+                    if (ProcessImageMayMatchExpected(imagePath, executable))
                         return true;
                 }
                 catch (System.ComponentModel.Win32Exception) { return true; }
