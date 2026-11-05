@@ -220,6 +220,18 @@ public sealed class ProcessSnapshotMonitor
                 parent = observedParent;
                 behavior = ProcessLaunchBehaviorRules.Evaluate(parent.ProcessName, change.ProcessName);
             }
+            else if (change.Action == "Proces zaobserwowany" &&
+                wmiStarts.Contains((change.ProcessId, change.ProcessName)) &&
+                wmiParentProcessIds.TryGetValue((change.ProcessId, change.ProcessName), out var traceParentId) &&
+                traceParentId > 0 && traceParentId != change.ProcessId &&
+                current.TryGetValue(traceParentId, out var traceParentName) &&
+                !string.Equals(traceParentName, "unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                // WMI's ParentProcessId remains useful when the child has already exited
+                // and cannot be related through a live Toolhelp child snapshot.
+                parent = new(traceParentId, traceParentName);
+                behavior = ProcessLaunchBehaviorRules.Evaluate(parent.ProcessName, change.ProcessName);
+            }
             if (behavior is not null) LastSuspiciousLaunchMatches++;
             var observedFromWmi = change.Action == "Proces zaobserwowany" && wmiStarts.Contains((change.ProcessId, change.ProcessName));
             var wmiParentProcessId = 0;

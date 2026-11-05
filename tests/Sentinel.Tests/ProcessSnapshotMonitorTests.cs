@@ -77,6 +77,26 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task WmiParentPidAppliesBehaviorRuleToShortLivedOfficeChild()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var observedAt = DateTimeOffset.UtcNow.AddMilliseconds(-250);
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string> { [1] = "winword" });
+
+        var count = await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(observedAt, "Proces zaobserwowany", 808, "powershell", 1)]);
+
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal(1, count);
+        Assert.Equal(RiskLevel.Moderate, item.Risk);
+        Assert.Equal("Nietypowe uruchomienie procesu", item.Category);
+        Assert.Contains("winword (PID 1) → powershell (PID 808)", item.Explanation);
+        Assert.Contains("process.parent-child.relationship-observed", item.EvidenceCodes!);
+        Assert.Contains("process.behavior.office-spawned-script-host", item.EvidenceCodes!);
+        Assert.Contains("process.wmi.start-event", item.EvidenceCodes!);
+    }
+
+    [Fact]
     public async Task WmiStartUsesSameImageInspectionAndCorrelationPipelineAsSnapshotStart()
     {
         var store = new LocalStore(directory); await store.InitializeAsync();
