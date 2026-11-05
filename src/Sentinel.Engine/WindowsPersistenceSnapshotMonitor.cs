@@ -20,16 +20,22 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private readonly Func<PersistenceBaseSnapshotCapture> capture;
     private readonly Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks;
     private readonly Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices;
+    private readonly Func<IReadOnlyCollection<string>> startupWatcherRoots;
+    private readonly List<FileSystemWatcher> startupWatchers = [];
     private readonly TimeSpan minimumInterval;
     private long? lastAttemptTimestamp;
     private bool? wasEnabled;
+    private int startupChangePending;
+    private int startupWatcherNeedsReset;
+    private bool startupWatchersInitialized;
+    private string startupWatcherStatus = "zdarzeniowe powiadomienia folderów Startup nie zostały uruchomione";
 
     public string State { get; private set; } = "Monitor zmian autostartu jest wyłączony.";
     public int LastSuspiciousChanges { get; private set; }
 
     public WindowsPersistenceSnapshotMonitor(TimeSpan? minimumInterval = null)
         : this(CaptureSupportedPlatform, WindowsScheduledTaskSnapshotReader.CaptureAsync,
-            _ => Task.FromResult(CaptureServiceRegistry()), minimumInterval) { }
+            _ => Task.FromResult(CaptureServiceRegistry()), minimumInterval, CaptureStartupWatcherRoots) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
@@ -53,17 +59,19 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
         TimeSpan? minimumInterval = null)
         : this(() => new PersistenceBaseSnapshotCapture(true, capture(), true, true, "dostępne"),
-            captureScheduledTasks, captureServices, minimumInterval) { }
+            captureScheduledTasks, captureServices, minimumInterval, null) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<PersistenceBaseSnapshotCapture> capture,
         Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
         Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
-        TimeSpan? minimumInterval = null)
+        TimeSpan? minimumInterval = null,
+        Func<IReadOnlyCollection<string>>? startupWatcherRoots = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.captureScheduledTasks = captureScheduledTasks ?? throw new ArgumentNullException(nameof(captureScheduledTasks));
         this.captureServices = captureServices ?? throw new ArgumentNullException(nameof(captureServices));
+        this.startupWatcherRoots = startupWatcherRoots ?? (() => Array.Empty<string>());
         this.minimumInterval = minimumInterval ?? TimeSpan.FromSeconds(30);
         if (this.minimumInterval < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minimumInterval));
     }
@@ -74,6 +82,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         LastSuspiciousChanges = 0;
         if (!enabled || paused)
         {
+            StopStartupWatchers();
             if (wasEnabled is null or true)
             {
                 try { await store.ResetWindowsPersistenceMonitorSnapshotAsync(cancellationToken); }
@@ -96,7 +105,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             return 0;
         }
 
-        if (wasEnabled == true && lastAttemptTimestamp is { } previous && Stopwatch.GetElapsedTime(previous) < minimumInterval) return 0;
+        EnsureStartupWatchers();
+        var startupChangeObserved = Interlocked.Exchange(ref startupChangePending, 0) != 0;
+        if (wasEnabled == true && !startupChangeObserved && lastAttemptTimestamp is { } previous && Stopwatch.GetElapsedTime(previous) < minimumInterval) return 0;
         wasEnabled = true;
         lastAttemptTimestamp = Stopwatch.GetTimestamp();
 
@@ -315,7 +326,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 State = "Nie można ustawić lokalnego baseline'u autostartu: " + exception.GetType().Name;
                 return 0;
             }
-            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
+            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {startupWatcherStatus}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
             return 0;
         }
         var baseline = stored.Entries.ToDictionary(pair => pair.Key,
@@ -468,9 +479,88 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
         var pending = GetChanges(baseline, snapshot).Count;
         State = pending > 0
-            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd()
-            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
+            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {startupWatcherStatus}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd()
+            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {startupWatcherStatus}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
         return recorded;
+    }
+
+    private void EnsureStartupWatchers()
+    {
+        if (Interlocked.Exchange(ref startupWatcherNeedsReset, 0) != 0)
+        {
+            foreach (var existing in startupWatchers) existing.Dispose();
+            startupWatchers.Clear();
+            startupWatchersInitialized = false;
+        }
+        if (startupWatchersInitialized) return;
+        startupWatchersInitialized = true;
+        var created = 0;
+        try
+        {
+            foreach (var root in startupWatcherRoots().Where(path => !string.IsNullOrWhiteSpace(path))
+                         .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Take(2))
+            {
+                if (!Directory.Exists(root)) continue;
+                var attributes = File.GetAttributes(root);
+                if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0) continue;
+                var watcher = new FileSystemWatcher(root)
+                {
+                    IncludeSubdirectories = false,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    InternalBufferSize = 4096
+                };
+                watcher.Created += OnStartupFileChanged;
+                watcher.Changed += OnStartupFileChanged;
+                watcher.Deleted += OnStartupFileChanged;
+                watcher.Renamed += OnStartupFileRenamed;
+                watcher.Error += OnStartupWatcherError;
+                watcher.EnableRaisingEvents = true;
+                startupWatchers.Add(watcher);
+                created++;
+            }
+            startupWatcherStatus = created == 0
+                ? "FileSystemWatcher folderów Startup niedostępny; zmiany są sprawdzane snapshotem okresowym"
+                : $"FileSystemWatcher aktywny dla {created} folderów Startup; snapshot potwierdza wykryte zmiany";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException)
+        {
+            foreach (var watcher in startupWatchers) watcher.Dispose();
+            startupWatchers.Clear();
+            startupWatcherStatus = "FileSystemWatcher folderów Startup niedostępny (" + exception.GetType().Name + "); używany jest snapshot okresowy";
+        }
+    }
+
+    private void StopStartupWatchers()
+    {
+        foreach (var watcher in startupWatchers) watcher.Dispose();
+        startupWatchers.Clear();
+        startupWatchersInitialized = false;
+        Interlocked.Exchange(ref startupChangePending, 0);
+        Interlocked.Exchange(ref startupWatcherNeedsReset, 0);
+        startupWatcherStatus = "zdarzeniowe powiadomienia folderów Startup są wstrzymane";
+    }
+
+    private void OnStartupFileChanged(object sender, FileSystemEventArgs args)
+        => Interlocked.Exchange(ref startupChangePending, 1);
+
+    private void OnStartupFileRenamed(object sender, RenamedEventArgs args)
+        => Interlocked.Exchange(ref startupChangePending, 1);
+
+    private void OnStartupWatcherError(object sender, ErrorEventArgs args)
+    {
+        Interlocked.Exchange(ref startupChangePending, 1);
+        Interlocked.Exchange(ref startupWatcherNeedsReset, 1);
+        startupWatcherStatus = "błąd FileSystemWatcher folderów Startup; ponawiane jest utworzenie obserwatorów";
+    }
+
+    private static IReadOnlyCollection<string> CaptureStartupWatcherRoots()
+    {
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup)
+        };
+        return roots.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
     }
 
     private static IReadOnlyList<PersistenceChange> GetChanges(
@@ -945,7 +1035,11 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         return source + ":" + stable;
     }
 
-    public void Dispose() { lastAttemptTimestamp = null; }
+    public void Dispose()
+    {
+        StopStartupWatchers();
+        lastAttemptTimestamp = null;
+    }
 
     private enum PersistenceChangeKind { Added, Changed, Removed }
     private sealed record PersistenceChange(string Key, PersistenceChangeKind Kind,

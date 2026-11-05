@@ -44,6 +44,45 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task StartupFolderWatcherExpeditesSnapshotConfirmation()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var store = await CreateStore();
+        var startup = Path.Combine(root, "startup-watch");
+        Directory.CreateDirectory(startup);
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
+        var noTasks = new ScheduledTaskSnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var noServices = new PersistenceRegistrySnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var monitor = new WindowsPersistenceSnapshotMonitor(
+            () => new PersistenceBaseSnapshotCapture(true, entries, true, true, "test"),
+            _ => Task.FromResult(noTasks), _ => Task.FromResult(noServices),
+            TimeSpan.FromSeconds(30), () => [startup]);
+        using (monitor)
+        {
+            Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+            Assert.Contains("FileSystemWatcher aktywny", monitor.State, StringComparison.Ordinal);
+
+            await File.WriteAllTextAsync(Path.Combine(startup, "new-entry.lnk"), "synthetic startup entry");
+            entries["startup.user:test"] = Entry("startup.user", "synthetic startup entry", true);
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var captured = 0;
+            while (DateTime.UtcNow < deadline && captured == 0)
+            {
+                captured = await monitor.CollectAsync(store, enabled: true, paused: false);
+                if (captured == 0) await Task.Delay(50);
+            }
+
+            Assert.Equal(1, captured);
+            Assert.Single(await store.ReadAsync());
+            Assert.Contains("zapisano 1 zmian", monitor.State, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
     public async Task InaccessibleIfeoSourcePreservesOtherSourcesAndInitializesSilentlyWhenAccessReturns()
     {
         var store = await CreateStore();
