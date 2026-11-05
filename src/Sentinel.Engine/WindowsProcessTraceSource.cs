@@ -80,7 +80,9 @@ public sealed class WindowsProcessTraceSource : IDisposable
                     return;
                 }
                 retryAttempt = 0;
-                State = "Odbieranie zdarzeń startu i zakończenia procesów przez WMI; kolejka ograniczona do 4096.";
+                State = DroppedEvents == 0
+                    ? "Odbieranie zdarzeń startu i zakończenia procesów przez WMI; kolejka ograniczona do 4096."
+                    : $"Subskrypcja WMI działa, ale pominięto {DroppedEvents} zdarzeń po przepełnieniu kolejki; snapshot PID jest fallbackiem.";
             }
             catch (Exception exception)
             {
@@ -151,7 +153,13 @@ public sealed class WindowsProcessTraceSource : IDisposable
             item.ParentProcessId < 0 || item.Action is not ("Proces zaobserwowany" or "Proces zakończony")) return;
         lock (gate)
         {
-            if (events.Count == Capacity) { Interlocked.Increment(ref dropped); return; }
+            if (events.Count == Capacity)
+            {
+                var totalDropped = Interlocked.Increment(ref dropped);
+                if (totalDropped == 1)
+                    State = "Zdarzenia procesów WMI są ograniczone: przepełniono kolejkę 4096; pominięto zdarzenia, snapshot PID pozostaje fallbackiem.";
+                return;
+            }
             events.Enqueue(item);
         }
     }

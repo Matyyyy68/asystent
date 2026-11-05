@@ -4,7 +4,7 @@
 
 Engine używa dwóch źródeł:
 
-1. Zdarzeń WMI start/stop (`Win32_ProcessStartTrace`, `Win32_ProcessStopTrace`) w kolejce do 4096 wpisów. Po błędzie startu albo nieoczekiwanym zatrzymaniu subskrypcji silnik próbuje ją odtworzyć po 5, 10, 20… sekundach, maksymalnie co 5 minut; snapshot pozostaje aktywnym fallbackiem.
+1. Zdarzeń WMI start/stop (`Win32_ProcessStartTrace`, `Win32_ProcessStopTrace`) w kolejce do 4096 wpisów. Po błędzie startu albo nieoczekiwanym zatrzymaniu subskrypcji silnik próbuje ją odtworzyć po 5, 10, 20… sekundach, maksymalnie co 5 minut; snapshot pozostaje aktywnym fallbackiem. Przepełnienie kolejki podnosi trwały w ramach życia procesu licznik strat i obniża status kolektora; kolektor nie raportuje wtedy zdrowego odbioru WMI.
 2. Snapshotu PID/nazw jako fallbacku i rekonsyliacji.
 
 Alerty procesu zawierają źródło (`process-wmi` albo `process-snapshot`), PID, nazwę, czas obserwacji i kody dowodów. WMI dostarcza Parent PID nawet dla krótkiego procesu; jeśli jego nazwy nie da się ustalić, zapisujemy Parent PID jako ograniczone wyjaśnienie bez przypisywania nazwy. Dla nadal działających procesów relacja parent-child jest odczytywana z Windows; dla zdarzenia WMI silnik może też dopasować Parent PID do bieżącego snapshotu, nawet gdy dziecka nie ma już w snapshotcie. Pozwala to zastosować regułę Office → interpreter do krótkiego procesu, z umiarkowanym poziomem heurystycznym i jawną informacją o ograniczeniach. WMI start może zachować fakt uruchomienia krótkiego procesu, lecz niekoniecznie jego ścieżkę ani hash.

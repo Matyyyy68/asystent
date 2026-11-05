@@ -89,6 +89,29 @@ public sealed class WindowsProcessTraceSourceTests
         Assert.Empty(source.Drain());
     }
 
+    [Fact]
+    public void QueueOverflowIsBoundedAndReportedAsDegraded()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var subscriptions = new ConcurrentBag<FakeSubscription>();
+        using var source = new WindowsProcessTraceSource((_, _) =>
+        {
+            var subscription = new FakeSubscription(false, subscriptions.Count + 1);
+            subscriptions.Add(subscription);
+            return subscription;
+        });
+        source.Start();
+        var startSubscription = Assert.Single(subscriptions, item => item.Sequence == 1);
+        var item = new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zaobserwowany", 123,
+            "synthetic-process", 1);
+
+        for (var index = 0; index < 4097; index++) startSubscription.RaiseEvent(item);
+
+        Assert.Equal(1, source.DroppedEvents);
+        Assert.Equal(4096, source.Drain().Count);
+        Assert.Contains("przepełniono kolejkę", source.State, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class FakeSubscription(bool failOnStart, int sequence) : IProcessTraceSubscription
     {
         public event Action<WindowsProcessTraceEvent>? EventReceived;
