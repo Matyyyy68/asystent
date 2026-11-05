@@ -229,8 +229,6 @@ internal static class Program
             menu.Items.Add("Ostatnie alerty", null, (_, _) => OpenUi(appRoot, "--alerts"));
             menu.Items.Add("Sprawdź aktualizacje", null, async (_, _) => await CheckForUpdatesAsync());
             menu.Items.Add("Zamknij interfejs (ochrona działa dalej)", null, (_, _) => CloseUi(appRoot));
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Sentinel działa w tle", null, (_, _) => { });
             normalIcon = TryLoadIcon(Path.Combine(appRoot, "Sentinel AI.exe"));
             tray = new NotifyIcon
             {

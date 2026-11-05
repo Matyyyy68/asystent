@@ -18,3 +18,12 @@ test('tray alert route opens the event history and defaults to the overview', as
   assert.match(agent, /menu\.Items\.Add\("Ostatnie alerty"[\s\S]*?OpenUi\(appRoot, "--alerts"\)/,
     'The user-mode tray must expose the recent-events action.');
 });
+
+test('tray menu contains no inert clickable background-status item', () => {
+  const agent = fs.readFileSync(path.resolve(__dirname, '../../src/Sentinel.Agent/Program.cs'), 'utf8');
+  assert.doesNotMatch(agent, /menu\.Items\.Add\("Sentinel działa w tle"[^\n]*=>\s*\{\s*\}\)/,
+    'A status that performs no action must not be presented as a clickable menu command.');
+  for (const label of ['Otwórz Sentinel AI', 'Stan ochrony', 'Ostatnie alerty', 'Sprawdź aktualizacje']) {
+    assert.match(agent, new RegExp(`menu\\.Items\\.Add\\("${label}"`), `${label} must remain available in the tray menu.`);
+  }
+});
