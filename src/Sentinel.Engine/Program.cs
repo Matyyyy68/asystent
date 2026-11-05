@@ -60,6 +60,8 @@ var fileHashReputation = new FileHashReputation(directory);
 var ipReputation = new IpReputation(directory);
 await using var processImageInspectionQueue = new ProcessImageInspectionQueue(store, fileHashReputation, ReadAuthenticodeSignatureAsync);
 var processMonitor = new ProcessSnapshotMonitor(ProcessImageInspectionQueue.ResolveExecutablePath, processImageInspectionQueue.TryEnqueue);
+using var processTraceSource = new WindowsProcessTraceSource();
+processTraceSource.Start();
 using var persistenceMonitor = new WindowsPersistenceSnapshotMonitor();
 foreach (var pendingInspection in await store.ReadPendingProcessImageInspectionsAsync())
     if (!processImageInspectionQueue.TryEnqueue(pendingInspection.EventId, pendingInspection.Path))
@@ -346,7 +348,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     lastCollectionAtUtc,
-                    processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
+                    processes = processMonitor.State, processEvents = processTraceSource.State,
+                    droppedProcessEvents = processTraceSource.DroppedEvents, tcpConnections = tcpConnectionMonitor.State,
                     persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
@@ -385,7 +388,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                 certFeedRefreshScheduler.Evaluate(settings.AutoUpdateCertFeed, reputation.Status(DateTimeOffset.UtcNow),
                     DateTimeOffset.UtcNow, reputation.UpdateAsync, reputation.SaveAutoRefreshCheckpoint);
                 var detections = new List<string>();
-                var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
+                var processTraceEvents = processTraceSource.Drain();
+                var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications,
+                    traceEvents: processTraceEvents);
                 var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
                     settings.ExcludedApplications);
                 var downloadedFileMatches = await downloadedFileMonitor.CollectAsync(store, fileHashReputation);
@@ -446,7 +451,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     ? await SyncEnterpriseAsync(force: false) : null;
                 lastCollectionAtUtc = DateTimeOffset.UtcNow;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
-                    processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
+                    processChanges, processes = processMonitor.State, processEvents = processTraceSource.State,
+                    droppedProcessEvents = processTraceSource.DroppedEvents, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
                     suspiciousProcessLaunches = processMonitor.LastSuspiciousLaunchMatches,
                     tcpIpReputationMatches = tcpConnectionMonitor.LastIpReputationMatches,
                     processImageReputationMatches = processImageInspectionQueue.TakeLocalReputationMatches(),

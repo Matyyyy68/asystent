@@ -1,4 +1,4 @@
-const unavailable = /niedostępny|niedostępna|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione|jeszcze nie wykonano/i;
+const unavailable = /niedostępn(?:y|a|e)|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione|jeszcze nie wykonano/i;
 
 export function getProtectionStatus(status, firstRun, firstAssessment, machineService) {
   if (!status) return { title: 'Ochrona niedostępna', description: 'Silnik nie odpowiada. Nie można potwierdzić działania monitorowania.' };
@@ -13,6 +13,7 @@ export function getProtectionStatus(status, firstRun, firstAssessment, machineSe
 
   const monitors = [
     ['Procesy', status.processes, true],
+    ['Zdarzenia startu procesów', status.processEvents, true],
     ['Pobrane pliki', status.downloadedFiles, status.settings?.monitorDownloadedFiles],
     ['Zmiany autostartu', status.persistence, status.settings?.monitorPersistenceChanges],
     ['Połączenia sieciowe', status.tcpConnections, status.settings?.monitorNetworkConnections]

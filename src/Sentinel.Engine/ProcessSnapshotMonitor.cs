@@ -74,7 +74,8 @@ public sealed class ProcessSnapshotMonitor
             ? started.CorrelationId : null;
     }
 
-    public async Task<int> CollectAsync(LocalStore store, bool paused, string excludedApplications, CancellationToken cancellationToken = default)
+    public async Task<int> CollectAsync(LocalStore store, bool paused, string excludedApplications,
+        CancellationToken cancellationToken = default, IReadOnlyCollection<WindowsProcessTraceEvent>? traceEvents = null)
     {
         LastSuspiciousLaunchMatches = 0;
         Dictionary<int, string> current;
@@ -125,7 +126,22 @@ public sealed class ProcessSnapshotMonitor
 
         var previousSnapshotTruncated = knownSnapshotTruncated;
         var changes = GetChanges(knownProcesses, current, excludedApplications, previousSnapshotTruncated, currentTruncated);
-        var persistedCurrent = GetPersistableProcesses(current, excludedApplications);
+        var wmiStarts = new HashSet<(int ProcessId, string ProcessName)>();
+        if (traceEvents is { Count: > 0 } && !paused)
+        {
+            var excluded = new HashSet<string>((excludedApplications ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase)
+            { "Sentinel.Engine" };
+            static bool IsStart(string action) => action == "Proces zaobserwowany";
+            var observed = changes.Select(change => (IsStart(change.Action), change.ProcessId, change.ProcessName)).ToHashSet();
+            foreach (var trace in traceEvents.OrderBy(item => item.ObservedAt))
+            {
+                if (excluded.Contains(trace.ProcessName) || trace.ProcessId <= 0) continue;
+                var key = (IsStart(trace.Action), trace.ProcessId, trace.ProcessName);
+                if (observed.Add(key)) changes.Add(new(trace.Action, trace.ProcessId, trace.ProcessName, trace.ObservedAt));
+                if (trace.Action == "Proces zaobserwowany") wmiStarts.Add((trace.ProcessId, trace.ProcessName));
+            }
+        }
+        var persistedCurrent = GetPersistableProcesses(current, excludedApplications ?? "");
         var (upserts, removed) = GetPersistedDelta(persistedProcesses, persistedCurrent);
         if (paused)
         {
@@ -153,7 +169,8 @@ public sealed class ProcessSnapshotMonitor
         var now = DateTimeOffset.UtcNow;
         foreach (var processId in recentlyObservedStarts.Where(entry => entry.Value.Timestamp < now.AddSeconds(-60)).Select(entry => entry.Key).ToArray())
             recentlyObservedStarts.Remove(processId);
-        var discovered = changes.Select(change => new ProcessChangeQueueItem(0, Guid.NewGuid(), now, change.Action,
+        var discovered = changes.Select(change => new ProcessChangeQueueItem(0, Guid.NewGuid(), change.ObservedAt,
+            change.Action,
             change.ProcessId, change.ProcessName,
             change.Action == "Proces zaobserwowany" ? Guid.NewGuid() : WasRecentlyObservedStart(change.ProcessId, change.ProcessName, now))).ToArray();
         var changesDrainedThisSample = Math.Min(Math.Min(pendingChanges.Count, pendingChanges.Items.Count), MaximumEventsPerSample);
@@ -208,7 +225,10 @@ public sealed class ProcessSnapshotMonitor
                 : delayed
                     ? $"Windows zaobserwował zniknięcie PID {change.ProcessId} ({change.ProcessName}) wcześniej; zapis zdarzenia opóźniło oczekiwanie w kolejce."
                     : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
-            var evidenceCodes = new List<string> { change.Action == "Proces zaobserwowany" ? "process.snapshot.new-pid" : "process.snapshot.pid-absent" };
+            var observedFromWmi = change.Action == "Proces zaobserwowany" && wmiStarts.Contains((change.ProcessId, change.ProcessName));
+            var evidenceCodes = new List<string> { change.Action == "Proces zaobserwowany"
+                ? observedFromWmi ? "process.wmi.start-event" : "process.snapshot.new-pid"
+                : change.Action == "Proces zakończony" ? "process.wmi.stop-event" : "process.snapshot.pid-absent" };
             if (change.Action == "Proces zaobserwowany") evidenceCodes.Add(imagePath is null ? "process.image.path-unavailable" : "process.image.path-available");
             if (parent is not null) evidenceCodes.Add("process.parent-child.relationship-observed");
             if (behavior is not null) evidenceCodes.Add(behavior.RuleCode);
@@ -218,7 +238,8 @@ public sealed class ProcessSnapshotMonitor
                     ? "Sprawdź, czy użytkownik oczekiwał uruchomienia interpretera przez aplikację Office. Sentinel AI nie zablokował ani nie zatrzymał procesu."
                     : "To obserwacja metadanych, nie werdykt zagrożenia. Zweryfikuj pochodzenie procesu.", EventStatus.New,
                 EventId: eventId,
-                Source: "process-snapshot", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+                Source: observedFromWmi || change.Action == "Proces zakończony" ? "process-wmi" : "process-snapshot",
+                RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: change.ProcessId, ProcessName: change.ProcessName,
                 CorrelationId: change.CorrelationId,
                 EvidenceCodes: evidenceCodes,
@@ -292,10 +313,10 @@ public sealed class ProcessSnapshotMonitor
         var changes = new List<ProcessChange>();
         foreach (var (id, name) in current)
             if (!previousTruncated && (!previous.TryGetValue(id, out var previousName) || !string.Equals(name, previousName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
-                changes.Add(new("Proces zaobserwowany", id, name));
+                changes.Add(new("Proces zaobserwowany", id, name, DateTimeOffset.UtcNow));
         foreach (var (id, name) in previous)
             if (!currentTruncated && (!current.TryGetValue(id, out var currentName) || !string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)) && !excluded.Contains(name))
-                changes.Add(new("Proces zniknął z migawki", id, name));
+                changes.Add(new("Proces zniknął z migawki", id, name, DateTimeOffset.UtcNow));
         return changes;
     }
 
@@ -318,5 +339,5 @@ public sealed class ProcessSnapshotMonitor
         return (upserts, removed);
     }
 
-    private sealed record ProcessChange(string Action, int ProcessId, string ProcessName);
+    private sealed record ProcessChange(string Action, int ProcessId, string ProcessName, DateTimeOffset ObservedAt);
 }

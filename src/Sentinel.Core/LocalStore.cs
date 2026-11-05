@@ -434,7 +434,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
             await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
-            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source='process-snapshot' AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
+            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -723,7 +723,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var current = now.ToUniversalTime();
         var cutoff = current.AddSeconds(-60);
         await using var c = await Open(ct); using var command = c.CreateCommand();
-        command.CommandText = "SELECT process_id,process_name,timestamp,correlation_id FROM events WHERE source='process-snapshot' AND category='Proces zaobserwowany' AND process_id IS NOT NULL AND process_name IS NOT NULL AND correlation_id IS NOT NULL AND timestamp >= $cutoff AND timestamp <= $now ORDER BY timestamp DESC LIMIT 10000";
+        command.CommandText = "SELECT process_id,process_name,timestamp,correlation_id FROM events WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND process_id IS NOT NULL AND process_name IS NOT NULL AND correlation_id IS NOT NULL AND timestamp >= $cutoff AND timestamp <= $now ORDER BY timestamp DESC LIMIT 10000";
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$now", current.ToString("O", CultureInfo.InvariantCulture));
         var results = new List<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>();
@@ -1550,7 +1550,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             throw new ArgumentException("Nieprawidłowy SHA-256 pliku procesu.");
         await using var c = await Open(cancellationToken); using var transaction = c.BeginTransaction();
         using var read = c.CreateCommand(); read.Transaction = transaction;
-        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source='process-snapshot'";
+        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source IN ('process-snapshot','process-wmi')";
         read.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
         long rowId; IReadOnlyList<string> evidence; Guid? processCorrelationId; DateTimeOffset processTimestamp;
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
@@ -1651,7 +1651,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<IReadOnlyList<(Guid EventId, string Path)>> ReadPendingProcessImageInspectionsAsync(CancellationToken cancellationToken = default)
     {
         await using var c = await Open(cancellationToken); using var command = c.CreateCommand();
-        command.CommandText = "SELECT event_id,process_image_path FROM events WHERE source='process-snapshot' AND process_image_signature_status='Pending' AND event_id IS NOT NULL AND process_image_path IS NOT NULL ORDER BY id LIMIT 33";
+        command.CommandText = "SELECT event_id,process_image_path FROM events WHERE source IN ('process-snapshot','process-wmi') AND process_image_signature_status='Pending' AND event_id IS NOT NULL AND process_image_path IS NOT NULL ORDER BY id LIMIT 33";
         var pending = new List<(Guid EventId, string Path)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
