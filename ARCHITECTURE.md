@@ -1,4 +1,4 @@
-# Architektura Sentinel AI — stan źródeł 2026-10-21
+# Architektura Sentinel AI — stan źródeł 2026-11-05
 
 Ten dokument opisuje aktywny produkt w repozytorium. Historyczny klient WPF znajduje się w `legacy/` i nie należy do bieżącego buildu. Pełny audyt luk, statusy funkcji oraz osobne plany prac są w [analizie luk](docs/IMPLEMENTATION_GAP_ANALYSIS.md), [postępie projektu](docs/PROJECT_PROGRESS.md) i `docs/implementation-plans/`.
 
@@ -7,11 +7,17 @@ Ten dokument opisuje aktywny produkt w repozytorium. Historyczny klient WPF znaj
 ```mermaid
 flowchart LR
   U[Użytkownik] --> UI[React / TypeScript]
-  UI -->|dozwolone IPC| E[Electron main + tray]
-  E -->|JSON Lines v1 przez stdio| EN[Sentinel.Engine .NET 10]
+  UI -->|dozwolone IPC| E[Electron main]
+  E -->|named pipe SentinelAI.Engine.v1.sesja| AG[Sentinel.Agent: tray, autostart]
+  AG -->|JSON Lines v1 przez stdio| EN[Sentinel.Engine .NET 10]
   EN --> C[Sentinel.Core: reguły, reputacja, korelacja]
-  EN --> DB[(Lokalne SQLite: historia, ustawienia, baseline'y)]
+  EN --> DB[(SQLite użytkownika: %LOCALAPPDATA%)]
   EN --> W[Windows: cache DNS, IP Helper, procesy, Downloads]
+  SVC[Sentinel.Service: usługa SCM, LocalService] -->|JSON Lines v1 przez stdio| SEN[Sentinel.Engine instancja usługi]
+  SEN --> SDBL[(SQLite usługi: %ProgramData%)]
+  SEN --> W
+  AG -->|pipe SentinelAI.Service.Status.v1: ingestEvents, recentEvents| SVC
+  E -->|pipe SentinelAI.Service.Status.v1: status, recentEvents| SVC
   B[Chrome / Edge MV3] -->|Native Messaging| H[Sentinel.UrlHost]
   H --> C
   H --> DB
@@ -22,7 +28,11 @@ flowchart LR
   ADMIN[Panel administratora] --> API
 ```
 
-Aktywny klient to UI React uruchamiane przez Electron (`desktop/`). Renderer działa z sandboxem, context isolation i wyłączonym Node integration; preload udostępnia jawnie dozwolone metody IPC. Electron utrzymuje proces silnika .NET (`src/Sentinel.Engine`) przez JSON Lines na odziedziczonym stdin/stdout. `Sentinel.Core` (`src/Sentinel.Core`) wykonuje lokalne reguły, operacje SQLite, reputację i wyszukiwanie lokalnej bazy wiedzy. Silnik nie udostępnia lokalnego portu HTTP.
+Aktywny klient to UI React uruchamiane przez Electron (`desktop/`). Renderer działa z sandboxem, context isolation i wyłączonym Node integration; preload udostępnia jawnie dozwolone metody IPC. Electron nie uruchamia silnika bezpośrednio (poza trybem smoke testu): łączy się przez named pipe `SentinelAI.Engine.v1.<sesja>` z agentem `src/Sentinel.Agent`, a gdy agent nie działa, uruchamia go jako odłączony proces. Agent (WinForms, ikona w zasobniku, jedna instancja na sesję dzięki mutexowi `Local\SentinelAI.CoreAgent.v1`, autostart przez HKCU `Run` z `--background`) utrzymuje proces silnika .NET (`src/Sentinel.Engine`) przez JSON Lines na stdin/stdout, wywołuje `collect` co około 1 s i restartuje silnik po awarii z zachowaniem zredagowanej diagnostyki. Dzięki temu monitorowanie użytkownika działa także przy zamkniętym oknie Electron. `Sentinel.Core` (`src/Sentinel.Core`) wykonuje lokalne reguły, operacje SQLite, reputację i wyszukiwanie lokalnej bazy wiedzy. Silnik nie udostępnia lokalnego portu HTTP.
+
+Usługa Windows `src/Sentinel.Service` jest instalowana po zgodzie UAC do `Program Files\Sentinel AI\Service` i działa jako `NT AUTHORITY\LocalService` ze startem automatycznym. Uruchamia własną instancję `Sentinel.Engine` z katalogiem danych `%ProgramData%\Sentinel AI Service` (chroniony DACL, odrzucanie reparse points), wykonuje `collect` w pętli co około 1 s i restartuje silnik z backoffem. Udostępnia pipe `SentinelAI.Service.Status.v1` z metodami `status`, `recentEvents`, `eventStatus` i `ingestEvents`; ACL pipe zezwala tylko na SID użytkownika, który instalował produkt (`--allowed-user-sid`). Electron odczytuje przez ten pipe stan i historię usługi. Agent co 30 s pobiera nowe zdarzenia usługi do powiadomień oraz przekazuje do usługi zredagowane zdarzenia z historii silnika użytkownika (trwały kursor, pełny ACK, deduplikacja ponowień po `EventId`, walidacja całej paczki przed zapisem).
+
+Silnik użytkownika i usługa prowadzą **dwie osobne bazy SQLite**. Przekazywanie Agent → Service nie scala ich w jedno źródło prawdy, a sygnały o różnych `EventId` dotyczące tego samego zjawiska nie są jeszcze korelowane ani deduplikowane.
 
 Rozszerzenie Manifest V3 dla Chrome i Edge przekazuje główną nawigację HTTP/HTTPS do hosta Native Messaging (`src/Sentinel.UrlHost`). Host weryfikuje dozwolone rozszerzenie i kieruje dane do lokalnego silnika. Ostrzeżenie może pojawić się po rozpoczęciu nawigacji; integracja nie jest synchronicznym filtrem ani blokadą. Rozszerzenie nie jest publikowane w sklepach i wymaga ręcznego załadowania.
 
@@ -45,10 +55,10 @@ Obserwacja metadanych połączeń nie oznacza inspekcji całego ruchu. Produkt n
 
 ## Analiza, dane i AI
 
-Ręcznie podany tekst i URL przechodzą przez deterministyczne reguły offline oraz lokalną listę Public Suffix List. Reguły są wersjonowane (`2026.10.2`), a wyniki wraz z kodami dowodów trafiają do historii bez zapisywania pełnej treści lub URL. Obecny zestaw 25 scenariuszy URL jest syntetycznym zestawem regresyjnym, nie miarą skuteczności na rzeczywistym phishingu. `confidence` nie jest kalibrowane.
+Ręcznie podany tekst i URL przechodzą przez deterministyczne reguły offline oraz lokalną listę Public Suffix List. Reguły są wersjonowane (`2026.11.03`), a wyniki wraz z kodami dowodów trafiają do historii bez zapisywania pełnej treści lub URL. Obecny zestaw 25 scenariuszy URL jest syntetycznym zestawem regresyjnym, nie miarą skuteczności na rzeczywistym phishingu. `confidence` nie jest kalibrowane.
 
-SQLite klienta przechowuje historię, ustawienia, reputację i baseline'y monitorów. Aktualny schemat to v18; migracje, retencja, eksport i backup/restore mają testy. Baza nie jest szyfrowana. Dane baseline'u Downloads obejmują lokalne ścieżki, rozmiary i czasy modyfikacji. Wyszukiwanie wiedzy używa lokalnego FTS5 dla obsługiwanych formatów; wybrane trafienia można przekazać do Ollama dopiero po włączeniu AI. Nie jest to wyszukiwanie semantyczne, OCR ani gwarancja poprawności odpowiedzi. Rzeczywisty model Ollama nie był dostępny na maszynie audytu.
+SQLite klienta (osobno dla użytkownika i usługi) przechowuje historię, ustawienia, reputację i baseline'y monitorów. Aktualny schemat to v38; migracje, retencja, eksport i backup/restore mają testy. Baza nie jest szyfrowana. Dane baseline'u Downloads obejmują lokalne ścieżki, rozmiary i czasy modyfikacji. Wyszukiwanie wiedzy używa lokalnego FTS5 dla obsługiwanych formatów; wybrane trafienia można przekazać do Ollama dopiero po włączeniu AI. Nie jest to wyszukiwanie semantyczne, OCR ani gwarancja poprawności odpowiedzi. Rzeczywisty model Ollama nie był dostępny na maszynie audytu.
 
 ## Weryfikacja i ograniczenia wdrożenia
 
-Ostatnia odnotowana pełna walidacja źródeł po zmianie atomowego cofania zgody przeszła `scripts/build-user.ps1 -Installer`: .NET 227/227 bez pominięć, Engine IPC, procesy, DNS/TCP/UDP, desktop 9/9, `npm audit` bez podatności, build UI i autotest instalatora. Windows CI `39663289184` również zakończył się sukcesem. Te testy nie są pełnym ręcznym cyklem instalacji, upgrade/rollback, autostartu po restarcie ani deinstalacji na czystym Windows; te scenariusze nadal są otwarte w PLAN-006/008. Osobne blokady to brak decyzji właściciela o licencji, brak certyfikatu podpisu dla zaufanych aktualizacji, brak autoryzowanego klucza/warunków dla rzeczywistego lookup MalwareBazaar oraz brak dostępu do źródeł ETW/DNS wymagających konfiguracji systemu.
+Ostatni pełny Windows CI ([42036158493](https://github.com/Matyyyy68/asystent/actions/runs/42036158493), commit `61e1085`) przeszedł wszystkie kroki: build i testy .NET, desktop 110/110, start usługi SCM z kontrolą tożsamości LocalService i ACL ProgramData, pipe usługi i diagnostyki Agenta, przekazywanie zdarzeń Agent → Service, smoke test Electron, Downloads i soak, autostart, Chrome/Edge E2E, instalator headless oraz widoczny kreator (install/repair/uninstall) i Enterprise API. To weryfikacja izolowanego runnera, nie ręczny cykl na fizycznym, czystym Windows 10/11; ten scenariusz pozostaje otwarty w PLAN-006/008. Aktualne statusy są w [analizie luk](docs/IMPLEMENTATION_GAP_ANALYSIS.md). Osobne blokady to brak decyzji właściciela o licencji, brak certyfikatu podpisu dla zaufanych aktualizacji, brak autoryzowanego klucza/warunków dla rzeczywistego lookup MalwareBazaar oraz brak dostępu do źródeł ETW/DNS wymagających konfiguracji systemu.
