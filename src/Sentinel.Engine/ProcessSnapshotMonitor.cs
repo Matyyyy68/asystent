@@ -267,7 +267,8 @@ public sealed class ProcessSnapshotMonitor
                 CorrelationId: change.CorrelationId,
                 EvidenceCodes: evidenceCodes,
                 ProcessImagePath: imagePath,
-                ProcessImageSignatureStatus: imagePath is not null ? "Pending" : null);
+                ProcessImageSignatureStatus: imagePath is not null ? "Pending" : null,
+                RiskScore: RiskEngine.EvaluateEvidenceCodes(evidenceCodes).Score);
         }).ToArray();
         try
         {

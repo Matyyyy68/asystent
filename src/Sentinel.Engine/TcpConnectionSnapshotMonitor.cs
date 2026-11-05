@@ -206,19 +206,22 @@ public sealed class TcpConnectionSnapshotMonitor
                     : correlatedSuspiciousLaunch
                     ? "Sprawdź powiązane uruchomienie procesu i cel połączenia. Sentinel nie blokuje ruchu; korelacja pozostaje heurystyczna."
                     : "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.";
-            return new SecurityEvent(0, now, ipReputationMatch ? RiskLevel.High : correlatedSuspiciousLaunch ? RiskLevel.Moderate : RiskLevel.Information, category, connection.ProcessName ?? "unknown",
+            var evidenceCodes = item.IsUdp ? new[] { "network.udp.local-endpoint-seen" } : ipReputationMatch
+                ? correlatedSuspiciousLaunch
+                    ? new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
+                    : new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match" }
+                : correlatedSuspiciousLaunch
+                    ? new[] { "network.tcp.connection-snapshot", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
+                    : new[] { "network.tcp.connection-snapshot" };
+            var assessment = RiskEngine.EvaluateEvidenceCodes(evidenceCodes);
+            return new SecurityEvent(0, now, assessment.Level, category, connection.ProcessName ?? "unknown",
                 explanation, recommendation, EventStatus.New,
                 EventId: Guid.NewGuid(), Source: item.IsUdp ? "udp-endpoint-snapshot" : "tcp-connection-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName,
                 CorrelationId: correlationId,
-                EvidenceCodes: item.IsUdp ? ["network.udp.local-endpoint-seen"] : ipReputationMatch
-                    ? correlatedSuspiciousLaunch
-                        ? ["network.tcp.connection-snapshot", "reputation.ip-feed.match", "correlation.process-network.office-spawned-script-host"]
-                        : ["network.tcp.connection-snapshot", "reputation.ip-feed.match"]
-                    : correlatedSuspiciousLaunch
-                    ? ["network.tcp.connection-snapshot", "correlation.process-network.office-spawned-script-host"]
-                    : ["network.tcp.connection-snapshot"]);
+                EvidenceCodes: evidenceCodes,
+                RiskScore: assessment.Score);
         }).ToArray();
 
         var tcpBaselineReset = previousTcpTruncated || tcpTruncated;

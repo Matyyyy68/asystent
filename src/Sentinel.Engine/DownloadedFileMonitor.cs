@@ -329,7 +329,8 @@ public sealed class DownloadedFileMonitor : IDisposable
                         ? CreateHashFeedRecheckEventId(importedAt, hash) : Guid.NewGuid(), Source: "downloads-local-hash",
                     RuleVersion: ThreatAnalysisEngine.RulesVersion,
                     EvidenceCodes: ["file.sha256.matches-local-list", "file.local-list-source-unverified"],
-                    SignalHash: hash);
+                    SignalHash: hash,
+                    RiskScore: RiskEngine.EvaluateEvidenceCodes(["file.sha256.matches-local-list", "file.local-list-source-unverified"]).Score);
                 await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), itemEvent, cancellationToken);
                 baseline[info.FullName] = fileFingerprint;
                 RememberFingerprint(fingerprint);

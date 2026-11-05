@@ -805,3 +805,8 @@ Po zapełnieniu kolejki WMI 4096 rekordów Engine zwiększa licznik odrzuconych 
 # Wynik ryzyka w historii (2026-11-05)
 
 Rozszerzono wynik RiskEngine do trwałych zdarzeń ręcznej analizy: SQLite v41, stronicowany odczyt historii, CSV/JSON, kopia SQLite oraz bezpieczne przekazanie Agent→Service zachowują opcjonalny RiskScore 0–100. Bazy v40 migrują bez utraty historii, dotychczasowe zdarzenia mają NULL. UI pokazuje wartość jako heurystyczny wskaźnik, nie prawdopodobieństwo. Testy magazynu 84/84 PASS; pełna suita .NET 504 PASS + 2 środowiskowe SKIP; Release build 0 ostrzeżeń/błędów; desktop 112/112 PASS. Lokalny TypeScript build/lint nie uruchomił się, ponieważ w tym worktree nie ma `tsc`; Windows CI wymagany. Score pozostaje ograniczony do ręcznej analizy i nie jest skalibrowany ani używany do reakcji.
+
+
+## RiskEngine dla monitorowanych zdarzeń (2026-11-05)
+
+`RiskEngine.EvaluateEvidenceCodes` dodaje punkty wyłącznie dla jawnie znanych kodów dowodów; nieznane kody nie zmieniają oceny. Dopasowanie reputacyjne jest łączone z odpowiadającą mu obserwacją Windows. Korelacja TCP uwzględnia jawny dowód zachowania procesu. Dopasowanie hasha z lokalnej listy o niezweryfikowanym źródle nie otrzymuje samoistnego wyniku numerycznego. Monitoring procesu, TCP, DNS Operational/cache, persistence i Downloads zapisuje wynik w SQLite v41. `RiskEngineTests` 8/8 PASS; pełna suita .NET 506 PASS, 2 pominięte zależnie od środowiska. Pełny Windows CI poprzedniego commita wykrył dodatkowo zbyt ścisłe założenie testu formatu CSV; test został uodporniony na cytowane i niecytowane pola liczbowe. Niezależna kalibracja ryzyka pozostaje nieukończona.

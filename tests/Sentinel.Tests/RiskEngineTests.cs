@@ -53,4 +53,31 @@ public sealed class RiskEngineTests
         Assert.Equal(0, low.Score);
         Assert.Equal(44, high.Score);
     }
+
+    [Fact]
+    public void MonitoredEventScoresUseKnownEvidenceAndIgnoreUnknownCodes()
+    {
+        var oneSignal = RiskEngine.EvaluateEvidenceCodes([
+            "reputation.cert.current-feed-match", "dns.windows-operational-query"]);
+        var correlated = RiskEngine.EvaluateEvidenceCodes([
+            "process.behavior.office-spawned-script-host", "correlation.process-network.office-spawned-script-host"]);
+        var unknown = RiskEngine.EvaluateEvidenceCodes(["made-up.signal"]);
+
+        Assert.Equal(63, oneSignal.Score);
+        Assert.Equal(RiskLevel.High, oneSignal.Level);
+        Assert.Equal(52, correlated.Score);
+        Assert.Equal(RiskLevel.Moderate, correlated.Level);
+        Assert.Equal(0, unknown.Score);
+        Assert.Equal(RiskLevel.Information, unknown.Level);
+    }
+
+    [Fact]
+    public void UnverifiedLocalHashFeedDoesNotProduceNumericRisk()
+    {
+        var result = RiskEngine.EvaluateEvidenceCodes([
+            "file.sha256.matches-local-list", "file.local-list-source-unverified"]);
+
+        Assert.Equal(0, result.Score);
+        Assert.Equal(RiskLevel.Information, result.Level);
+    }
 }

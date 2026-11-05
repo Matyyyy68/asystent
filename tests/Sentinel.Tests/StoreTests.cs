@@ -1095,12 +1095,14 @@ public sealed class StoreTests : IDisposable
     {
         var store = await Store();
         await store.AddLocalOnlyAsync(Event() with { RiskScore = 57 });
+
         Assert.Equal(57, Assert.Single(await store.ReadAsync()).RiskScore);
         Assert.Equal(57, Assert.Single(await store.ReadAfterAsync(0)).RiskScore);
         var csvPath = Path.Combine(dir, "risk.csv");
         await store.ExportCsvAsync(csvPath);
         Assert.Contains("risk_score", await File.ReadAllTextAsync(csvPath));
-        Assert.Contains("\"57\"", await File.ReadAllTextAsync(csvPath));
+        Assert.Matches(@"(?m)(?:^|,)""?57""?(?:,|$)", await File.ReadAllTextAsync(csvPath));
+
         var backupDir = Path.Combine(dir, "risk-backup"); Directory.CreateDirectory(backupDir);
         await store.BackupAsync(Path.Combine(backupDir, "sentinel.db"));
         var backup = new LocalStore(backupDir); await backup.InitializeAsync();
@@ -1112,18 +1114,22 @@ public sealed class StoreTests : IDisposable
         await store.AddLocalOnlyAsync(Event() with { Category = "legacy" });
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
-            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
             command.CommandText = "ALTER TABLE events DROP COLUMN risk_score; PRAGMA user_version=40;";
             await command.ExecuteNonQueryAsync();
         }
+
         await store.InitializeAsync();
+
         var legacy = Assert.Single(await store.ReadAsync());
-        Assert.Equal("legacy", legacy.Category); Assert.Null(legacy.RiskScore);
+        Assert.Equal("legacy", legacy.Category);
+        Assert.Null(legacy.RiskScore);
         await using var check = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
-        await check.OpenAsync(); using var version = check.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        await check.OpenAsync();
+        using var version = check.CreateCommand(); version.CommandText = "PRAGMA user_version";
         Assert.Equal(41L, Convert.ToInt64(await version.ExecuteScalarAsync()));
     }
-
     [Fact] public async Task ProcessImageInspectionPersistsAndRestoresLocallyButNeverExportsPathOrHash()
     {
         var store = await Store();

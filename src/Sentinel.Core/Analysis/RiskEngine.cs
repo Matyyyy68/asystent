@@ -8,6 +8,47 @@ public static class RiskEngine
 {
     public sealed record Result(int Score, RiskLevel Level);
 
+    // Only evidence identifiers with a defined meaning contribute to scores for
+    // system-monitor events. Unknown identifiers remain visible in the event but
+    // cannot silently inflate its risk.
+    private static readonly IReadOnlyDictionary<string, (int Weight, ThreatCategory Category)> EventEvidence =
+        new Dictionary<string, (int, ThreatCategory)>(StringComparer.Ordinal)
+        {
+            ["process.behavior.office-spawned-script-host"] = (3, ThreatCategory.UnsafeExecution),
+            ["reputation.ip-feed.match"] = (4, ThreatCategory.SuspiciousNavigation),
+            ["reputation.cert.current-feed-match"] = (4, ThreatCategory.SuspiciousNavigation),
+            ["file.sha256.matches-local-list"] = (3, ThreatCategory.UnsafeExecution),
+            ["persistence.target.user-writable-location"] = (2, ThreatCategory.UnsafeExecution),
+            ["correlation.process-network.office-spawned-script-host"] = (3, ThreatCategory.UnsafeExecution)
+        };
+
+    public static Result EvaluateEvidenceCodes(IEnumerable<string> evidenceCodes)
+    {
+        ArgumentNullException.ThrowIfNull(evidenceCodes);
+        var allCodes = evidenceCodes.Where(code => code is not null).Distinct(StringComparer.Ordinal).ToArray();
+        var codes = allCodes
+            .Where(code => code is not null && EventEvidence.ContainsKey(code))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        // A local file hash list with unverified provenance is not sufficient
+        // evidence to assign a numeric risk score.
+        if (allCodes.Contains("file.local-list-source-unverified", StringComparer.Ordinal))
+            codes = codes.Where(code => code != "file.sha256.matches-local-list").ToArray();
+        var indicators = codes.Select(code =>
+            {
+                var evidence = EventEvidence[code];
+                return new ThreatIndicator(code, code, evidence.Weight, evidence.Category);
+            }).ToList();
+        // Reputation contributes a second signal only when Windows also supplied
+        // the matching event (DNS query or TCP connection) represented by the
+        // reputation evidence code.
+        if (codes.Contains("reputation.ip-feed.match", StringComparer.Ordinal) ||
+            codes.Contains("reputation.cert.current-feed-match", StringComparer.Ordinal))
+            indicators.Add(new ThreatIndicator("reputation.observed-system-event", "matching Windows observation", 4,
+                ThreatCategory.SuspiciousNavigation));
+        return Evaluate(indicators);
+    }
+
     public static Result Evaluate(IEnumerable<ThreatIndicator> indicators)
     {
         ArgumentNullException.ThrowIfNull(indicators);

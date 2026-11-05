@@ -440,7 +440,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             };
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
             if (suspicious) evidence.Add("persistence.target.user-writable-location");
-            var item = new SecurityEvent(0, now, suspicious ? RiskLevel.Low : RiskLevel.Information,
+            var assessment = RiskEngine.EvaluateEvidenceCodes(evidence);
+            var item = new SecurityEvent(0, now, assessment.Level,
                 isWinlogon ? "Zmiana konfiguracji logowania Windows" : source switch
                 {
                     "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
@@ -457,7 +458,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     : $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
                 recommendation,
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
-                RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence);
+                RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence, RiskScore: assessment.Score);
             try { await store.CommitWindowsPersistenceChangeAsync(change.Key, change.Current is null ? null : current[change.Key], item, cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
