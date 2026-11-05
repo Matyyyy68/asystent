@@ -6,7 +6,22 @@ public sealed record ProtectionHealthSnapshot(string State, string Title, string
 /// <summary>Builds the truthful top-level engine status from current component health.</summary>
 public static class ProtectionHealthEvaluator
 {
-    private static readonly string[] UnavailableMarkers = ["niedostęp", "nie działa", "wstrzyman", "błąd", "error", "unavailable", "not started"];
+    private static readonly string[] UnavailableMarkers =
+    [
+        "niedostęp", "nie działa", "wstrzyman", "błąd", "error", "unavailable", "not started",
+        "nie można", "nie mógł", "nie może", "nie udało", "nie uda się", "nie wykonano",
+        "nie ustawiono", "nie potwierdz", "przekracza limit", "osiągnięto limit", "kolejka jest pełna",
+        "niepełn", "pominięto", "po utracie", "wymaga windows", "stan nieznany"
+    ];
+    private static readonly IReadOnlyDictionary<string, string[]> HealthyPrefixes = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["processes"] = ["Snapshot procesów działa"],
+        ["processEvents"] = ["Odbieranie zdarzeń startu i zakończenia procesów przez WMI"],
+        ["downloadedFiles"] = ["Monitoring Downloads działa", "Monitoring Downloads wznowiono"],
+        ["persistence"] = ["Monitor zmian autostartu działa"],
+        ["tcpConnections"] = ["Ciągła migawka TCP/UDP działa"],
+        ["dns"] = ["Odczyt cache DNS działa"]
+    };
 
     public static ProtectionHealthSnapshot Evaluate(AppSettings settings, DateTimeOffset? lastCollectionAtUtc,
         DateTimeOffset now, IReadOnlyDictionary<string, string?> sourceStates, string? antivirus, string? firewall)
@@ -54,6 +69,8 @@ public static class ProtectionHealthEvaluator
         {
             if (!enabled) { limitations.Add(label); return; }
             if (!sourceStates.TryGetValue(key, out var state) || string.IsNullOrWhiteSpace(state) ||
+                !HealthyPrefixes.TryGetValue(key, out var healthyPrefixes) ||
+                !healthyPrefixes.Any(prefix => state.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) ||
                 UnavailableMarkers.Any(marker => state.Contains(marker, StringComparison.OrdinalIgnoreCase)))
                 limitations.Add(label);
         }

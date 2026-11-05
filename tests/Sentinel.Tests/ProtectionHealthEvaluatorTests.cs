@@ -9,7 +9,7 @@ public sealed class ProtectionHealthEvaluatorTests
     private static readonly IReadOnlyDictionary<string, string?> HealthySources = new Dictionary<string, string?>
     {
         ["processes"] = "Snapshot procesów działa",
-        ["processEvents"] = "WMI process trace is receiving events",
+        ["processEvents"] = "Odbieranie zdarzeń startu i zakończenia procesów przez WMI; kolejka ograniczona do 4096.",
         ["downloadedFiles"] = "Monitoring Downloads działa",
         ["persistence"] = "Monitor zmian autostartu działa",
         ["tcpConnections"] = "Ciągła migawka TCP/UDP działa",
@@ -72,5 +72,21 @@ public sealed class ProtectionHealthEvaluatorTests
 
         Assert.Equal("LIMITED_PROTECTION", result.State);
         Assert.Contains("no-process-or-network-blocking", result.Limitations);
+    }
+
+    [Theory]
+    [InlineData("dns", "Jeszcze nie wykonano odczytu cache DNS", "Cache DNS")]
+    [InlineData("tcpConnections", "Ciągła migawka TCP/UDP działa; Osiągnięto limit tabeli; alerty z niepełnej próbki są wstrzymane.", "Połączenia sieciowe")]
+    [InlineData("persistence", "Monitor zmian autostartu wymaga Windows.", "Zmiany autostartu")]
+    [InlineData("downloadedFiles", "Monitoring Downloads: kolejka jest pełna; pominięto zdarzenia.", "Pobrane pliki")]
+    public void FailsClosedForUnknownOrDegradedCollectorStates(string key, string state, string limitation)
+    {
+        var sources = new Dictionary<string, string?>(HealthySources) { [key] = state };
+
+        var result = ProtectionHealthEvaluator.Evaluate(new AppSettings(), Now.AddSeconds(-5), Now,
+            sources, "stan dobry", "stan dobry");
+
+        Assert.Equal("LIMITED_PROTECTION", result.State);
+        Assert.Contains(limitation, result.Description);
     }
 }
