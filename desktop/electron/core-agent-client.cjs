@@ -53,9 +53,9 @@ class CoreAgentClient {
         this.recordFailure(error?.code ?? 'agent-spawn-error');
       });
       child.once?.('exit', code => {
-        if (code !== 0 && !this.disposed) {
+        if (!this.disposed) {
           this.agentLaunchAttempted = false;
-          this.recordFailure('agent-exit-error');
+          this.recordFailure(code === 0 ? 'agent-exit' : 'agent-exit-error');
         }
       });
       child.unref?.();

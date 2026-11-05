@@ -66,6 +66,26 @@ test('Core Agent client permits a retry after an asynchronous process launch err
   client.dispose();
 });
 
+test('Core Agent client restarts after an unexpected clean Agent exit', () => {
+  const children = [];
+  const diagnostics = [];
+  let nowMs = 0;
+  const client = new CoreAgentClient('Sentinel.Agent.exe', {
+    nowMs: () => nowMs,
+    onDiagnostic: item => diagnostics.push(item),
+    spawnProcess: () => { const child = new EventEmitter(); child.unref = () => {}; children.push(child); return child; }
+  });
+  client.start();
+  children[0].emit('exit', 0);
+  assert.equal(diagnostics[0].reasonCode, 'agent-exit');
+  client.start();
+  assert.equal(children.length, 1, 'restart must respect the existing backoff');
+  nowMs = 1000;
+  client.start();
+  assert.equal(children.length, 2, 'a clean but unexpected Agent exit must be restartable');
+  client.dispose();
+});
+
 test('Core Agent client does not retry completed engine errors', async () => {
   let attempts = 0;
   const client = new CoreAgentClient('Sentinel.Agent.exe', {
