@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased — diagnostyka awarii Engine (2026-11-05)
+- Agent przekazuje do głównego UI wyłącznie stan procesu Engine, kod wyjścia, informację o stderr i zsanityzowany typ wyjątku; treść stderr, komunikaty wyjątków i ścieżki pozostają ukryte. Dodano test regresyjny filtrowania pól oraz izolowany Windows self-test pełnego named pipe; ten nowy test czeka na CI.
+- Agent i Service zapisują kody wyjścia procesów Engine. Nieobsłużone wyjątki Agenta są logowane bez treści, a UI zamyka się z kodem restartu watchdog zamiast wyświetlać surowy błąd.
+- Usunięto z menu zasobnika martwą, klikalną pozycję „Sentinel działa w tle”; stan ochrony ma osobną akcję.
+
 ## Unreleased — prostsza historia zdarzeń (2026-11-04)
 - Przegląd i historia domyślnie pomijają rutynowe wpisy `Information`; przełącznik pozwala pokazać je bez usuwania z historii ani eksportu.
 

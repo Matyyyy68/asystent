@@ -79,7 +79,8 @@ internal static class Program
             }
         }
         if (args.Contains("--shutdown", StringComparer.OrdinalIgnoreCase)) return await RequestShutdownAsync();
-        if (!args.Contains("--agent-process", StringComparer.OrdinalIgnoreCase)) return await RunWatchdogAsync();
+        var diagnosticsSelfTest = args.Contains("--self-test-core-engine-diagnostics", StringComparer.OrdinalIgnoreCase);
+        if (!args.Contains("--agent-process", StringComparer.OrdinalIgnoreCase) && !diagnosticsSelfTest) return await RunWatchdogAsync();
         AgentLog("AGENT_PROCESS_START");
         singleInstance = new Mutex(initiallyOwned: true, "Local\\SentinelAI.CoreAgent.v1", out var created);
         if (!created) { AgentLog("AGENT_DUPLICATE_INSTANCE"); return AgentAlreadyRunningExitCode; }
@@ -92,6 +93,7 @@ internal static class Program
         };
         ApplicationConfiguration.Initialize();
         using var agent = new AgentContext();
+        if (diagnosticsSelfTest) return await agent.SelfTestCoreEngineDiagnosticsAsync() ? 0 : 1;
         Application.Run(agent);
         AgentLog($"AGENT_MESSAGE_LOOP_EXIT exitCode={Environment.ExitCode}");
         GC.KeepAlive(singleInstance);
@@ -609,6 +611,35 @@ internal static class Program
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
                 catch { await Task.Delay(500, cancellationToken).ContinueWith(_ => { }, TaskScheduler.Default); }
             }
+        }
+
+        public async Task<bool> SelfTestCoreEngineDiagnosticsAsync()
+        {
+            using (var engineStatus = await engine.SendAsync(
+                "{\"id\":\"agent-diagnostics-engine-status\",\"version\":1,\"method\":\"status\"}", CancellationToken.None))
+            {
+                if (!engineStatus.RootElement.TryGetProperty("ok", out var engineOk) || engineOk.ValueKind != JsonValueKind.True)
+                    return false;
+            }
+
+            await using var pipe = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await pipe.ConnectAsync(timeout.Token);
+            using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 4096, leaveOpen: true) { AutoFlush = true };
+            using var reader = new StreamReader(pipe, new UTF8Encoding(false), false, 4096, leaveOpen: true);
+            await writer.WriteLineAsync("{\"id\":\"agent-diagnostics-self-test\",\"version\":1,\"method\":\"coreEngineDiagnostics\"}");
+            var line = await reader.ReadLineAsync(timeout.Token);
+            if (line is null || line.Length > 4096) return false;
+            using var response = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 8 });
+            return response.RootElement.TryGetProperty("id", out var id) && id.GetString() == "agent-diagnostics-self-test" &&
+                response.RootElement.TryGetProperty("version", out var version) && version.GetInt32() == 1 &&
+                response.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True &&
+                response.RootElement.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object &&
+                result.TryGetProperty("engineProcessRunning", out var running) && running.ValueKind == JsonValueKind.True &&
+                result.TryGetProperty("engineLastExitCode", out var exitCode) && exitCode.ValueKind == JsonValueKind.Null &&
+                result.TryGetProperty("engineStderrObserved", out var stderr) && (stderr.ValueKind is JsonValueKind.True or JsonValueKind.False) &&
+                (!result.TryGetProperty("engineExceptionType", out var exceptionType) || exceptionType.ValueKind == JsonValueKind.Null ||
+                    exceptionType.ValueKind == JsonValueKind.String && exceptionType.GetString()!.Length <= 160);
         }
 
         protected override void Dispose(bool disposing)

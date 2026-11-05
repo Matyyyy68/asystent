@@ -171,6 +171,18 @@ try {
     throw "Sentinel.Agent event-forwarding request failed with exit code $($agentForwardingTest.ExitCode): $diagnostic"
   }
 
+  $agentDiagnosticsError = Join-Path $tempRoot 'agent-engine-diagnostics-self-test.stderr.txt'
+  $agentDiagnosticsTest = Start-Process -FilePath $agentPipeClient -ArgumentList '--self-test-core-engine-diagnostics' `
+    -PassThru -WindowStyle Hidden -RedirectStandardError $agentDiagnosticsError
+  if (-not $agentDiagnosticsTest.WaitForExit(60000)) {
+    Stop-Process -Id $agentDiagnosticsTest.Id -Force -ErrorAction SilentlyContinue
+    throw 'Sentinel.Agent sanitized Engine diagnostics pipe test did not complete within 60 seconds.'
+  }
+  if ($agentDiagnosticsTest.ExitCode -ne 0) {
+    $diagnostic = if (Test-Path -LiteralPath $agentDiagnosticsError) { (Get-Content -LiteralPath $agentDiagnosticsError -Raw).Trim() } else { 'no diagnostic' }
+    throw "Sentinel.Agent sanitized Engine diagnostics pipe test failed with exit code $($agentDiagnosticsTest.ExitCode): $diagnostic"
+  }
+
   $forwardedPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'SentinelAI.Service.Status.v1', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
   $forwardedReader = $null
   $forwardedWriter = $null
@@ -195,7 +207,7 @@ try {
 
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
-  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent event read and Agent-to-Service persisted event forwarding.'
+  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent Engine diagnostics, Agent event read and Agent-to-Service persisted event forwarding.'
 }
 finally {
   if ($serviceCreated) {
