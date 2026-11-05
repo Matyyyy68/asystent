@@ -183,9 +183,23 @@ public sealed class ProcessSnapshotMonitor
         var available = Math.Max(0, MaximumPendingChanges - Math.Max(0, pendingChanges.Count - changesDrainedThisSample));
         var backlogToAdd = discovered.Take(available).ToArray();
         var newlyDroppedEvents = Math.Max(0, discovered.Length - backlogToAdd.Length);
-        foreach (var start in backlogToAdd.Where(item => item.Action == "Proces zaobserwowany" && item.CorrelationId.HasValue))
-            recentlyObservedStarts[start.ProcessId] = (start.ObservedAt, start.CorrelationId!.Value, start.ProcessName);
         var toStore = pendingChanges.Items.Concat(backlogToAdd).Take(MaximumEventsPerSample).ToArray();
+        // Apply lifecycle changes in observation order. Keeping a stopped PID in
+        // this cache can attach a later TCP snapshot to an unrelated process if
+        // Windows quickly reuses the PID (especially when the image name matches).
+        foreach (var change in toStore.OrderBy(item => item.ObservedAt).ThenBy(item => item.QueueId))
+        {
+            if (change.Action == "Proces zaobserwowany" && change.CorrelationId is { } correlationId)
+            {
+                if (!recentlyObservedStarts.TryGetValue(change.ProcessId, out var existing) || existing.Timestamp <= change.ObservedAt)
+                    recentlyObservedStarts[change.ProcessId] = (change.ObservedAt, correlationId, change.ProcessName);
+            }
+            else if (change.Action == "Proces zakończony" && recentlyObservedStarts.TryGetValue(change.ProcessId, out var stoppedProcess) &&
+                stoppedProcess.Timestamp <= change.ObservedAt && string.Equals(stoppedProcess.ProcessName, change.ProcessName, StringComparison.OrdinalIgnoreCase))
+            {
+                recentlyObservedStarts.Remove(change.ProcessId);
+            }
+        }
         var backlogToRemove = toStore.Select(item => item.EventId).ToArray();
         var imageInspections = new List<(Guid EventId, string Path)>();
         var liveStarts = toStore.Where(change => change.Action == "Proces zaobserwowany" && change.QueueId == 0 &&
@@ -365,3 +379,4 @@ public sealed class ProcessSnapshotMonitor
 
     private sealed record ProcessChange(string Action, int ProcessId, string ProcessName, DateTimeOffset ObservedAt);
 }
+

@@ -77,6 +77,23 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task WmiStopExpiresProcessCorrelationBeforePidCanBeReused()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string>());
+        var startedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(startedAt, "Proces zaobserwowany", 808, "worker", 1)]);
+        var firstCorrelation = monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow);
+        Assert.NotNull(firstCorrelation);
+
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zakończony", 808, "worker", 1)]);
+
+        Assert.Null(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public async Task WmiParentPidAppliesBehaviorRuleToShortLivedOfficeChild()
     {
         var store = new LocalStore(directory); await store.InitializeAsync();
@@ -518,3 +535,4 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
     }
 }
+
