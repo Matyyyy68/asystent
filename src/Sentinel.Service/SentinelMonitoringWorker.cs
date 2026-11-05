@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -271,16 +272,23 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             };
             start.Environment["SENTINEL_DATA_ROOT"] = dataRoot;
             start.Environment["SENTINEL_DOWNLOADS_PATH"] = downloadsPath;
-            process = Process.Start(start) ?? throw new IOException("Unable to start Sentinel Engine.");
-            input = process.StandardInput;
-            output = process.StandardOutput;
-            process.ErrorDataReceived += (_, line) =>
+            var startedProcess = Process.Start(start) ?? throw new IOException("Unable to start Sentinel Engine.");
+            process = startedProcess;
+            input = startedProcess.StandardInput;
+            output = startedProcess.StandardOutput;
+            startedProcess.ErrorDataReceived += (_, line) =>
             {
                 if (string.IsNullOrWhiteSpace(line.Data)) return;
                 var fatalType = EngineFatalDiagnostic.ReadExceptionType(line.Data);
                 ServiceLog.Write(fatalType is null ? "ENGINE_DIAGNOSTIC_AVAILABLE" : "ENGINE_FATAL type=" + fatalType);
             };
-            process.BeginErrorReadLine();
+            startedProcess.EnableRaisingEvents = true;
+            startedProcess.Exited += (_, _) =>
+            {
+                try { ServiceLog.Write("ENGINE_PROCESS_EXIT exitCode=" + startedProcess.ExitCode.ToString(CultureInfo.InvariantCulture)); }
+                catch { ServiceLog.Write("ENGINE_PROCESS_EXIT exitCode=unavailable"); }
+            };
+            startedProcess.BeginErrorReadLine();
         }
 
         private void Stop()
