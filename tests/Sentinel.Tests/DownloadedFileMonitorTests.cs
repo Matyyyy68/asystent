@@ -543,8 +543,37 @@ public sealed class DownloadedFileMonitorTests : IDisposable
 
         await store.InitializeAsync();
         await monitor.CollectAsync(store, new FileHashReputation(Path.Combine(data, "reputation")));
-        Assert.Contains("zaimportuj lokalną listę hashy", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("brak lokalnej listy reputacji", monitor.State, StringComparison.OrdinalIgnoreCase);
         Assert.True((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
+    }
+
+    [Fact]
+    public async Task NewFilesAreHashedAndBaselinedWithoutAnOptionalReputationList()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        var store = new LocalStore(data); await store.InitializeAsync();
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        using var monitor = new DownloadedFileMonitor(downloads);
+        string? computedSha256 = null;
+        monitor.AfterSha256ForTest = (_, hash) => computedSha256 = hash;
+        await monitor.SetEnabledAsync(store, true);
+
+        const string content = "synthetic file without threat feed";
+        await File.WriteAllTextAsync(Path.Combine(downloads, "without-feed.bin"), content);
+        var deadline = DateTime.UtcNow.AddSeconds(6);
+        while ((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+            await monitor.CollectAsync(store, reputation);
+        }
+
+        Assert.Single((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
+        Assert.Empty(await store.ReadAsync());
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))), computedSha256);
+        Assert.Contains("hashowane lokalnie", monitor.State, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("brak lokalnej listy reputacji", monitor.State, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

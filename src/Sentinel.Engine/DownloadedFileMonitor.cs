@@ -37,6 +37,7 @@ public sealed class DownloadedFileMonitor : IDisposable
     private readonly object pendingGate = new();
     internal Action<string>? BeforeVerifiedReadStreamOpenForTest { get; set; }
     internal Action<string>? BeforeFileContentReadForTest { get; set; }
+    internal Action<string, string>? AfterSha256ForTest { get; set; }
     private long droppedPendingFiles;
     private long rescanRequestedVersion;
     private long rescanCompletedVersion;
@@ -192,13 +193,10 @@ public sealed class DownloadedFileMonitor : IDisposable
         if (enabledRequested && watcher is null)
             await SetEnabledAsync(store, true, cancellationToken);
         if (watcher is null) return 0;
+        var stateBeforeCollection = State;
         if (DateTimeOffset.UtcNow - lastReconciledAtUtc >= reconciliationInterval) RequestRescan();
         await ReconcileIfNeededAsync(store, cancellationToken);
-        if (reputation.Status().HashCount == 0)
-        {
-            State = $"Monitoring Downloads działa; zaimportuj lokalną listę hashy, aby sprawdzać pliki. Utracone powiadomienia kolejki: {Interlocked.Read(ref droppedPendingFiles)}.";
-            return 0;
-        }
+        var reputationStatus = reputation.Status();
         var cutoff = DateTimeOffset.UtcNow - SettleTime;
         var ready = pending.Where(item => item.Value <= cutoff).Take(MaximumFilesPerSample).ToArray();
         var detections = 0;
@@ -280,6 +278,7 @@ public sealed class DownloadedFileMonitor : IDisposable
 
                     BeforeFileContentReadForTest?.Invoke(info.FullName);
                     hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
+                    AfterSha256ForTest?.Invoke(info.FullName, hash);
                     bytesScanned += openedLength;
                     if (!IsFileHandleInsideDownloads(verifiedStream.DownloadsFinalPath, stream.SafeFileHandle))
                     {
@@ -295,6 +294,9 @@ public sealed class DownloadedFileMonitor : IDisposable
                     continue;
                 }
 
+                // Hash new files even when no reputation list is configured. This keeps
+                // collection and content inspection independent of optional intelligence.
+                // A missing list is not a clean verdict; it simply cannot match anything.
                 var check = reputation.Check(hash);
                 if (!check.FeedImported || !check.Match)
                 {
@@ -336,6 +338,11 @@ public sealed class DownloadedFileMonitor : IDisposable
             }
             catch (UnauthorizedAccessException) { }
         }
+        if (watcher is not null && State == stateBeforeCollection &&
+            !State.Contains("odtworzył", StringComparison.OrdinalIgnoreCase))
+            State = reputationStatus.HashCount == 0
+                ? $"Monitoring Downloads działa; nowe pliki są hashowane lokalnie, ale brak lokalnej listy reputacji. Brak dopasowania nie potwierdza bezpieczeństwa. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}."
+                : $"Monitoring Downloads działa; nowe pliki są hashowane i porównywane z lokalną listą reputacji ({reputationStatus.HashCount} hashy). Źródło listy nie jest niezależnie weryfikowane. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
         return detections;
     }
 
