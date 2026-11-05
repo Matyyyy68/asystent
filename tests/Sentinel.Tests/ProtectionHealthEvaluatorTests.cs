@@ -79,6 +79,7 @@ public sealed class ProtectionHealthEvaluatorTests
     [InlineData("tcpConnections", "Ciągła migawka TCP/UDP działa; Osiągnięto limit tabeli; alerty z niepełnej próbki są wstrzymane.", "Połączenia sieciowe")]
     [InlineData("persistence", "Monitor zmian autostartu wymaga Windows.", "Zmiany autostartu")]
     [InlineData("downloadedFiles", "Monitoring Downloads: kolejka jest pełna; pominięto zdarzenia.", "Pobrane pliki")]
+    [InlineData("processEvents", "Zdarzenia procesów WMI są ograniczone: przepełniono kolejkę 4096; pominięto zdarzenia, snapshot PID pozostaje fallbackiem.", "Zdarzenia startu procesów")]
     public void FailsClosedForUnknownOrDegradedCollectorStates(string key, string state, string limitation)
     {
         var sources = new Dictionary<string, string?>(HealthySources) { [key] = state };
