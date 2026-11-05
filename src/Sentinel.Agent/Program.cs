@@ -639,19 +639,20 @@ internal static class Program
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(executable)!
             };
-            process = Process.Start(start) ?? throw new IOException("Nie można uruchomić lokalnego silnika.");
-            input = process.StandardInput;
-            output = process.StandardOutput;
-            process.ErrorDataReceived += (_, line) =>
+            var startedProcess = Process.Start(start) ?? throw new IOException("Nie można uruchomić lokalnego silnika.");
+            process = startedProcess;
+            input = startedProcess.StandardInput;
+            output = startedProcess.StandardOutput;
+            startedProcess.ErrorDataReceived += (_, line) =>
             {
                 if (string.IsNullOrWhiteSpace(line.Data)) return;
                 var fatalType = EngineFatalDiagnostic.ReadExceptionType(line.Data);
                 AgentLog(fatalType is null ? "ENGINE_STDERR_DIAGNOSTIC" : "ENGINE_FATAL type=" + fatalType);
             };
-            process.EnableRaisingEvents = true;
-            process.Exited += (_, _) =>
+            startedProcess.EnableRaisingEvents = true;
+            startedProcess.Exited += (_, _) =>
             {
-                try { AgentLog("ENGINE_PROCESS_EXIT exitCode=" + process.ExitCode.ToString(CultureInfo.InvariantCulture)); }
+                try { AgentLog("ENGINE_PROCESS_EXIT exitCode=" + startedProcess.ExitCode.ToString(CultureInfo.InvariantCulture)); }
                 catch { AgentLog("ENGINE_PROCESS_EXIT exitCode=unavailable"); }
             };
             process.BeginErrorReadLine();
