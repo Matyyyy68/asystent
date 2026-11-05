@@ -159,12 +159,17 @@ try {
   }
   if ($agentPipeTest.ExitCode -ne 0) { throw "Sentinel.Agent event-pipe client failed with exit code $($agentPipeTest.ExitCode)." }
 
-  $agentForwardingTest = Start-Process -FilePath $agentPipeClient -ArgumentList '--self-test-service-event-forwarding' -PassThru -WindowStyle Hidden
+  $agentForwardingError = Join-Path $tempRoot 'agent-forwarding-self-test.stderr.txt'
+  $agentForwardingTest = Start-Process -FilePath $agentPipeClient -ArgumentList '--self-test-service-event-forwarding' `
+    -PassThru -WindowStyle Hidden -RedirectStandardError $agentForwardingError
   if (-not $agentForwardingTest.WaitForExit(10000)) {
     Stop-Process -Id $agentForwardingTest.Id -Force -ErrorAction SilentlyContinue
     throw 'Sentinel.Agent event-forwarding request did not receive a bounded Service acknowledgement.'
   }
-  if ($agentForwardingTest.ExitCode -ne 0) { throw "Sentinel.Agent event-forwarding request failed with exit code $($agentForwardingTest.ExitCode)." }
+  if ($agentForwardingTest.ExitCode -ne 0) {
+    $diagnostic = if (Test-Path -LiteralPath $agentForwardingError) { (Get-Content -LiteralPath $agentForwardingError -Raw).Trim() } else { 'no diagnostic' }
+    throw "Sentinel.Agent event-forwarding request failed with exit code $($agentForwardingTest.ExitCode): $diagnostic"
+  }
 
   $forwardedPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'SentinelAI.Service.Status.v1', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
   $forwardedReader = $null

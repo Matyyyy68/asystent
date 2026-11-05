@@ -44,7 +44,12 @@ internal static class Program
                 _ = await SystemServiceEventsClient.ReadLatestAsync(CancellationToken.None);
                 return 0;
             }
-            catch { return 1; }
+            catch (Exception exception)
+            {
+                var message = exception.Message.Replace('\r', ' ').Replace('\n', ' ');
+                Console.Error.WriteLine($"SELF_TEST_FAILED service-event-read type={exception.GetType().Name} hresult=0x{exception.HResult:X8} message={message[..Math.Min(message.Length, 300)]}");
+                return 1;
+            }
         }
         if (args.Contains("--self-test-service-event-forwarding", StringComparer.OrdinalIgnoreCase))
         {
@@ -58,7 +63,12 @@ internal static class Program
                 var acknowledged = await SystemServiceEventsClient.ForwardEventsAsync([item], CancellationToken.None);
                 return acknowledged.SequenceEqual([sourceRowId]) ? 0 : 1;
             }
-            catch { return 1; }
+            catch (Exception exception)
+            {
+                var message = exception.Message.Replace('\r', ' ').Replace('\n', ' ');
+                Console.Error.WriteLine($"SELF_TEST_FAILED service-event-forwarding type={exception.GetType().Name} hresult=0x{exception.HResult:X8} message={message[..Math.Min(message.Length, 300)]}");
+                return 1;
+            }
         }
         if (args.Contains("--shutdown", StringComparer.OrdinalIgnoreCase)) return await RequestShutdownAsync();
         if (!args.Contains("--agent-process", StringComparer.OrdinalIgnoreCase)) return await RunWatchdogAsync();
