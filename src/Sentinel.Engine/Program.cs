@@ -86,17 +86,8 @@ var enterpriseAnalysisMode = "local";
 var enterpriseContextSharingAllowed = false;
 ThreatAssessment CombineEnterpriseAssessments(ThreatAssessment local, ThreatAssessment remote)
 {
-    var category = (int)remote.Risk > (int)local.Risk ? remote.Category : local.Category;
-    var indicators = local.Indicators.Concat(remote.Indicators)
-        .DistinctBy(indicator => (indicator.Id, indicator.Category)).Take(128).ToArray();
-    var uncertainties = local.Uncertainties.Concat(remote.Uncertainties)
-        .Append("Kontekst został wysłany do serwera Enterprise po jednorazowym potwierdzeniu; API nie zapisuje surowej treści.")
-        .Distinct(StringComparer.Ordinal).Take(64).ToArray();
-    var recommendations = local.Recommendations.Concat(remote.Recommendations)
-        .Distinct(StringComparer.Ordinal).Take(32).ToArray();
-    return new ThreatAssessment(category, (int)remote.Risk > (int)local.Risk ? remote.Risk : local.Risk,
-        indicators, uncertainties, recommendations,
-        $"Ocena lokalna: {local.Explanation}\n\nOcena Enterprise: {remote.Explanation}");
+    return EnterpriseAssessmentCombiner.Combine(local, remote,
+        "Kontekst został wysłany do serwera Enterprise po jednorazowym potwierdzeniu; API nie zapisuje surowej treści.");
 }
 HttpClient CreateEnterpriseHttpClient()
 {

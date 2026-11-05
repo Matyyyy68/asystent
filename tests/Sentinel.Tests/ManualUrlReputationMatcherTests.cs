@@ -34,6 +34,8 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
 
         Assert.Equal("listed.test", matchedHost);
         Assert.Equal(RiskLevel.High, result.Risk);
+        Assert.Equal(result.Risk, RiskEngine.LevelForScore(result.RiskScore));
+        Assert.InRange(result.RiskScore, 60, 79);
         Assert.Equal(ThreatCategory.SuspiciousNavigation, result.Category);
         Assert.Contains(result.Indicators, indicator => indicator.Id == "reputation.cert");
         Assert.DoesNotContain("listed.test", result.Explanation);
@@ -92,6 +94,8 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
         Assert.Equal(UrlReputation.CreateSignalHash(maliciousUrl), signalHash);
         Assert.Equal(maliciousUrl, matchedUrl);
         Assert.Equal(RiskLevel.High, result.Risk);
+        Assert.Equal(result.Risk, RiskEngine.LevelForScore(result.RiskScore));
+        Assert.InRange(result.RiskScore, 60, 79);
         Assert.Contains(result.Indicators, indicator => indicator.Id == "reputation.url-feed");
         Assert.DoesNotContain(maliciousUrl, result.Explanation, StringComparison.Ordinal);
         Assert.DoesNotContain("attacker.test", result.Explanation, StringComparison.Ordinal);

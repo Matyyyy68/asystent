@@ -820,3 +820,8 @@ Run [42104537763](https://github.com/Matyyyy68/asystent/actions/runs/42104537763
 ### Aktualizacja asercji eksportu IPC (2026-11-05)
 
 Po poprawieniu mapowania `risk_score` Windows CI [42105753012](https://github.com/Matyyyy68/asystent/actions/runs/42105753012) zaliczył pełny .NET suite (508 testów, bez błędów; w tym runie testy środowiskowe nie zostały oznaczone jako skip), po czym wykrył nieaktualny oczekiwany nagłówek CSV w `scripts/test-engine.cjs`. Zaktualizowano asercję o nową kolumnę. Ponowny pełny CI dla tego commita jest wymagany.
+
+
+## RiskScore consistency for manual and Enterprise assessments (2026-11-05)
+
+Manual reputation enrichment now recomputes its heuristic score and keeps it in the same band as the resulting alert level. The Enterprise merger combines at most 128 distinct evidence indicators and derives the output score, risk level and category from those indicators; an unsupported remote level alone no longer escalates a local result. Added 18 focused tests for score bands, manual reputation, and evidence-backed Enterprise merging; full local suite: 508 PASS, 2 environment-dependent SKIP. Release solution build: 0 warnings/errors. Independent risk calibration remains unimplemented.

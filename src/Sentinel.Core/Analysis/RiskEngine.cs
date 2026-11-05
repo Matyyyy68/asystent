@@ -71,14 +71,25 @@ public static class RiskEngine
         else if (totalWeight < 12 || evidence.Length < 3)
             score = 60 + Math.Min(19, Math.Max(0, totalWeight - 7) * 3);
         else score = 80 + Math.Min(20, (totalWeight - 12) * 3);
-        var level = score switch
-        {
-            < 20 => RiskLevel.Information,
-            < 40 => RiskLevel.Low,
-            < 60 => RiskLevel.Moderate,
-            < 80 => RiskLevel.High,
-            _ => RiskLevel.Critical
-        };
-        return new(score, level);
+        return new(score, LevelForScore(score));
     }
+
+    public static RiskLevel LevelForScore(int score) => Math.Clamp(score, 0, 100) switch
+    {
+        < 20 => RiskLevel.Information,
+        < 40 => RiskLevel.Low,
+        < 60 => RiskLevel.Moderate,
+        < 80 => RiskLevel.High,
+        _ => RiskLevel.Critical
+    };
+
+    public static int MinimumScoreForLevel(RiskLevel level) => level switch
+    {
+        RiskLevel.Information => 0,
+        RiskLevel.Low => 20,
+        RiskLevel.Moderate => 40,
+        RiskLevel.High => 60,
+        RiskLevel.Critical => 80,
+        _ => throw new ArgumentOutOfRangeException(nameof(level))
+    };
 }

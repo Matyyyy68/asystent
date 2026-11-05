@@ -37,11 +37,16 @@ public static class ManualUrlReputationMatcher
                 ThreatCategory.SuspiciousNavigation)
             : new ThreatIndicator("reputation.url-feed", "Dokładny adres znajduje się na lokalnej liście URL użytkownika.", 10,
                 ThreatCategory.SuspiciousNavigation);
+        var indicators = assessment.Indicators.Append(indicator).DistinctBy(item => item.Id, StringComparer.Ordinal).ToArray();
+        var assessed = RiskEngine.Evaluate(indicators);
+        var minimumScore = RiskEngine.MinimumScoreForLevel((RiskLevel)Math.Max((int)assessment.Risk, (int)RiskLevel.High));
+        var score = Math.Max(assessed.Score, minimumScore);
         return assessment with
         {
-            Risk = (RiskLevel)Math.Max((int)assessment.Risk, (int)RiskLevel.High),
+            Risk = RiskEngine.LevelForScore(score),
             Category = ThreatCategory.SuspiciousNavigation,
-            Indicators = assessment.Indicators.Append(indicator).ToArray(),
+            Indicators = indicators,
+            RiskScore = score,
             Explanation = indicator.Description + " " + assessment.Explanation
         };
     }
