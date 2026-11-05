@@ -4,19 +4,23 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using Sentinel.Core;
 
 namespace Sentinel.Service;
 
 internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid, ServiceHealthSnapshot health,
     string? pipeName = null, Action<Exception>? onError = null,
     Func<long?, long?, CancellationToken, Task<ServiceEventPage>>? readRecentEvents = null,
-    Func<long, string, CancellationToken, Task<bool>>? updateEventStatus = null)
+    Func<long, string, CancellationToken, Task<bool>>? updateEventStatus = null,
+    Func<IReadOnlyList<ForwardedSecurityEvent>, CancellationToken, Task<IReadOnlyList<long>>>? importForwardedEvents = null)
 {
     public const string PipeName = "SentinelAI.Service.Status.v1";
-    private const int MaximumRequestChars = 1024;
+    private const int MaximumRequestChars = 32_768;
     private const int MaximumResponseChars = 32_768;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
     private static readonly JsonSerializerOptions ResponseJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions RequestJsonOptions = new(JsonSerializerDefaults.Web) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
     private readonly string pipeName = pipeName ?? PipeName;
     private readonly Action<Exception>? onError = onError;
     private readonly PipeSecurity pipeSecurity = CreatePipeSecurity(allowedUserSid);
@@ -120,6 +124,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         health.MarkCollectionSucceeded(DateTimeOffset.UtcNow);
         var stage = "start-server";
         var changedEventStatus = false;
+        long[]? importedSourceRows = null;
         var server = new ServiceStatusPipeServer(userSid, health, testPipeName,
             exception => Console.Error.WriteLine($"SELF_TEST_STATUS_PIPE_SERVER_ERROR {exception.Message} type={exception.InnerException?.GetType().Name} hresult=0x{exception.InnerException?.HResult:X8} message={exception.InnerException?.Message.Replace('\r', ' ').Replace('\n', ' ')}"),
             (afterEventId, beforeEventId, _) => Task.FromResult(
@@ -132,7 +137,8 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                             new string('ż', 128), new string('ą', 128), new string('ł', 768), new string('ź', 512), "New", null,
                             "service", "test", null, 1, null, null, null, [], []))
                         : Enumerable.Empty<ServiceEventSummary>()).ToArray())),
-            (id, status, _) => { changedEventStatus = id == 1 && status == "Reviewed"; return Task.FromResult(changedEventStatus); });
+            (id, status, _) => { changedEventStatus = id == 1 && status == "Reviewed"; return Task.FromResult(changedEventStatus); },
+            (events, _) => { importedSourceRows = events.Select(item => item.SourceRowId).Order().ToArray(); return Task.FromResult<IReadOnlyList<long>>(importedSourceRows); });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cancellation.Token);
         bool Fail(string check) { Console.Error.WriteLine("SELF_TEST_FAILED status-pipe-runtime-" + check); return false; }
@@ -216,6 +222,22 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                     !updateRoot.TryGetProperty("result", out var updateResult) || !updateResult.TryGetProperty("updated", out var updated) || updated.ValueKind != JsonValueKind.True)
                     return Fail(stage);
             }
+            stage = "event-ingest-request";
+            var forwarded = new ForwardedSecurityEvent(101, DateTimeOffset.UtcNow, RiskLevel.Moderate, "Fixture", "Fixture",
+                "synthetic event", "review", EventStatus.New, Guid.NewGuid(), "agent-test", "test-v1", null, 1,
+                null, null, null, ["test.signal"], []);
+            var ingestRequest = JsonSerializer.Serialize(new { id = "event-ingest-self-test", version = 1, method = "ingestEvents", events = new[] { forwarded } }, RequestJsonOptions);
+            var ingestLine = await SendSelfTestRequestAsync(testPipeName, ingestRequest, cancellation.Token);
+            if (ingestLine is null) return Fail(stage);
+            using (var ingestResponse = JsonDocument.Parse(ingestLine, new JsonDocumentOptions { MaxDepth = 8 }))
+            {
+                var ingestRoot = ingestResponse.RootElement;
+                if (!ingestRoot.TryGetProperty("id", out var ingestId) || ingestId.GetString() != "event-ingest-self-test" ||
+                    !ingestRoot.TryGetProperty("ok", out var ingestOk) || ingestOk.ValueKind != JsonValueKind.True ||
+                    !ingestRoot.TryGetProperty("result", out var ingestResult) || !ingestResult.TryGetProperty("acknowledgedSourceRowIds", out var acknowledged) ||
+                    acknowledged.ValueKind != JsonValueKind.Array || acknowledged.GetArrayLength() != 1 || acknowledged[0].GetInt64() != 101 ||
+                    importedSourceRows is not [101]) return Fail(stage);
+            }
             return changedEventStatus || Fail(stage);
         }
         catch (Exception exception)
@@ -295,6 +317,7 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                     "status" => StatusResponse(pipeRequest.Id),
                     "recentEvents" when readRecentEvents is not null => await EventsResponseAsync(pipeRequest.Id, pipeRequest.AfterEventId, pipeRequest.BeforeEventId, timeout.Token),
                     "eventStatus" when updateEventStatus is not null => await EventStatusResponseAsync(pipeRequest, timeout.Token),
+                    "ingestEvents" when importForwardedEvents is not null && pipeRequest.Events is not null => await ImportEventsResponseAsync(pipeRequest, timeout.Token),
                     _ => new { id = pipeRequest.Id, version = 1, ok = false, error = "unsupported-request" }
                 };
                 await WriteResponseAsync(writer, response, timeout.Token);
@@ -360,6 +383,12 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         return new { id = request.Id, version = 1, ok = true, result = new { updated } };
     }
 
+    private async Task<object> ImportEventsResponseAsync(PipeRequest request, CancellationToken cancellationToken)
+    {
+        var acknowledged = await importForwardedEvents!(request.Events!, cancellationToken);
+        return new { id = request.Id, version = 1, ok = true, result = new { acknowledgedSourceRowIds = acknowledged } };
+    }
+
     private static PipeRequest? ReadPipeRequest(string request)
     {
         try
@@ -393,9 +422,19 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
                 root.TryGetProperty("eventId", out var eventId) && eventId.TryGetInt64(out var numericId) && numericId > 0 &&
                 root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.String && status.GetString() is "Reviewed" or "FalsePositive")
                 return new PipeRequest(value, methodName, numericId, status.GetString(), null, null);
+            if (methodName == "ingestEvents" && root.EnumerateObject().Count() == 4 &&
+                root.TryGetProperty("events", out var events) && events.ValueKind == JsonValueKind.Array && events.GetArrayLength() is > 0 and <= 4)
+            {
+                var forwarded = JsonSerializer.Deserialize<ForwardedSecurityEvent[]>(events.GetRawText(), RequestJsonOptions);
+                if (forwarded is null || forwarded.Length != events.GetArrayLength() || forwarded.Any(item => item is null)) return null;
+                foreach (var item in forwarded) _ = item.ToSecurityEvent();
+                if (forwarded.Select(item => item.SourceRowId).Distinct().Count() != forwarded.Length ||
+                    forwarded.Select(item => item.EventId).Distinct().Count() != forwarded.Length) return null;
+                return new PipeRequest(value, methodName, null, null, null, null, forwarded);
+            }
             return null;
         }
-        catch (JsonException) { return null; }
+        catch (Exception exception) when (exception is JsonException or ArgumentException or NotSupportedException) { return null; }
     }
 
     private static async Task WriteResponseAsync<T>(StreamWriter writer, T response, CancellationToken cancellationToken)
@@ -415,7 +454,8 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
         security.AddAccessRule(new PipeAccessRule(sid, PipeAccessRights.FullControl, AccessControlType.Allow));
 }
 
-internal sealed record PipeRequest(string Id, string Method, long? EventId, string? Status, long? AfterEventId, long? BeforeEventId);
+internal sealed record PipeRequest(string Id, string Method, long? EventId, string? Status, long? AfterEventId, long? BeforeEventId,
+    IReadOnlyList<ForwardedSecurityEvent>? Events = null);
 internal sealed record ServiceEventPage(long LatestEventId, IReadOnlyList<ServiceEventSummary> Events);
 internal sealed record ServiceEventSummary(long Id, DateTimeOffset Timestamp, string Risk, string Category,
     string Application, string Explanation, string Recommendation, string Status, Guid? EventId,

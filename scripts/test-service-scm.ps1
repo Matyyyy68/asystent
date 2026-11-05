@@ -159,9 +159,38 @@ try {
   }
   if ($agentPipeTest.ExitCode -ne 0) { throw "Sentinel.Agent event-pipe client failed with exit code $($agentPipeTest.ExitCode)." }
 
+  $agentForwardingTest = Start-Process -FilePath $agentPipeClient -ArgumentList '--self-test-service-event-forwarding' -PassThru -WindowStyle Hidden
+  if (-not $agentForwardingTest.WaitForExit(10000)) {
+    Stop-Process -Id $agentForwardingTest.Id -Force -ErrorAction SilentlyContinue
+    throw 'Sentinel.Agent event-forwarding request did not receive a bounded Service acknowledgement.'
+  }
+  if ($agentForwardingTest.ExitCode -ne 0) { throw "Sentinel.Agent event-forwarding request failed with exit code $($agentForwardingTest.ExitCode)." }
+
+  $forwardedPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'SentinelAI.Service.Status.v1', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+  $forwardedReader = $null
+  $forwardedWriter = $null
+  try {
+    $forwardedPipe.Connect(5000)
+    $forwardedReader = [IO.StreamReader]::new($forwardedPipe, [Text.UTF8Encoding]::new($false), $false, 1024, $true)
+    $forwardedWriter = [IO.StreamWriter]::new($forwardedPipe, [Text.UTF8Encoding]::new($false), 1024, $true)
+    $forwardedWriter.AutoFlush = $true
+    $forwardedWriter.WriteLine('{"id":"agent-forwarding-history","version":1,"method":"recentEvents"}')
+    $forwardedLine = $forwardedReader.ReadLine()
+    if ([string]::IsNullOrWhiteSpace($forwardedLine)) { throw 'Service returned no history after Agent forwarding.' }
+    $forwardedResponse = $forwardedLine | ConvertFrom-Json
+    if ($forwardedResponse.id -ne 'agent-forwarding-history' -or $forwardedResponse.ok -ne $true -or
+        -not ($forwardedResponse.result.events | Where-Object { $_.source -eq 'agent-forwarding-self-test' -and $_.category -eq 'Agent forwarding self-test' })) {
+      throw "Agent acknowledged forwarding but its event was not present in Service history: $forwardedLine"
+    }
+  } finally {
+    if ($null -ne $forwardedReader) { $forwardedReader.Dispose() }
+    if ($null -ne $forwardedWriter) { $forwardedWriter.Dispose() }
+    $forwardedPipe.Dispose()
+  }
+
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
-  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent event client.'
+  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent event read and Agent-to-Service persisted event forwarding.'
 }
 finally {
   if ($serviceCreated) {

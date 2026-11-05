@@ -8,7 +8,7 @@ const { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, truncateSyn
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const root = mkdtempSync(path.join(tmpdir(), 'sentinel-engine-test-'));
 const downloadsDirectory = path.join(root, 'Downloads'); mkdirSync(downloadsDirectory);
 const child = spawn(path.resolve('artifacts/engine/Sentinel.Engine.exe'), [], { windowsHide: true,
@@ -314,6 +314,22 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     await call('clearHistory');
   }
   assert.equal((await call('history')).result.length, 0);
+  const forwardedFixture = { sourceRowId: 17, timestamp: new Date().toISOString(), risk: 'Moderate', category: 'Agent forwarding fixture',
+    application: 'Synthetic agent', explanation: 'Synthetic forwarding test', recommendation: 'Review the event', status: 'New',
+    eventId: randomUUID(), source: 'agent-forwarding-test', ruleVersion: 'test-v1', confidence: null, schemaVersion: 1,
+    processId: null, processName: null, correlationId: randomUUID(), evidenceCodes: ['test.forwarded-event'], analysisLimitations: [] };
+  const firstImport = await call('importForwardedEvents', { events: [forwardedFixture] });
+  assert.equal(firstImport.ok, true, firstImport.error);
+  assert.deepEqual(firstImport.result.acknowledgedSourceRowIds, [17]);
+  const repeatedImport = await call('importForwardedEvents', { events: [forwardedFixture] });
+  assert.equal(repeatedImport.ok, true, repeatedImport.error);
+  assert.equal((await call('history')).result.length, 1, 'replaying a forwarded EventId must be idempotent');
+  const historyPage = await call('historyAfter', { afterId: 0 });
+  assert.equal(historyPage.ok, true, historyPage.error);
+  assert.equal(historyPage.result.latestEventRowId, 1);
+  assert.equal(historyPage.result.events[0].source, 'agent-forwarding-test');
+  await call('clearHistory');
+  assert.equal((await call('historyAfter', { afterId: 1 })).result.latestEventRowId, 0, 'history clear must be detectable by a durable transfer cursor');
   const embeddedPhishingUrl = 'https://paypal.com.evil.test/login';
   const embeddedAnalysis = await call('analyze', { text: `Pilnie zaloguj się i podaj hasło: ${embeddedPhishingUrl}`, url: 'https://example.com' });
   assert.equal(embeddedAnalysis.ok, true); assert.ok(['High','Critical'].includes(embeddedAnalysis.result.risk));

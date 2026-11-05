@@ -460,6 +460,16 @@ while (await Console.In.ReadLineAsync() is { } line)
                     ? await downloadedFileQuarantine.ReadQuarantinedEventIdsAsync() : new HashSet<Guid>();
                 result = history.Select(item => item with { Quarantined = item.EventId is { } eventId && quarantinedEventIds.Contains(eventId) }).ToArray();
                 break;
+            case "historyAfter":
+                var afterId = request.GetProperty("afterId").GetInt64();
+                if (afterId < 0) throw new InvalidDataException("Nieprawidłowy kursor historii.");
+                result = new { latestEventRowId = await store.GetLatestEventRowIdAsync(), events = await store.ReadAfterAsync(afterId, 4) };
+                break;
+            case "importForwardedEvents":
+                var forwardedEvents = JsonSerializer.Deserialize<ForwardedSecurityEvent[]>(request.GetProperty("events").GetRawText(), json)
+                    ?? throw new InvalidDataException("Nieprawidłowa paczka zdarzeń.");
+                result = new { acknowledgedSourceRowIds = await store.ImportForwardedEventsAsync(forwardedEvents) };
+                break;
             case "eventStatus":
                 if (!Enum.TryParse<EventStatus>(request.GetProperty("status").GetString(), ignoreCase: true, out var eventStatus) || !Enum.IsDefined(eventStatus))
                     throw new InvalidDataException("Nieprawidłowy status zdarzenia.");

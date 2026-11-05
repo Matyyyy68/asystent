@@ -18,6 +18,28 @@ public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel 
 public sealed record EventObservation(Guid EventId, DateTimeOffset ObservedAt, string Source,
     IReadOnlyList<string> EvidenceCodes, DateTimeOffset? ProcessedAt = null,
     IReadOnlyList<string>? AnalysisLimitations = null);
+// Local-only transport from the per-user Engine to the privileged service. Deliberately excludes paths and hashes.
+public sealed record ForwardedSecurityEvent(long SourceRowId, DateTimeOffset Timestamp, RiskLevel Risk,
+    string Category, string Application, string Explanation, string Recommendation, EventStatus Status,
+    Guid EventId, string? Source, string? RuleVersion, int? Confidence, int SchemaVersion,
+    int? ProcessId, string? ProcessName, Guid? CorrelationId,
+    IReadOnlyList<string> EvidenceCodes, IReadOnlyList<string> AnalysisLimitations)
+{
+    public SecurityEvent ToSecurityEvent()
+    {
+        if (SourceRowId <= 0 || EventId == Guid.Empty || !Enum.IsDefined(Risk) || !Enum.IsDefined(Status) || SchemaVersion != 1 ||
+            string.IsNullOrWhiteSpace(Category) || Category.Length > 200 || string.IsNullOrWhiteSpace(Application) || Application.Length > 200 ||
+            string.IsNullOrWhiteSpace(Explanation) || Explanation.Length > 1000 || string.IsNullOrWhiteSpace(Recommendation) || Recommendation.Length > 1000 ||
+            Source?.Length > 100 || RuleVersion?.Length > 80 || Confidence is < 0 or > 100 || ProcessId < 0 || ProcessName?.Length > 260 ||
+            CorrelationId == Guid.Empty || EvidenceCodes is null || EvidenceCodes.Count > 32 || AnalysisLimitations is null || AnalysisLimitations.Count > 16 ||
+            EvidenceCodes.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 || code.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '_' or '-'))) ||
+            AnalysisLimitations.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 || code.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '_' or '-'))))
+            throw new ArgumentException("Forwarded event is invalid.");
+        return new SecurityEvent(0, Timestamp, Risk, Category, Application, Explanation, Recommendation, Status,
+            EventId, Source, RuleVersion, Confidence, SchemaVersion, ProcessId, ProcessName, CorrelationId,
+            EvidenceCodes, AnalysisLimitations: AnalysisLimitations);
+    }
+}
 // Fresh profiles start local monitoring automatically. Persisted user preferences are never rewritten by this default.
 public sealed record AppSettings(int RetentionDays = 30, bool Notifications = true, bool Paused = false,
     int MinimumIntervalSeconds = 10,

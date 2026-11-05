@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sentinel.Core;
 
 namespace Sentinel.Service;
 
@@ -35,7 +36,8 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         if (allowedUserSid is not null)
         {
             statusPipe = new ServiceStatusPipeServer(allowedUserSid, health,
-                readRecentEvents: ReadRecentEventsAsync, updateEventStatus: UpdateEventStatusAsync);
+                readRecentEvents: ReadRecentEventsAsync, updateEventStatus: UpdateEventStatusAsync,
+                importForwardedEvents: ImportForwardedEventsAsync);
             statusPipeTask = statusPipe.RunAsync(cancellationToken);
         }
     }
@@ -140,6 +142,22 @@ internal sealed class SentinelMonitoringWorker : IDisposable
         var response = await process.SendAsync(request, cancellationToken);
         using var document = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 8 });
         return document.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True;
+    }
+
+    private async Task<IReadOnlyList<long>> ImportForwardedEventsAsync(IReadOnlyList<ForwardedSecurityEvent> events, CancellationToken cancellationToken)
+    {
+        foreach (var item in events) _ = item.ToSecurityEvent();
+        var request = JsonSerializer.Serialize(new { id = "service-import-events", version = 1, method = "importForwardedEvents", events });
+        var response = await (engine ?? throw new IOException("Sentinel Engine is not available.")).SendAsync(request, cancellationToken);
+        using var document = JsonDocument.Parse(response, new JsonDocumentOptions { MaxDepth = 8 });
+        var root = document.RootElement;
+        if (!root.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
+            !root.TryGetProperty("result", out var result) || !result.TryGetProperty("acknowledgedSourceRowIds", out var ids) || ids.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("Sentinel Engine did not acknowledge forwarded events.");
+        var acknowledged = ids.EnumerateArray().Select(item => item.GetInt64()).ToArray();
+        var expected = events.Select(item => item.SourceRowId).Order().ToArray();
+        if (!acknowledged.SequenceEqual(expected)) throw new InvalidDataException("Sentinel Engine acknowledged an incomplete event page.");
+        return acknowledged;
     }
 
     private static bool TryText(JsonElement element, string property, int maxLength, out string value)

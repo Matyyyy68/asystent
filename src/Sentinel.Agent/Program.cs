@@ -46,6 +46,20 @@ internal static class Program
             }
             catch { return 1; }
         }
+        if (args.Contains("--self-test-service-event-forwarding", StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var sourceRowId = DateTimeOffset.UtcNow.Ticks;
+                var item = new ForwardedSecurityEvent(sourceRowId, DateTimeOffset.UtcNow, RiskLevel.Moderate,
+                    "Agent forwarding self-test", "Sentinel.Agent", "Synthetic pipe integration event", "No action required",
+                    EventStatus.New, Guid.NewGuid(), "agent-forwarding-self-test", "self-test-v1", null, 1,
+                    null, null, null, ["test.agent-service-forwarding"], []);
+                var acknowledged = await SystemServiceEventsClient.ForwardEventsAsync([item], CancellationToken.None);
+                return acknowledged.SequenceEqual([sourceRowId]) ? 0 : 1;
+            }
+            catch { return 1; }
+        }
         if (args.Contains("--shutdown", StringComparer.OrdinalIgnoreCase)) return await RequestShutdownAsync();
         if (!args.Contains("--agent-process", StringComparer.OrdinalIgnoreCase)) return await RunWatchdogAsync();
         AgentLog("AGENT_PROCESS_START");
@@ -151,6 +165,8 @@ internal static class Program
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-notifications.enabled"));
         private readonly ServiceEventNotificationCursor serviceEventNotificationCursor = new(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-notification.cursor"));
+        private readonly ServiceEventTransferCursor serviceEventTransferCursor = new(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-transfer.cursor"));
         private readonly InitialAnalysisCompletionMarker initialAnalysisCompletion = new(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "first-analysis-completed.v1"));
         private readonly List<(string Key, string Title, string Message, ToolTipIcon Icon, NotificationToneKind Tone)> pendingNotifications = [];
@@ -325,6 +341,7 @@ internal static class Program
             if (!serviceEventPollingGate.TryBegin(DateTimeOffset.UtcNow, serviceEventNotificationPreferenceKnown, shutdown.IsCancellationRequested)) return;
             try
             {
+                await ForwardPendingAgentEventsAsync();
                 var notifyForNewEvents = notificationsEnabled && serviceEventNotificationCursor.CanNotifyForNewEvents;
                 var initializeNotificationCursor = notificationsEnabled && !notifyForNewEvents;
                 var batch = notifyForNewEvents
@@ -352,6 +369,62 @@ internal static class Program
             }
             catch { /* Service event notifications are best-effort and never interrupt user-session collection. */ }
             finally { serviceEventPollingGate.Complete(); }
+        }
+
+        private async Task ForwardPendingAgentEventsAsync()
+        {
+            var cursor = serviceEventTransferCursor.Read();
+            var cursorReset = false;
+            for (var pageNumber = 0; pageNumber < 2; pageNumber++)
+            {
+                using var response = await engine.SendAsync(JsonSerializer.Serialize(new { id = "agent-history-forward", version = 1, method = "historyAfter", afterId = cursor }), shutdown.Token);
+                if (!response.RootElement.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
+                    !response.RootElement.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object ||
+                    !result.TryGetProperty("latestEventRowId", out var latestElement) || !latestElement.TryGetInt64(out var latestEventRowId) || latestEventRowId < 0 ||
+                    !result.TryGetProperty("events", out var events) || events.ValueKind != JsonValueKind.Array || events.GetArrayLength() > 4)
+                    throw new InvalidDataException("User Engine returned an invalid forwarded history page.");
+                if (!cursorReset && latestEventRowId < cursor)
+                {
+                    if (!serviceEventTransferCursor.TryReset(0)) throw new IOException("Could not reset the acknowledged cursor after the local history was reset.");
+                    cursor = 0;
+                    cursorReset = true;
+                    pageNumber--;
+                    continue;
+                }
+                var batch = new List<ForwardedSecurityEvent>(events.GetArrayLength());
+                foreach (var item in events.EnumerateArray())
+                {
+                    var eventId = item.TryGetProperty("eventId", out var id) && id.ValueKind == JsonValueKind.String && id.TryGetGuid(out var parsedId) ? parsedId : Guid.Empty;
+                    if (eventId == Guid.Empty || !item.TryGetProperty("id", out var rowId) || !rowId.TryGetInt64(out var sourceRowId))
+                        throw new InvalidDataException("User Engine returned an event without stable identifiers.");
+                    batch.Add(new ForwardedSecurityEvent(sourceRowId,
+                        item.GetProperty("timestamp").GetDateTimeOffset(),
+                        Enum.Parse<RiskLevel>(item.GetProperty("risk").GetString()!, ignoreCase: false),
+                        item.GetProperty("category").GetString()!, item.GetProperty("application").GetString()!,
+                        item.GetProperty("explanation").GetString()!, item.GetProperty("recommendation").GetString()!,
+                        Enum.Parse<EventStatus>(item.GetProperty("status").GetString()!, ignoreCase: false), eventId,
+                        item.TryGetProperty("source", out var source) && source.ValueKind == JsonValueKind.String ? source.GetString() : null,
+                        item.TryGetProperty("ruleVersion", out var rule) && rule.ValueKind == JsonValueKind.String ? rule.GetString() : null,
+                        item.TryGetProperty("confidence", out var confidence) && confidence.TryGetInt32(out var confidenceValue) ? confidenceValue : null,
+                        item.TryGetProperty("schemaVersion", out var schema) && schema.TryGetInt32(out var schemaValue) ? schemaValue : 1,
+                        item.TryGetProperty("processId", out var pid) && pid.TryGetInt32(out var processId) ? processId : null,
+                        item.TryGetProperty("processName", out var process) && process.ValueKind == JsonValueKind.String ? process.GetString() : null,
+                        item.TryGetProperty("correlationId", out var correlation) && correlation.ValueKind == JsonValueKind.String && correlation.TryGetGuid(out var correlationId) ? correlationId : null,
+                        ReadStringArray(item, "evidenceCodes", 32), ReadStringArray(item, "analysisLimitations", 16)));
+                }
+                if (batch.Count == 0) return;
+                var acknowledged = await SystemServiceEventsClient.ForwardEventsAsync(batch, shutdown.Token);
+                if (acknowledged.Count != batch.Count || !serviceEventTransferCursor.TryAdvance(acknowledged.Max()))
+                    throw new IOException("Could not persist the acknowledged system-service event cursor.");
+                cursor = acknowledged.Max();
+            }
+        }
+
+        private static IReadOnlyList<string> ReadStringArray(JsonElement item, string property, int maximum)
+        {
+            if (!item.TryGetProperty(property, out var values) || values.ValueKind != JsonValueKind.Array) return [];
+            return values.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Take(maximum)
+                .Select(value => value.GetString() ?? string.Empty).ToArray();
         }
 
         private async Task CheckWindowsSecurityCenterAsync()

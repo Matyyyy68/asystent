@@ -22,6 +22,36 @@ public sealed class StoreTests : IDisposable
         Assert.False((await (await Store()).LoadSettingsAsync()).AutoUpdateCertFeed);
     }
 
+    [Fact] public async Task EventHistoryCanBeReadInBoundedAscendingPagesAfterStableRowId()
+    {
+        var store = await Store();
+        var first = await store.AddLocalOnlyAsync(Event());
+        var second = await store.AddLocalOnlyAsync(Event());
+        var third = await store.AddLocalOnlyAsync(Event());
+
+        var page = await store.ReadAfterAsync(first, limit: 1);
+        var next = await store.ReadAfterAsync(page[^1].Id);
+
+        Assert.Equal(second, Assert.Single(page).Id);
+        Assert.Equal(third, Assert.Single(next).Id);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.ReadAfterAsync(-1));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.ReadAfterAsync(0, 33));
+    }
+
+    [Fact] public async Task ForwardedEventImportIsBoundedAndIdempotentByEventId()
+    {
+        var store = await Store();
+        var item = new ForwardedSecurityEvent(41, DateTimeOffset.UtcNow, RiskLevel.Moderate,
+            "Synthetic", "Synthetic", "Test event", "Review", EventStatus.New, Guid.NewGuid(),
+            "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], []);
+
+        Assert.Equal(new long[] { 41 }, await store.ImportForwardedEventsAsync([item]));
+        Assert.Equal(new long[] { 41 }, await store.ImportForwardedEventsAsync([item]));
+        Assert.Equal(1, await store.CountEventsAsync());
+        await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync(Enumerable.Repeat(item, 9).ToArray()));
+        await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([item with { SourceRowId = 0 }]));
+    }
+
     [Fact] public async Task DataDirectoryPointerBoundsReadsAndRejectsInvalidOrNonLocalPaths()
     {
         Directory.CreateDirectory(dir);

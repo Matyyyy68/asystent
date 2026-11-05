@@ -2,6 +2,8 @@
 
 **Stan: etap pośredni, cel z promptu nie jest ukończony.** Raport opisuje wyłącznie aktualny kod i wyniki testów; nie potwierdza pełnej ochrony ani gotowości wydania.
 
+**Lokalna zmiana nieopublikowana (2026-11-05):** Agent kopiuje zdarzenia lokalnego Engine do bazy usługi po chronionym pipe. Strony mają do 4 wpisów; stabilny kursor przesuwa się dopiero po pełnym ACK, a ponowienia deduplikuje EventId. Transport pomija ścieżki/hashy. Engine E2E import/replay/historyAfter, .NET 460 PASS + 2 SKIP, buildy Agent/Engine/Service i pipe self-test PASS. Nowego transferu nie sprawdzono jeszcze w live SCM na Windows CI. Nie jest to jedna baza: Service i Agent nadal zapisują do osobnych SQLite, a kopiowanie nie zapewnia korelacji odmiennych EventId.
+
 **Najnowszy pełny Windows CI:** [41891594622](https://github.com/Matyyyy68/asystent/actions/runs/41891594622) dla `83e1b7f` zakończył PASS: .NET 459/459, live SCM status/history pipe i Agent pipe, Electron smoke, Downloads + soak junctionów, autostart, Chrome/Edge, headless i widoczny cykl instalatora oraz Enterprise API 23/23 + HTTP smoke. CI poprzedza eksport stronicowanej historii Service (`5b37e03`), grupowanie EventId (`6165ca3`) i filtrowanie rutynowych informacji (`9a3a593`). Statusy checków dla nowych commitów pozostają puste, więc te zmiany wymagają Windows CI. Wynik starszego CI nie zastępuje testu czystego, fizycznego komputera Windows.
 
 ## 1. Interfejs

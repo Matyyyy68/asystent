@@ -524,6 +524,22 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
     public async Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) =>
         (await AddCoreAsync(item, enqueueEnterprise: false, cancellationToken)).EventRowId;
+    public async Task<IReadOnlyList<long>> ImportForwardedEventsAsync(IReadOnlyList<ForwardedSecurityEvent> items, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count is < 1 or > 4 || items.Any(item => item is null) ||
+            items.Select(item => item.SourceRowId).Distinct().Count() != items.Count ||
+            items.Select(item => item.EventId).Distinct().Count() != items.Count)
+            throw new ArgumentException("Forwarded event batch must contain 1–4 unique events.", nameof(items));
+        var accepted = new List<long>(items.Count);
+        foreach (var item in items.OrderBy(item => item.SourceRowId))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await AddLocalOnlyAsync(item.ToSecurityEvent(), cancellationToken);
+            accepted.Add(item.SourceRowId);
+        }
+        return accepted;
+    }
     /// <summary>Persists a local-only event unless its source already reported the same signal in the requested interval.</summary>
     public async Task<bool> AddLocalOnlyDeduplicatedAsync(SecurityEvent item, TimeSpan sourceSignalWindow,
         CancellationToken cancellationToken = default)
@@ -1473,10 +1489,35 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await r.DisposeAsync();
         return await AttachObservationsAsync(c, rows, cancellationToken);
     }
+    public async Task<IReadOnlyList<SecurityEvent>> ReadAfterAsync(long afterId, int limit = 32, CancellationToken cancellationToken = default)
+    {
+        if (afterId < 0) throw new ArgumentOutOfRangeException(nameof(afterId));
+        if (limit is < 1 or > 32) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,processed_at,analysis_limitations FROM events WHERE id>$afterId ORDER BY id LIMIT $limit";
+        cmd.Parameters.AddWithValue("$afterId", afterId); cmd.Parameters.AddWithValue("$limit", limit);
+        using var r = await cmd.ExecuteReaderAsync(cancellationToken); var rows = new List<SecurityEvent>();
+        while (await r.ReadAsync(cancellationToken)) rows.Add(new(r.GetInt64(0), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture),
+            (RiskLevel)r.GetInt32(2), r.GetString(3), r.GetString(4), r.GetString(5), r.GetString(6), (EventStatus)r.GetInt32(7),
+            r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
+            r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)),
+            ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17),
+            ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture),
+            AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19))));
+        await r.DisposeAsync();
+        return await AttachObservationsAsync(c, rows, cancellationToken);
+    }
     public async Task<int> CountEventsAsync(CancellationToken cancellationToken = default)
     {
         await using var c = await Open(cancellationToken); using var command = c.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM events";
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+    public async Task<long> GetLatestEventRowIdAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await Open(cancellationToken); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(id),0) FROM events";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
     }
     public async Task<DownloadedFileQuarantineCandidate> ReadDownloadedFileQuarantineCandidateAsync(long eventRowId, CancellationToken cancellationToken = default)
     {
