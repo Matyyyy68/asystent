@@ -76,9 +76,8 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         if (!urgency && priorUrgency && indicators.Any(s => s.Id == "text.credentials"))
             Add("context.urgency", "W tym samym oknie niedawno wystÄ…piÅ‚a presja czasu, a teraz proÅ›ba o logowanie.", 2, ThreatCategory.CredentialPhishing);
         indicators = indicators.DistinctBy(i => i.Id).ToList();
-        int score = indicators.Sum(i => i.Weight);
-        // Explicit aggregation, not a calibrated probability. A single weak signal is never a high alert.
-        var risk = score == 0 ? RiskLevel.Information : score <= 2 ? RiskLevel.Low : score < 7 || indicators.Count < 2 ? RiskLevel.Moderate : score < 12 || indicators.Count < 3 ? RiskLevel.High : RiskLevel.Critical;
+        var riskAssessment = RiskEngine.Evaluate(indicators);
+        var risk = riskAssessment.Level;
         var category = indicators.OrderByDescending(i => i.Weight).Select(i => i.Category).FirstOrDefault();
         if (indicators.Any(i => i.Id == "text.payment") && !indicators.Any(i => i.Id == "text.credentials") && !indicators.Any(i => i.Weight >= 4)) category = ThreatCategory.PaymentFraud;
         if (indicators.Any(i => i.Id == "text.credentials") && indicators.Any(i => i.Id.StartsWith("url.", StringComparison.Ordinal) && i.Weight >= 3)) category = ThreatCategory.CredentialPhishing;
@@ -100,7 +99,7 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
             ["Nie podawaj danych, nie wykonuj przelewu ani polecenia przed weryfikacjÄ….", "OtwÃ³rz usÅ‚ugÄ™ ze znanego adresu i skontaktuj siÄ™ z nadawcÄ… niezaleÅ¼nym kanaÅ‚em."];
         var explanation = indicators.Count == 0 ? "Nie wykryto sygnaÅ‚Ã³w obsÅ‚ugiwanych przez reguÅ‚y. To nie jest potwierdzenie bezpieczeÅ„stwa." :
             string.Join(" ", indicators.Select(i => i.Description)) + " MoÅ¼liwe konsekwencje obejmujÄ… utratÄ™ danych, pieniÄ™dzy lub kontroli nad urzÄ…dzeniem.";
-        return new(category, risk, indicators, uncertainty, recommendations, explanation);
+        return new(category, risk, indicators, uncertainty, recommendations, explanation, riskAssessment.Score);
     }
 
     public static (IReadOnlyList<string> Urls, bool Truncated, bool ContainsDefanged) ExtractEmbeddedUrls(string text)
@@ -163,25 +162,4 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
             ? (candidate, true)
             : null;
     }
-    private static string TrimUrlBoundaryPunctuation(string value)
-    {
-        var end = value.Length;
-        while (end > 0 && value[end - 1] is '.' or ',' or '!' or '?' or ';' or ':') end--;
-        while (end > 0 && value[end - 1] is ')' or ']' or '}')
-        {
-            var closing = value[end - 1];
-            var opening = closing switch { ')' => '(', ']' => '[', _ => '{' };
-            if (value.AsSpan(0, end).Count(closing) <= value.AsSpan(0, end).Count(opening)) break;
-            end--;
-        }
-        return value[..end];
-    }
-    private static string Fold(string value)
-    {
-        var builder = new StringBuilder();
-        var wellFormed = string.Concat(value.EnumerateRunes().Select(r => r.ToString()));
-        foreach (char c in wellFormed.ToLowerInvariant().Normalize(NormalizationForm.FormD))
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark) builder.Append(c == 'Å‚' ? 'l' : c);
-        return builder.ToString();
-    }
-}
+    private static string TrimUrlN÷ÒÚ$z{-®éÜj×¥Ì¹•µ‰•‘‘•µÕÉ°µ±¥µ¥Ðˆ¤°4(€€€€€€€€ ‰9¥”ÕÍÑ…±½¹¼Ý¥…Éå½‘¹•¼…‘É•ÍÔˆ°€‰…¹…±åÍ¥Ì¹¹…Ù¥…Ñ¥½¸µÑ…É•ÐµÕ¹Ù•É¥™¥•ˆ¤°4(€€€€€€€€ ‰A½‘…¹ä…‘É•Ì¹¥”©•ÍÐÁ½ÁÉ…Ý¹å´ˆ°€‰…¹…±åÍ¥Ì¹¹…Ù¥…Ñ¥½¸µÑ…É•Ðµ¥¹Ù…±¥ˆ¤°4(€€€€€€€€ ‰]¥‘½é¹äÑ•­ÍÐ±¥¹­Ô¹¥”©•ÍÐˆ°€‰…¹…±åÍ¥Ì¹‘¥ÍÁ±…å•µÕÉ°µ¥¹Ù…±¥ˆ¤°4(€€€€€€€€ ‰A½‘…¹ä•°ÁÉé•­¥•É½Ý…¹¥„¹¥”©•ÍÐˆ°€‰…¹…±åÍ¥Ì¹É•‘¥É•ÐµÑ…É•Ðµ¥¹Ù…±¥ˆ¤°4(€€€€€€€€ ‰QÉ—oé½ÍÑ‡	„½É…¹¥é½¹„ˆ°€‰…¹…±åÍ¥Ì¹¥¹ÁÕÐµÑÉÕ¹…Ñ•ˆ¤°4(€€€€€€€€ ‰]å¹¥¬±½­…±¹•¼µ½‘•±Ô¹¥”©•ÍÐÍ­…±¥‰É½Ý…¹å´ˆ°€‰…¹…±åÍ¥Ì¹…¤µ¹½Ðµ…±¥‰É…Ñ•ˆ¤°4(€€€€€€€€ ‰M•µ…¹Ñåé¹”Á½Éë‘­½Ý…¹¥”±½­…±¹å ƒéËÍ‘—‰ç	¼¹¥•‘½ÍÓeÁ¹”ˆ°€‰…¹…±åÍ¥Ì¹Í•µ…¹Ñ¥ŒµÉ…¹­¥¹œµÕ¹…Ù…¥±…‰±”ˆ¤°4(€€€€€€€€ ‰1½­…±¹äµ½‘•°$©•ÍÐ¹¥•‘½ÍÓeÁ¹ä±ÕˆéÝËÍ§ˆ°€‰…¹…±åÍ¥Ì¹…¤µÕ¹…Ù…¥±…‰±”µÉÕ±”µ½¹±äˆ¤°4(€€€€€€€€ ‰9¥•ÁÉ…Ý¥“	½Ýä±¥µ¥Ðé…ÍÔµ½‘•±Ôˆ°€‰…¹…±åÍ¥Ì¹…¤µÑ¥µ•½ÕÐµ¥¹Ù…±¥µÉÕ±”µ½¹±äˆ¤4(€€€tì4(4(€€€ÁÕ‰±¥ŒÍÑ…Ñ¥Œ%I•…‘=¹±å1¥ÍÐñÍÑÉ¥¹œøÉ½µU¹•ÉÑ…¥¹Ñ¥•Ì¡%¹Õµ•É…‰±”ñÍÑÉ¥¹œøÕ¹•ÉÑ…¥¹Ñ¥•Ì¤4(€€€ì4(€€€€€€€ÉÕµ•¹Ñ9Õ±±á•ÁÑ¥½¸¹Q¡É½Ý%™9Õ±°¡Õ¹•ÉÑ…¥¹Ñ¥•Ì¤ì4(€€€€€€€Ù…È½‘•Ì€ô¹•Ü!…Í¡M•ÐñÍÑÉ¥¹œø¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì4(€€€€€€€™½É•… €¡Ù…ÈÕ¹•ÉÑ…¥¹Ñä¥¸Õ¹•ÉÑ…¥¹Ñ¥•Ì¤4(€€€€€€€€€€€™½É•… €¡Ù…È€¡ÁÉ•™¥à°½‘”¤¥¸-¹½Ý¸¤4(€€€€€€€€€€€€€€€¥˜€¡Õ¹•ÉÑ…¥¹Ñä¹MÑ…ÉÑÍ]¥Ñ ¡ÁÉ•™¥à°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤½‘•Ì¹‘¡½‘”¤ì4(€€€€€€€É•ÑÕÉ¸½‘•Ì¹=É‘•È¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤¹Q½ÉÉ…ä ¤ì4(€€€ô4)ô4(¼¼‘•ÍÑ¥¹…Ñ¥½¸µÕÍÐ½µ”™É½´…¸•áÁ±¥¥ÐÕÍ•È¥¹ÁÕÐ½È„™ÕÑÕÉ”ÑÉÕÍÑ•¹…Ù¥…Ñ¥½¸ÁÉ½Ù¥‘•È¸4(¼¼Q•áÐ½˜…¸…É‰¥ÑÉ…ÉäU$ÕÑ½µ…Ñ¥½¸±…‰•°¥Ì9=P•Ù¥‘•¹”½˜…¸…ÑÕ…°±¥¹¬Ñ…É•Ð¸4)ÁÕ‰±¥ŒÍ•…±•É•½É9…Ù¥…Ñ¥½¹M¥¹…°¡ÍÑÉ¥¹œQ…É•Ð°ÍÑÉ¥¹œü¥ÍÁ±…å•‘UÉ°€ô¹Õ±°°ÍÑÉ¥¹œüY•É¥™¥•‘I•‘¥É•ÑQ…É•Ð€ô¹Õ±°¤ì4)ÁÕ‰±¥ŒÍ•…±•É•½É¹…±åÍ¥Í½¹Ñ•áÐ¡ÍÑÉ¥¹œÁÁ±¥…Ñ¥½¸°ÍÑÉ¥¹œQ•áÐ°…Ñ•Q¥µ•=™™Í•ÐQ¥µ•ÍÑ…µÀ°4(€€€9…Ù¥…Ñ¥½¹M¥¹…°ü9…Ù¥…Ñ¥½¸€ô¹Õ±°°ÍÑÉ¥¹œü½ÉÉ•±…Ñ¥½¹-•ä€ô¹Õ±°¤ì4)ÁÕ‰±¥ŒÍ•…±•É•½ÉUÉ±¹…±åÍ¥Ì¡‰½½°%ÍY…±¥°ÍÑÉ¥¹œü=É¥¥¸°ÍÑÉ¥¹œü!½ÍÐ°ÍÑÉ¥¹œüI•¥ÍÑÉ…‰±•½µ…¥¸°4(€€€%I•…‘=¹±å1¥ÍÐñQ¡É•…Ñ%¹‘¥…Ñ½Èø%¹‘¥…Ñ½ÉÌ¤ì4(

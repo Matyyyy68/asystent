@@ -40,7 +40,9 @@ Niezależność usługi jest częściowa: jej profil Downloads to izolowany kata
 
 **Częściowo działa:** usługa jest niezależna od UI, ale nie zastępuje per-user Engine dla Downloads i ustawień właściwych dla użytkownika; część historii i kolektorów działa w obu instancjach. WMI nie gwarantuje odbioru zdarzeń podczas awarii/restartu. Core liczy fail-closed status świeżości i źródeł oraz uwzględnia Windows Security Center. Korelacja jest ograniczona do dostępnych kluczy i okien czasu.
 
-**Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalny risk engine 0–100, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna konsolidacja stanu i korelacji pomiędzy dwiema bazami oraz fizyczny test instalacji i restartu na czystym Windows użytkownika.
+**Częściowo zaimplementowano:** `RiskEngine` oblicza deterministyczną heurystykę 0–100 dla ręcznej analizy tekstu/URL, a `ThreatAssessment` zwraca wynik wraz z poziomem i wskaźnikami. To nie jest skalibrowane prawdopodobieństwo; wynik nie jest jeszcze częścią trwałego schematu zdarzeń ani nie jest stosowany do monitorów systemowych.
+
+**Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalna i skalibrowana ocena ryzyka, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna konsolidacja stanu i korelacji pomiędzy dwiema bazami oraz fizyczny test instalacji i restartu na czystym Windows użytkownika.
 
 ## Modułowe notatki
 
