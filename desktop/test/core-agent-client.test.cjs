@@ -1,12 +1,16 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { CoreAgentClient, PIPE_PATH, resolvePipePath } = require('../electron/core-agent-client.cjs');
+const { CoreAgentClient, PIPE_PATH, resolvePipePath, sanitizeCoreEngineDiagnostics } = require('../electron/core-agent-client.cjs');
 
 class MockPipe extends EventEmitter {
   write(line) {
     const request = JSON.parse(line);
-    queueMicrotask(() => this.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result: { engine: 'ready' } }) + '\n')));
+    const result = request.method === 'coreEngineDiagnostics'
+      ? { engineProcessRunning: false, engineLastExitCode: -532462766, engineStderrObserved: true,
+        engineExceptionType: 'System.IO.IOException', message: 'private path C:\\Users\\Alice\\secret.txt' }
+      : { engine: 'ready' };
+    queueMicrotask(() => this.emit('data', Buffer.from(JSON.stringify({ id: request.id, ok: true, result }) + '\n')));
   }
   destroy() { this.destroyed = true; }
 }
@@ -28,6 +32,20 @@ test('Core Agent client launches the detached user agent and sends versioned IPC
   assert.equal(client.diagnostics().status, 'ready');
   client.dispose();
   assert.equal(client.diagnostics().status, 'stopped');
+});
+
+test('Core Agent client returns only sanitized Engine failure diagnostics', async () => {
+  const client = new CoreAgentClient('Sentinel.Agent.exe', {
+    spawnProcess: () => ({ unref() {} }),
+    connectPipe: () => { const pipe = new MockPipe(); queueMicrotask(() => pipe.emit('connect')); return pipe; }
+  });
+  assert.deepEqual(await client.call('coreEngineDiagnostics'), {
+    engineProcessRunning: false,
+    engineLastExitCode: '-532462766',
+    engineStderrObserved: true,
+    engineExceptionType: 'System.IO.IOException'
+  });
+  client.dispose();
 });
 
 test('Core Agent client permits a retry after an asynchronous process launch error', () => {
@@ -67,4 +85,28 @@ test('Core Agent client does not retry completed engine errors', async () => {
   await assert.rejects(client.call('file'), /Invalid file path/);
   assert.equal(attempts, 1);
   client.dispose();
+});
+
+test('sanitizes Agent Engine diagnostics to bounded, non-sensitive status fields', () => {
+  assert.deepEqual(sanitizeCoreEngineDiagnostics({
+    engineProcessRunning: false,
+    engineLastExitCode: -532462766,
+    engineStderrObserved: true,
+    engineExceptionType: 'System.IO.IOException',
+    message: 'private path C:\\Users\\Alice\\secret.txt'
+  }), {
+    engineProcessRunning: false,
+    engineLastExitCode: '-532462766',
+    engineStderrObserved: true,
+    engineExceptionType: 'System.IO.IOException'
+  });
+  assert.deepEqual(sanitizeCoreEngineDiagnostics({
+    engineLastExitCode: 0x1_0000_0000,
+    engineExceptionType: 'System.Exception C:\\private'
+  }), {
+    engineProcessRunning: null,
+    engineLastExitCode: null,
+    engineStderrObserved: false,
+    engineExceptionType: null
+  });
 });

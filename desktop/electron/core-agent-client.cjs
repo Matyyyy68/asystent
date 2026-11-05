@@ -11,6 +11,18 @@ const PIPE_PATH = resolvePipePath();
 const REQUEST_TIMEOUT_MS = 45000;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
+function sanitizeCoreEngineDiagnostics(value) {
+  const exitCode = value?.engineLastExitCode;
+  const exceptionType = value?.engineExceptionType;
+  return {
+    engineProcessRunning: typeof value?.engineProcessRunning === 'boolean' ? value.engineProcessRunning : null,
+    engineLastExitCode: Number.isInteger(exitCode) && exitCode >= -0x80000000 && exitCode <= 0xffffffff ? String(exitCode) : null,
+    engineStderrObserved: value?.engineStderrObserved === true,
+    engineExceptionType: typeof exceptionType === 'string' && exceptionType.length <= 160 &&
+      /^[A-Za-z0-9._+`]+$/.test(exceptionType) ? exceptionType : null
+  };
+}
+
 class CoreAgentClient {
   constructor(agentExecutable, options = {}) {
     this.agentExecutable = agentExecutable;
@@ -84,7 +96,7 @@ class CoreAgentClient {
           error.permanent = true;
           throw error;
         }
-        return response.result;
+        return method === 'coreEngineDiagnostics' ? sanitizeCoreEngineDiagnostics(response.result) : response.result;
       } catch (error) {
         if (error?.permanent) throw error;
         lastError = error;
@@ -135,4 +147,4 @@ class CoreAgentClient {
   }
 }
 
-module.exports = { CoreAgentClient, PIPE_PATH, resolvePipePath };
+module.exports = { CoreAgentClient, PIPE_PATH, resolvePipePath, sanitizeCoreEngineDiagnostics };

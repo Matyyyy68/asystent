@@ -60,7 +60,13 @@ app.whenReady().then(() => {
   const call = (method, data) => engine.call(method, data);
   ipcMain.handle('sentinel', async (event, method, data) => {
     if (event.sender !== win.webContents || event.senderFrame?.url !== page) throw new Error('Niezaufane źródło');
-    if (method === 'engineStatus') return { ...engine.diagnostics(), lastFailure: readLastFailure(lifecycleLogDirectory) };
+    if (method === 'engineStatus') {
+      let coreDiagnostics = null;
+      if (!smokeTest) {
+        try { coreDiagnostics = await engine.call('coreEngineDiagnostics'); } catch { /* The regular engine status remains available if the agent pipe is down. */ }
+      }
+      return { ...engine.diagnostics(), ...(coreDiagnostics || {}), lastFailure: readLastFailure(lifecycleLogDirectory) };
+    }
     if (method === 'machineServiceStatus') return readServiceStatus();
     if (method === 'machineServiceEvents') return readServiceEvents({ beforeEventId: data?.beforeEventId });
     if (method === 'machineServiceEventStatus') return updateServiceEventStatus(data?.eventId, data?.status);

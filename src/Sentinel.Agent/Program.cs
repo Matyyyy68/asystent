@@ -587,6 +587,21 @@ internal static class Program
                             catch (Exception exception) { AgentLog("AGENT_SHUTDOWN_DISPATCH_FAILED type=" + exception.GetType().Name); throw; }
                             continue;
                         }
+                        if (parsed.RootElement.TryGetProperty("method", out method) && method.GetString() == "coreEngineDiagnostics")
+                        {
+                            var id = parsed.RootElement.TryGetProperty("id", out var requestId) && requestId.ValueKind == JsonValueKind.String
+                                ? requestId.GetString() : null;
+                            if (string.IsNullOrWhiteSpace(id) || id.Length > 80) continue;
+                            var diagnosticsResponse = JsonSerializer.Serialize(new
+                            {
+                                id,
+                                version = 1,
+                                ok = true,
+                                result = engine.Diagnostics()
+                            });
+                            await writer.WriteLineAsync(diagnosticsResponse);
+                            continue;
+                        }
                     }
                     var response = await engine.SendAsync(request, cancellationToken);
                     await writer.WriteLineAsync(response.RootElement.GetRawText());
@@ -624,8 +639,21 @@ internal static class Program
         private Process? process;
         private StreamWriter? input;
         private StreamReader? output;
+        private readonly object diagnosticGate = new();
+        private int? lastExitCode;
+        private bool stderrObserved;
+        private string? lastExceptionType;
 
         public EngineProxy(string executable) => this.executable = executable;
+
+        public object Diagnostics()
+        {
+            var running = false;
+            try { running = process is { HasExited: false }; } catch { /* A process may exit during the snapshot. */ }
+            lock (diagnosticGate)
+                return new { engineProcessRunning = running, engineLastExitCode = lastExitCode,
+                    engineStderrObserved = stderrObserved, engineExceptionType = lastExceptionType };
+        }
 
         public async Task<JsonDocument> SendAsync(string request, CancellationToken cancellationToken)
         {
@@ -671,12 +699,22 @@ internal static class Program
             {
                 if (string.IsNullOrWhiteSpace(line.Data)) return;
                 var fatalType = EngineFatalDiagnostic.ReadExceptionType(line.Data);
+                lock (diagnosticGate)
+                {
+                    stderrObserved = true;
+                    if (fatalType is not null) lastExceptionType = fatalType;
+                }
                 AgentLog(fatalType is null ? "ENGINE_STDERR_DIAGNOSTIC" : "ENGINE_FATAL type=" + fatalType);
             };
             startedProcess.EnableRaisingEvents = true;
             startedProcess.Exited += (_, _) =>
             {
-                try { AgentLog("ENGINE_PROCESS_EXIT exitCode=" + startedProcess.ExitCode.ToString(CultureInfo.InvariantCulture)); }
+                try
+                {
+                    var exitCode = startedProcess.ExitCode;
+                    lock (diagnosticGate) lastExitCode = exitCode;
+                    AgentLog("ENGINE_PROCESS_EXIT exitCode=" + exitCode.ToString(CultureInfo.InvariantCulture));
+                }
                 catch { AgentLog("ENGINE_PROCESS_EXIT exitCode=unavailable"); }
             };
             process.BeginErrorReadLine();
