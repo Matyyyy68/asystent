@@ -434,7 +434,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
             await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
-            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
+            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation_v2 ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }

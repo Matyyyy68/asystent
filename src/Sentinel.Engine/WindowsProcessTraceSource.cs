@@ -18,6 +18,7 @@ public sealed class WindowsProcessTraceSource : IDisposable
     private ManagementEventWatcher? startWatcher;
     private ManagementEventWatcher? stopWatcher;
     private long dropped;
+    private int stopping;
 
     public string State { get; private set; } = "Nie uruchomiono źródła zdarzeń procesów Windows.";
     public long DroppedEvents => Interlocked.Read(ref dropped);
@@ -33,7 +34,7 @@ public sealed class WindowsProcessTraceSource : IDisposable
             stopWatcher.Start();
             State = "Odbieranie zdarzeń startu i zakończenia procesów przez WMI; kolejka ograniczona do 4096.";
         }
-        catch (Exception exception) when (exception is ManagementException or UnauthorizedAccessException or InvalidOperationException or System.Runtime.InteropServices.COMException)
+        catch (Exception exception)
         {
             DisposeWatchers();
             State = "Zdarzenia procesów WMI niedostępne (" + exception.GetType().Name + "); działa awaryjny snapshot PID.";
@@ -55,6 +56,11 @@ public sealed class WindowsProcessTraceSource : IDisposable
     {
         var watcher = new ManagementEventWatcher(new WqlEventQuery($"SELECT * FROM {eventClass}"));
         watcher.EventArrived += (_, args) => OnEvent(args.NewEvent, action);
+        watcher.Stopped += (_, _) =>
+        {
+            if (Volatile.Read(ref stopping) == 0)
+                State = "Subskrypcja zdarzeń procesów WMI niedostępna po zatrzymaniu watcher'a; działa awaryjny snapshot PID.";
+        };
         return watcher;
     }
 
@@ -100,6 +106,7 @@ public sealed class WindowsProcessTraceSource : IDisposable
     [SupportedOSPlatform("windows")]
     private void DisposeWatchers()
     {
+        Interlocked.Exchange(ref stopping, 1);
         try { startWatcher?.Stop(); } catch { }
         try { stopWatcher?.Stop(); } catch { }
         startWatcher?.Dispose(); stopWatcher?.Dispose();
