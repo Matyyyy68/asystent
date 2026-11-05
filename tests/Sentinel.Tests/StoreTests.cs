@@ -52,6 +52,19 @@ public sealed class StoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([item with { SourceRowId = 0 }]));
     }
 
+    [Fact] public async Task ForwardedEventImportRejectsMalformedPageBeforePersistingAnyRow()
+    {
+        var store = await Store();
+        var first = new ForwardedSecurityEvent(41, DateTimeOffset.UtcNow, RiskLevel.Moderate,
+            "Synthetic", "Synthetic", "Test event", "Review", EventStatus.New, Guid.NewGuid(),
+            "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], []);
+        var invalidSecond = first with { SourceRowId = 42, EventId = Guid.NewGuid(), Category = "" };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([first, invalidSecond]));
+
+        Assert.Equal(0, await store.CountEventsAsync());
+    }
+
     [Fact] public async Task DataDirectoryPointerBoundsReadsAndRejectsInvalidOrNonLocalPaths()
     {
         Directory.CreateDirectory(dir);

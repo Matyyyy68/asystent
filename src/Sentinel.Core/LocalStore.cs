@@ -531,12 +531,16 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             items.Select(item => item.SourceRowId).Distinct().Count() != items.Count ||
             items.Select(item => item.EventId).Distinct().Count() != items.Count)
             throw new ArgumentException("Forwarded event batch must contain 1–4 unique events.", nameof(items));
+        // Validate the complete page before persisting any row. Otherwise one malformed item
+        // near the end leaves a partially imported page that cannot be acknowledged as a unit.
+        var validated = items.Select(item => (Item: item, Event: item.ToSecurityEvent()))
+            .OrderBy(entry => entry.Item.SourceRowId).ToArray();
         var accepted = new List<long>(items.Count);
-        foreach (var item in items.OrderBy(item => item.SourceRowId))
+        foreach (var entry in validated)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await AddLocalOnlyAsync(item.ToSecurityEvent(), cancellationToken);
-            accepted.Add(item.SourceRowId);
+            await AddLocalOnlyAsync(entry.Event, cancellationToken);
+            accepted.Add(entry.Item.SourceRowId);
         }
         return accepted;
     }
