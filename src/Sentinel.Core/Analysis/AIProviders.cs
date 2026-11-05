@@ -290,9 +290,11 @@ public sealed class AnalysisOrchestrator(ThreatAnalysisEngine rules, IAIProvider
                     indicator.SourceReferences.Select(reference => sources[reference - 1]).Select(source => new KnowledgeCitation(
                         PrivacyFilter.Redact(source.SourceName), source.ChunkNumber,
                         PrivacyFilter.Redact(source.Excerpt))).ToArray()))).DistinctBy(item => item.Id).ToArray();
-            var risk = (RiskLevel)Math.Max((int)ruleResult.Risk, (int)conclusion.Risk);
+            // Model-proposed severity is not evidence. Only deterministic rule evidence may set the risk level.
+            var risk = ruleResult.Risk;
             var category = ruleResult.Risk >= RiskLevel.Moderate ? ruleResult.Category : conclusion.Category;
             var uncertainties = ruleResult.Uncertainties.Concat(conclusion.Uncertainties.Select(PrivacyFilter.Redact))
+                .Append("Ocena ryzyka pochodzi z lokalnych reguł i ich dowodów; model AI może pomóc w wyjaśnieniu, ale nie podnosi samodzielnie poziomu ryzyka.")
                 .Append("Wynik lokalnego modelu nie jest skalibrowanym prawdopodobieństwem; system nie potwierdza bezpieczeństwa.").Distinct().Take(12).ToArray();
             if (semanticFallback)
                 uncertainties = uncertainties.Append("Semantyczne porządkowanie lokalnych źródeł było niedostępne; użyto dopasowania leksykalnego.").Distinct().Take(12).ToArray();
