@@ -25,5 +25,5 @@ Pobrane pliki, TCP/UDP i część kontroli trwałości/autostartu pozostają zal
 
 ## Dalsze prace wymagane do wizji pełnej usługi
 
-Host SCM, pętla Engine, chroniony katalog danych, status pipe, helper UAC instalatora, forwarding Agent → Service i heartbeat w UI są w kodzie. UI pobiera stronicowane zdarzenia obu źródeł, a eksport JSON/CSV ma limit 500 rekordów. Bazy nadal są osobne, a korelacja różnych EventId i usunięcie równoległych cykli nie są ukończone. Pełny Windows CI dla commitu `61d2a69`, rozszerzającego test SCM o round-trip diagnostyki Agent → UI, jest w toku; izolowany test nie był uruchamiany na komputerze użytkownika.
+Host SCM, pętla Engine, chroniony katalog danych, status pipe, helper UAC instalatora, forwarding Agent → Service i heartbeat w UI są w kodzie. UI pobiera stronicowane zdarzenia obu źródeł, a eksport JSON/CSV ma limit 500 rekordów. Bazy nadal są osobne, a korelacja różnych EventId i usunięcie równoległych cykli nie są ukończone. Windows CI [42027981562](https://github.com/Matyyyy68/asystent/actions/runs/42027981562) dla commitu `3b56616` zakończył PASS: potwierdził Agent pipe, Electron smoke, Downloads soak, autostart, rozszerzenie i pełną ścieżkę instalacji/naprawy/deinstalacji. Testy odbyły się na izolowanym runnerze, nie na komputerze użytkownika. Nadal nie ma jednej kanonicznej bazy ani pełnej korelacji źródeł.
 
