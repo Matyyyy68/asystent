@@ -194,7 +194,8 @@ public sealed class ProcessSnapshotMonitor
                 if (!recentlyObservedStarts.TryGetValue(change.ProcessId, out var existing) || existing.Timestamp <= change.ObservedAt)
                     recentlyObservedStarts[change.ProcessId] = (change.ObservedAt, correlationId, change.ProcessName);
             }
-            else if (change.Action == "Proces zakończony" && recentlyObservedStarts.TryGetValue(change.ProcessId, out var stoppedProcess) &&
+            else if ((change.Action is "Proces zakończony" or "Proces zniknął z migawki") &&
+                recentlyObservedStarts.TryGetValue(change.ProcessId, out var stoppedProcess) &&
                 stoppedProcess.Timestamp <= change.ObservedAt && string.Equals(stoppedProcess.ProcessName, change.ProcessName, StringComparison.OrdinalIgnoreCase))
             {
                 recentlyObservedStarts.Remove(change.ProcessId);

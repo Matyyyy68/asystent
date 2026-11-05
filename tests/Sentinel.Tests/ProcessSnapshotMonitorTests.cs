@@ -94,6 +94,23 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task SnapshotRemovalExpiresProcessCorrelation()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+        snapshot[808] = "worker";
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+        Assert.NotNull(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
+
+        snapshot.Remove(808);
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+
+        Assert.Null(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
     public async Task WmiParentPidAppliesBehaviorRuleToShortLivedOfficeChild()
     {
         var store = new LocalStore(directory); await store.InitializeAsync();

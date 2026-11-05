@@ -187,6 +187,26 @@ public sealed class StoreTests : IDisposable
         Assert.Null(queued.CorrelationId);
     }
 
+    [Fact] public async Task RecentProcessStartCacheRebuildIgnoresPidWhoseLatestLifecycleEventIsStop()
+    {
+        var store = await Store();
+        var now = DateTimeOffset.UtcNow;
+        var firstCorrelation = Guid.NewGuid();
+        var restartedCorrelation = Guid.NewGuid();
+        SecurityEvent LifecycleEvent(DateTimeOffset at, string action, Guid? correlationId) =>
+            Event(at) with { Category = action, Source = "process-wmi", ProcessId = 808,
+                ProcessName = "worker", CorrelationId = correlationId };
+
+        await store.AddLocalOnlyAsync(LifecycleEvent(now.AddSeconds(-2), "Proces zaobserwowany", firstCorrelation));
+        Assert.Equal(firstCorrelation, Assert.Single(await store.ReadRecentProcessStartsAsync(now)).CorrelationId);
+
+        await store.AddLocalOnlyAsync(LifecycleEvent(now.AddSeconds(-1), "Proces zakończony", null));
+        Assert.Empty(await store.ReadRecentProcessStartsAsync(now));
+
+        await store.AddLocalOnlyAsync(LifecycleEvent(now, "Proces zaobserwowany", restartedCorrelation));
+        Assert.Equal(restartedCorrelation, Assert.Single(await store.ReadRecentProcessStartsAsync(now)).CorrelationId);
+    }
+
     [Fact] public async Task VersionThirtyFiveMigrationAddsDurableDroppedChangeCounterWithoutLosingData()
     {
         var store = await Store();
@@ -1434,4 +1454,5 @@ public sealed class StoreTests : IDisposable
     }
     public void Dispose() { if(Directory.Exists(dir)) Directory.Delete(dir,true); }
 }
+
 
