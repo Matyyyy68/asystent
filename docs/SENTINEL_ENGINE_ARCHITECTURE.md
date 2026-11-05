@@ -36,6 +36,10 @@ Engine i Agent działają w sesji użytkownika; usługa SCM jest osobnym procese
 
 **Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalny risk engine 0–100, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna niezależna od sesji użytkownika usługa kolektorów i czysty test Windows po instalacji.
 
+## Modułowe notatki
+
+[Monitoring procesów](PROCESS_MONITORING.md) · [monitoring plików](FILE_MONITORING.md) · [monitoring sieci](NETWORK_MONITORING.md) · [detekcja](DETECTION_ENGINE.md) · [ryzyko](RISK_ENGINE.md) · [threat intelligence](THREAT_INTELLIGENCE.md) · [reakcje](RESPONSE_ENGINE.md) · [AI](AI_ENGINE.md) · [wydajność](PERFORMANCE.md) · [prywatność](PRIVACY.md) · [testy](ENGINE_TESTING.md).
+
 ## Weryfikacja
 
 Test integrujący krótkotrwały proces z syntetycznym wejściem WMI jest w `ProcessSnapshotMonitorTests`. Test nie uruchamia WMI ani nie zmienia konfiguracji systemu. Testy regresji wykonuje się przez `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`.

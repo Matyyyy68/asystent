@@ -75,6 +75,31 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task WmiStartUsesSameImageInspectionAndCorrelationPipelineAsSnapshotStart()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var imagePath = Path.Combine(directory, "observed.exe");
+        var queued = new List<(Guid EventId, string Path)>();
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string> { [42] = "observed" },
+            (_, _) => imagePath, (eventId, path) => { queued.Add((eventId, path)); return true; }, null);
+
+        var count = await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zaobserwowany", 42, "observed", 1)]);
+
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal(1, count);
+        Assert.Equal("process-wmi", item.Source);
+        Assert.Equal(imagePath, item.ProcessImagePath);
+        Assert.Contains("process.wmi.start-event", item.EvidenceCodes!);
+        Assert.Equal((item.EventId!.Value, imagePath), Assert.Single(queued));
+        await store.UpdateProcessImageInspectionAsync(item.EventId.Value, new string('A', 64), "Valid", false);
+        var inspected = Assert.Single(await store.ReadAsync());
+        Assert.Equal(new string('A', 64), inspected.ProcessImageSha256);
+        Assert.Equal("Valid", inspected.ProcessImageSignatureStatus);
+        Assert.Contains("process.image.authenticode.valid", inspected.EvidenceCodes!);
+    }
+
+    [Fact]
     public async Task WindowsWmiSourceObservesBenignChildOrReportsSnapshotFallback()
     {
         if (!OperatingSystem.IsWindows()) return;
