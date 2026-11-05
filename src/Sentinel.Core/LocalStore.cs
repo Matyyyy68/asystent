@@ -1797,7 +1797,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         while (await r.ReadAsync(ct)) rows.Add(new(r.GetInt64(0),DateTimeOffset.Parse(r.GetString(1),CultureInfo.InvariantCulture),(RiskLevel)r.GetInt32(2),r.GetString(3),r.GetString(4),r.GetString(5),r.GetString(6),(EventStatus)r.GetInt32(7),
             r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
             r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
-            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17), ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19))));
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17), ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19)), RiskScore: r.IsDBNull(20) ? null : r.GetInt32(20)));
         await r.DisposeAsync();
         return await AttachObservationsAsync(c, rows, ct);
     }

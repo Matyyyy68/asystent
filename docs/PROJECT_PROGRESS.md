@@ -810,3 +810,8 @@ Rozszerzono wynik RiskEngine do trwałych zdarzeń ręcznej analizy: SQLite v41,
 ## RiskEngine dla monitorowanych zdarzeń (2026-11-05)
 
 `RiskEngine.EvaluateEvidenceCodes` dodaje punkty wyłącznie dla jawnie znanych kodów dowodów; nieznane kody nie zmieniają oceny. Dopasowanie reputacyjne jest łączone z odpowiadającą mu obserwacją Windows. Korelacja TCP uwzględnia jawny dowód zachowania procesu. Dopasowanie hasha z lokalnej listy o niezweryfikowanym źródle nie otrzymuje samoistnego wyniku numerycznego. Monitoring procesu, TCP, DNS Operational/cache, persistence i Downloads zapisuje wynik w SQLite v41. `RiskEngineTests` 8/8 PASS; pełna suita .NET 506 PASS, 2 pominięte zależnie od środowiska. Pełny Windows CI poprzedniego commita wykrył dodatkowo zbyt ścisłe założenie testu formatu CSV; test został uodporniony na cytowane i niecytowane pola liczbowe. Niezależna kalibracja ryzyka pozostaje nieukończona.
+
+
+### Windows CI regression fix (2026-11-05)
+
+Run [42104537763](https://github.com/Matyyyy68/asystent/actions/runs/42104537763) confirmed a product bug in CSV export: the SQL query selected `risk_score`, but the row mapper omitted it, so CSV always exported an empty score. Added the missing SQLite-column-to-model mapping. The assertion now accepts standard quoted or unquoted numeric CSV fields; local targeted regression passes. Awaiting a full Windows CI run on the fix.
