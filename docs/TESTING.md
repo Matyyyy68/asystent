@@ -1,5 +1,12 @@
 # Testowanie i walidacja
 
+## Najnowsza weryfikacja (2026-11-05)
+
+- Windows CI [42018809261](https://github.com/Matyyyy68/asystent/actions/runs/42018809261) dla `083a402` zakończył PASS we wszystkich krokach: build/test aplikacji, SCM, Electron smoke, Downloads i soak, autostart, rozszerzenie, instalatory i Enterprise API.
+- Windows CI [42020846087](https://github.com/Matyyyy68/asystent/actions/runs/42020846087) dla `d1909dd` zakończył PASS; potwierdził także kompilację UI z diagnostyką procesu Engine pobieraną przez Agent named pipe.
+- Commit [`61d2a69`](https://github.com/Matyyyy68/asystent/commit/61d2a6926b032ca134218d016bd773f886292f38) dodaje nieinteraktywny self-test pełnego round-trip diagnostyki przez Agent pipe do `scripts/test-service-scm.ps1`; nowy run [42022857663](https://github.com/Matyyyy68/asystent/actions/runs/42022857663) jest w toku. Lokalnie build Agent 0 ostrzeżeń/błędów, składnia PowerShell PASS, desktop 109/109 PASS, zmienione pliki JS `node --check` PASS. Lokalnego lint TypeScript nie uruchomiono, bo checkout nie zawiera `tsc`.
+- Żaden z tych testów nie uruchamiał aplikacji ani instalatora na komputerze użytkownika. Wykryte wyjątki CLR są lepiej widoczne; ich pierwotna przyczyna pozostaje nieustalona do czasu zebrania diagnostyki z komputera, na którym występują.
+
 ## Zweryfikowane w bieżącym checkoutcie (2026-11-04)
 
 - Nowsza lokalna zmiana pipe: paginacja po `beforeEventId` i przycisk „Pokaż starsze zdarzenia usługi”; `Sentinel.Service --self-test` sprawdza poprawną, ograniczoną starszą stronę i odrzucenie kursora mieszanego/nieprawidłowego. Po zmianie .NET 457/457 PASS (2 skip środowiskowe), desktop 96/96, lint, Release build Service 0/0 i Vite production 1584 moduły PASS. Pierwszy Vite build w sandboxie nie odczytał katalogu nadrzędnego (`Access denied`); powtórzenie z oficjalnym `--configLoader runner` zakończyło się sukcesem. Windows CI dla samej paginacji oczekuje na commit.
