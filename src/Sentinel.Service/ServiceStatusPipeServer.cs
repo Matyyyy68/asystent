@@ -20,7 +20,11 @@ internal sealed class ServiceStatusPipeServer(SecurityIdentifier allowedUserSid,
     private const int MaximumResponseChars = 32_768;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
     private static readonly JsonSerializerOptions ResponseJsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly JsonSerializerOptions RequestJsonOptions = new(JsonSerializerDefaults.Web) { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
+    private static readonly JsonSerializerOptions RequestJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        Converters = { new JsonStringEnumConverter() }
+    };
     private readonly string pipeName = pipeName ?? PipeName;
     private readonly Action<Exception>? onError = onError;
     private readonly PipeSecurity pipeSecurity = CreatePipeSecurity(allowedUserSid);
