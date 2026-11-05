@@ -1,5 +1,7 @@
 # Network monitoring
 
+Nowy snapshot TCP otrzymuje ten sam lokalny `CorrelationId`, co start procesu z ostatnich 60 sekund. Jeśli ta korelacja zawiera `process.behavior.office-spawned-script-host`, połączenie jest dodatkowym sygnałem umiarkowanym (`correlation.process-network.office-spawned-script-host`). To korelacja metadanych po PID/czasie; nie przechwytuje treści ruchu i nie blokuje połączenia. Dopasowanie IP do lokalnego feedu pozostaje osobnym sygnałem zależnym od pochodzenia listy.
+
 ## Available observations
 
 - Windows TCP/UDP tables are read through bounded native table APIs. The continuous monitor samples approximately once per Agent collect cycle and stores new eligible TCP observations plus local UDP endpoint observations. It has explicit count limits and associates a PID/name when Windows reports one.

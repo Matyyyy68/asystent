@@ -754,6 +754,31 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 results.Add((reader.GetInt32(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), correlationId));
         return results;
     }
+    public async Task<IReadOnlySet<Guid>> ReadCorrelationsWithProcessEvidenceAsync(
+        IReadOnlyCollection<Guid> correlationIds, string evidenceCode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(correlationIds);
+        if (string.IsNullOrWhiteSpace(evidenceCode) || evidenceCode.Length > 100 || evidenceCode.Any(char.IsControl))
+            throw new ArgumentException("Nieprawidłowy kod dowodu korelacji.", nameof(evidenceCode));
+        var ids = correlationIds.Where(id => id != Guid.Empty).Distinct().Take(100).ToArray();
+        if (ids.Length == 0) return new HashSet<Guid>();
+
+        await using var c = await Open(ct);
+        using var command = c.CreateCommand();
+        var parameters = ids.Select((id, index) =>
+        {
+            var name = "$correlation" + index.ToString(CultureInfo.InvariantCulture);
+            command.Parameters.AddWithValue(name, id.ToString("D"));
+            return name;
+        });
+        command.Parameters.AddWithValue("$evidence", evidenceCode);
+        command.CommandText = $"SELECT DISTINCT correlation_id FROM events WHERE correlation_id IN ({string.Join(',', parameters)}) AND source IN ('process-wmi','process-snapshot') AND instr(evidence_codes,$evidence)>0";
+        var matches = new HashSet<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            if (Guid.TryParse(reader.GetString(0), out var correlationId)) matches.Add(correlationId);
+        return matches;
+    }
     public async Task<ProcessChangeQueueSnapshot> ReadPendingProcessChangesAsync(int maximumItems = 20_000,
         CancellationToken ct = default)
     {

@@ -167,6 +167,37 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Null(processMonitor.WasRecentlyObservedStart(1234, clock.GetUtcNow().AddSeconds(61)));
     }
 
+    [Fact]
+    public async Task CorrelatesOfficeScriptLaunchAndTcpActivityAsOneModerateIncident()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var correlationId = Guid.NewGuid();
+        await store.AddLocalOnlyAsync(new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Moderate,
+            "Nietypowe uruchomienie procesu", "powershell",
+            "WINWORD uruchomił PowerShell; heurystyka wymaga sprawdzenia.",
+            "Zweryfikuj dokument i proces.", EventStatus.New, EventId: Guid.NewGuid(), Source: "process-wmi",
+            ProcessId: 1234, ProcessName: "powershell", CorrelationId: correlationId,
+            EvidenceCodes: ["process.behavior.office-spawned-script-host"]));
+
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        IReadOnlyCollection<ConnectionSnapshot> sample = [];
+        var monitor = new TcpConnectionSnapshotMonitor(_ => Task.FromResult(sample), clock,
+            (pid, name, _) => pid == 1234 && name == "powershell" ? correlationId : null);
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+        sample = [Connection(443, "203.0.113.45", "powershell", 1234)];
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false, ""));
+
+        var networkEvent = Assert.Single(await store.ReadAsync(), item => item.Source == "tcp-connection-snapshot");
+        Assert.Equal(RiskLevel.Moderate, networkEvent.Risk);
+        Assert.Equal("Ruch sieciowy procesu uruchomionego przez Office", networkEvent.Category);
+        Assert.Equal(correlationId, networkEvent.CorrelationId);
+        Assert.Contains("heurystyką Office → interpreter", networkEvent.Explanation);
+        Assert.Contains("correlation.process-network.office-spawned-script-host", networkEvent.EvidenceCodes!);
+        Assert.Contains("heurystyczna", networkEvent.Recommendation);
+    }
+
     [Theory]
     [InlineData("different-process")]
     [InlineData("unknown")]
