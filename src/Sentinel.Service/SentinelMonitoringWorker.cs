@@ -276,7 +276,9 @@ internal sealed class SentinelMonitoringWorker : IDisposable
             output = process.StandardOutput;
             process.ErrorDataReceived += (_, line) =>
             {
-                if (!string.IsNullOrWhiteSpace(line.Data)) ServiceLog.Write("ENGINE_DIAGNOSTIC_AVAILABLE");
+                if (string.IsNullOrWhiteSpace(line.Data)) return;
+                var fatalType = EngineFatalDiagnostic.ReadExceptionType(line.Data);
+                ServiceLog.Write(fatalType is null ? "ENGINE_DIAGNOSTIC_AVAILABLE" : "ENGINE_FATAL type=" + fatalType);
             };
             process.BeginErrorReadLine();
         }

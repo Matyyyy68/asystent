@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO.Pipes;
 using System.Media;
 using System.Text;
@@ -641,7 +642,18 @@ internal static class Program
             process = Process.Start(start) ?? throw new IOException("Nie można uruchomić lokalnego silnika.");
             input = process.StandardInput;
             output = process.StandardOutput;
-            process.ErrorDataReceived += (_, _) => { };
+            process.ErrorDataReceived += (_, line) =>
+            {
+                if (string.IsNullOrWhiteSpace(line.Data)) return;
+                var fatalType = EngineFatalDiagnostic.ReadExceptionType(line.Data);
+                AgentLog(fatalType is null ? "ENGINE_STDERR_DIAGNOSTIC" : "ENGINE_FATAL type=" + fatalType);
+            };
+            process.EnableRaisingEvents = true;
+            process.Exited += (_, _) =>
+            {
+                try { AgentLog("ENGINE_PROCESS_EXIT exitCode=" + process.ExitCode.ToString(CultureInfo.InvariantCulture)); }
+                catch { AgentLog("ENGINE_PROCESS_EXIT exitCode=unavailable"); }
+            };
             process.BeginErrorReadLine();
         }
 
