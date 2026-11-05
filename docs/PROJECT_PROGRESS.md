@@ -800,3 +800,8 @@ Jeśli utworzenie/uruchomienie `Win32_ProcessStartTrace` lub `Win32_ProcessStopT
 # F19 — jawny stan przeciążenia kolejki zdarzeń procesów (2026-11-05)
 
 Po zapełnieniu kolejki WMI 4096 rekordów Engine zwiększa licznik odrzuconych zdarzeń i zmienia status na ograniczony; przy ponownym uruchomieniu subskrypcji status nadal ujawnia wcześniejsze straty. Snapshot PID działa dalej, ale nie odtwarza krótkotrwałych procesów, których zdarzenia wypadły z kolejki. Regresja syntetyczna weryfikuje twardy limit, licznik oraz status ograniczony; testy kolektora 6/6, a health evaluator 10/10 PASS. Pełna suita .NET 496 PASS + 2 środowiskowe SKIP; desktop 112/112 PASS; Release build 0 ostrzeżeń/błędów. Windows CI uruchomi się po pushu.
+
+
+# Wynik ryzyka w historii (2026-11-05)
+
+Rozszerzono wynik RiskEngine do trwałych zdarzeń ręcznej analizy: SQLite v41, stronicowany odczyt historii, CSV/JSON, kopia SQLite oraz bezpieczne przekazanie Agent→Service zachowują opcjonalny RiskScore 0–100. Bazy v40 migrują bez utraty historii, dotychczasowe zdarzenia mają NULL. UI pokazuje wartość jako heurystyczny wskaźnik, nie prawdopodobieństwo. Testy magazynu 84/84 PASS; pełna suita .NET 504 PASS + 2 środowiskowe SKIP; Release build 0 ostrzeżeń/błędów; desktop 112/112 PASS. Lokalny TypeScript build/lint nie uruchomił się, ponieważ w tym worktree nie ma `tsc`; Windows CI wymagany. Score pozostaje ograniczony do ręcznej analizy i nie jest skalibrowany ani używany do reakcji.

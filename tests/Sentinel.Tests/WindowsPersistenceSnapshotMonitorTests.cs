@@ -1000,7 +1000,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync();
         using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]

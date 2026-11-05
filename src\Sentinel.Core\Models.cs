@@ -1,0 +1,88 @@
+using System.Text.Json.Serialization;
+
+namespace Sentinel.Core;
+public enum RiskLevel { Information, Low, Moderate, High, Critical }
+public enum EventStatus { New, Reviewed, FalsePositive }
+// Never persist page text, credentials or screenshots in this model.
+public sealed record SecurityEvent(long Id, DateTimeOffset Timestamp, RiskLevel Risk,
+    string Category, string Application, string Explanation, string Recommendation, EventStatus Status,
+    Guid? EventId = null, string? Source = null, string? RuleVersion = null, int? Confidence = null, int SchemaVersion = 1,
+    int? ProcessId = null, string? ProcessName = null, Guid? CorrelationId = null,
+    IReadOnlyList<string>? EvidenceCodes = null, [property: JsonIgnore] string? SignalHash = null,
+    IReadOnlyList<EventObservation>? Observations = null,
+    string? ProcessImagePath = null, string? ProcessImageSha256 = null,
+    string? ProcessImageSignatureStatus = null, bool? ProcessImageLocalHashMatch = null,
+    DateTimeOffset? ProcessedAt = null,
+    IReadOnlyList<string>? AnalysisLimitations = null,
+    bool Quarantined = false,
+    int? RiskScore = null);
+public sealed record EventObservation(Guid EventId, DateTimeOffset ObservedAt, string Source,
+    IReadOnlyList<string> EvidenceCodes, DateTimeOffset? ProcessedAt = null,
+    IReadOnlyList<string>? AnalysisLimitations = null);
+// Local-only transport from the per-user Engine to the privileged service. Deliberately excludes paths and hashes.
+public sealed record ForwardedSecurityEvent(long SourceRowId, DateTimeOffset Timestamp, RiskLevel Risk,
+    string Category, string Application, string Explanation, string Recommendation, EventStatus Status,
+    Guid EventId, string? Source, string? RuleVersion, int? Confidence, int SchemaVersion,
+    int? ProcessId, string? ProcessName, Guid? CorrelationId,
+    IReadOnlyList<string> EvidenceCodes, IReadOnlyList<string> AnalysisLimitations, int? RiskScore = null)
+{
+    public SecurityEvent ToSecurityEvent()
+    {
+        if (SourceRowId <= 0 || EventId == Guid.Empty || !Enum.IsDefined(Risk) || !Enum.IsDefined(Status) || SchemaVersion != 1 ||
+            string.IsNullOrWhiteSpace(Category) || Category.Length > 200 || string.IsNullOrWhiteSpace(Application) || Application.Length > 200 ||
+            string.IsNullOrWhiteSpace(Explanation) || Explanation.Length > 1000 || string.IsNullOrWhiteSpace(Recommendation) || Recommendation.Length > 1000 ||
+            Source?.Length > 100 || RuleVersion?.Length > 80 || Confidence is < 0 or > 100 || RiskScore is < 0 or > 100 || ProcessId < 0 || ProcessName?.Length > 260 ||
+            CorrelationId == Guid.Empty || EvidenceCodes is null || EvidenceCodes.Count > 32 || AnalysisLimitations is null || AnalysisLimitations.Count > 16 ||
+            EvidenceCodes.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 || code.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '_' or '-'))) ||
+            AnalysisLimitations.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 || code.Any(ch => !char.IsAsciiLetterOrDigit(ch) && ch is not ('.' or '_' or '-'))))
+            throw new ArgumentException("Forwarded event is invalid.");
+        return new SecurityEvent(0, Timestamp, Risk, Category, Application, Explanation, Recommendation, Status,
+            EventId, Source, RuleVersion, Confidence, SchemaVersion, ProcessId, ProcessName, CorrelationId,
+            EvidenceCodes, AnalysisLimitations: AnalysisLimitations, RiskScore: RiskScore);
+    }
+}
+// Fresh profiles start local monitoring automatically. Persisted user preferences are never rewritten by this default.
+public sealed record AppSettings(int RetentionDays = 30, bool Notifications = true, bool Paused = false,
+    int MinimumIntervalSeconds = 10,
+    string ExcludedApplications = "1password;bitwarden;keepass;keepassxc;credentialuibroker;logonui",
+    string ExcludedWindowTitles = "",
+    bool ExcludeBrowsers = false,
+    bool ExcludeMessaging = false,
+    bool CollectStaticText = false,
+    bool MonitorForegroundChanges = false,
+    string Theme = "System",
+    bool StartMinimized = false,
+    bool UseLocalAI = false,
+    string LocalAIEndpoint = "http://127.0.0.1:11434",
+    string LocalAIModel = "",
+    int LocalAITimeoutSeconds = 30,
+    bool StartWithWindows = false,
+    int DnsPollIntervalSeconds = 15,
+    bool MonitorNetworkConnections = true,
+    bool MonitorDownloadedFiles = true,
+    bool MonitorPersistenceChanges = true,
+    string LocalAIEmbeddingModel = "",
+    bool AutoUpdateCertFeed = true);
+public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<string> EndpointKeys,
+    bool TcpTruncated = false, bool UdpTruncated = false);
+public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false, long DroppedChanges = 0);
+public sealed record DownloadFileFingerprint(string Path, long Length, long LastWriteTicks);
+public sealed record DownloadMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, DownloadFileFingerprint> Files,
+    DateTimeOffset? HashFeedImportedAtUtc = null, DateTimeOffset? HashFeedRecheckAtUtc = null, bool HashFeedStateInitialized = false);
+public sealed record WindowsPersistenceFingerprint(string Key, string Source, string Fingerprint, bool WritableLocation);
+public sealed record WindowsPersistenceMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, WindowsPersistenceFingerprint> Entries,
+    bool ScheduledTasksInitialized = false, bool ServicesInitialized = false,
+    bool IfeoMachine64Initialized = false, bool IfeoMachine32Initialized = false);
+public interface IEventRepository
+{
+    Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default);
+    Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default);
+    Task SetStatusAsync(long id, EventStatus status, CancellationToken cancellationToken = default);
+    Task DeleteHistoryAsync(CancellationToken cancellationToken = default);
+}
+public interface ISettingsRepository
+{
+    Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default);
+    Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default);
+}
+

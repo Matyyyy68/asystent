@@ -2,7 +2,7 @@
 
 Silnik analizuje ręcznie przekazany tekst/adres regułami lokalnymi, korzysta z lokalnych list reputacji, zbiera wybrane snapshoty systemu i zapisuje zdarzenia w SQLite. Zdarzenia mają źródło, kategorię, ryzyko, wyjaśnienie, rekomendację, status oraz dostępne dowody/kody reguł. Zdarzenia domenowe i procesowe mogą być grupowane po lokalnych identyfikatorach korelacji.
 
-Ręczna analiza tekstu/URL używa centralnego `RiskEngine`, który zwraca wynik heurystyczny 0–100 i poziom w `ThreatAssessment`. Wynik wynika z wag różnych wskaźników i ich liczby; nie jest prawdopodobieństwem ani kalibracją na niezależnym holdoucie. Zdarzenia monitorów systemowych nadal korzystają ze swoich jawnych poziomów `RiskLevel`; nowy wynik nie jest w nich utrwalany.
+Ręczna analiza tekstu/URL używa centralnego `RiskEngine`, który zwraca wynik heurystyczny 0–100 i poziom w `ThreatAssessment`. Wynik wynika z wag różnych wskaźników i ich liczby; nie jest prawdopodobieństwem ani kalibracją na niezależnym holdoucie. SQLite v41 utrwala go w ręcznych zdarzeniach i eksportach, a Agent może przekazać go do usługi. Zdarzenia monitorów systemowych nadal korzystają ze swoich jawnych poziomów `RiskLevel` i nie otrzymują tego wyniku.
 
 Nowe PID-y z procesu snapshotu są korelowane z jednym udokumentowanym snapshotem Toolhelp. Reguła `process.behavior.office-spawned-script-host` oznacza uruchomienie interpretera/skryptu przez proces Office jako umiarkowane ryzyko wymagające sprawdzenia. Wyjaśnienie zawiera nazwy i PID-y zaobserwowanej relacji. Krótkie procesy oraz rodzice zakończeni przed snapshotem mogą zostać pominięci; heurystyka nie dowodzi ataku, a Sentinel nie zatrzymuje procesu.
 

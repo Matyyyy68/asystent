@@ -43,11 +43,12 @@ public sealed class StoreTests : IDisposable
         var store = await Store();
         var item = new ForwardedSecurityEvent(41, DateTimeOffset.UtcNow, RiskLevel.Moderate,
             "Synthetic", "Synthetic", "Test event", "Review", EventStatus.New, Guid.NewGuid(),
-            "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], []);
+            "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], [], RiskScore: 61);
 
         Assert.Equal(new long[] { 41 }, await store.ImportForwardedEventsAsync([item]));
         Assert.Equal(new long[] { 41 }, await store.ImportForwardedEventsAsync([item]));
         Assert.Equal(1, await store.CountEventsAsync());
+        Assert.Equal(61, Assert.Single(await store.ReadAsync()).RiskScore);
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync(Enumerable.Repeat(item, 9).ToArray()));
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([item with { SourceRowId = 0 }]));
     }
@@ -58,7 +59,7 @@ public sealed class StoreTests : IDisposable
         var first = new ForwardedSecurityEvent(41, DateTimeOffset.UtcNow, RiskLevel.Moderate,
             "Synthetic", "Synthetic", "Test event", "Review", EventStatus.New, Guid.NewGuid(),
             "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], []);
-        var invalidSecond = first with { SourceRowId = 42, EventId = Guid.NewGuid(), Category = "" };
+        var invalidSecond = first with { SourceRowId = 42, EventId = Guid.NewGuid(), RiskScore = 101 };
 
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([first, invalidSecond]));
 
@@ -120,7 +121,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact] public async Task VersionThirtyNineDatabaseMigratesHashFeedRecheckCheckpointWithoutLosingDownloadsBaseline()
@@ -169,7 +170,7 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(0, (await store.ReadPendingProcessChangesAsync()).Count);
         await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact] public async Task ProcessBacklogAcceptsWmiExitEventsWithoutStartCorrelation()
@@ -207,7 +208,7 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(0L, (await store.ReadProcessMonitorSnapshotAsync()).DroppedChanges);
         await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTwentyTwoMigrationAddsProcessingTimesWithoutInventingLegacyValuesAndPreservesNewValues()
     {
@@ -605,7 +606,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -1090,6 +1091,39 @@ public sealed class StoreTests : IDisposable
     }
     [Fact] public async Task InvalidRetentionRejected() { var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(0))); }
     [Fact] public async Task BackupCanReopenAndExportIsValid() { var s = await Store(); await s.AddAsync(Event()); var export = Path.Combine(dir,"events.json"); await s.ExportAsync(export); Assert.Contains("Synthetic",await File.ReadAllTextAsync(export)); var backupDir = Path.Combine(dir,"backup"); Directory.CreateDirectory(backupDir); await s.BackupAsync(Path.Combine(backupDir,"sentinel.db")); var backup = new LocalStore(backupDir); await backup.InitializeAsync(); Assert.Single(await backup.ReadAsync()); }
+    [Fact] public async Task HeuristicRiskScoreSurvivesHistoryExportAndDatabaseBackup()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { RiskScore = 57 });
+        Assert.Equal(57, Assert.Single(await store.ReadAsync()).RiskScore);
+        Assert.Equal(57, Assert.Single(await store.ReadAfterAsync(0)).RiskScore);
+        var csvPath = Path.Combine(dir, "risk.csv");
+        await store.ExportCsvAsync(csvPath);
+        Assert.Contains("risk_score", await File.ReadAllTextAsync(csvPath));
+        Assert.Contains("\"57\"", await File.ReadAllTextAsync(csvPath));
+        var backupDir = Path.Combine(dir, "risk-backup"); Directory.CreateDirectory(backupDir);
+        await store.BackupAsync(Path.Combine(backupDir, "sentinel.db"));
+        var backup = new LocalStore(backupDir); await backup.InitializeAsync();
+        Assert.Equal(57, Assert.Single(await backup.ReadAsync()).RiskScore);
+    }
+    [Fact] public async Task Version40DatabaseAddsNullableRiskScoreWithoutLosingEvents()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { Category = "legacy" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE events DROP COLUMN risk_score; PRAGMA user_version=40;";
+            await command.ExecuteNonQueryAsync();
+        }
+        await store.InitializeAsync();
+        var legacy = Assert.Single(await store.ReadAsync());
+        Assert.Equal("legacy", legacy.Category); Assert.Null(legacy.RiskScore);
+        await using var check = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await check.OpenAsync(); using var version = check.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(41L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+    }
+
     [Fact] public async Task ProcessImageInspectionPersistsAndRestoresLocallyButNeverExportsPathOrHash()
     {
         var store = await Store();
@@ -1290,7 +1324,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -1309,7 +1343,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(40L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(41L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
