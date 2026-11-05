@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 42960)
-Total output lines: 1916
-
 using Microsoft.Data.Sqlite;
 using System.Globalization;
 using System.Net;
@@ -314,7 +311,1385 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             await Execute(c, "BEGIN IMMEDIATE;", ct);
             try
             {
-                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v25(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v25(…30960 tokens truncated… }
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v25(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v25(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v25 RENAME TO windows_persistence_snapshot; PRAGMA user_version=25; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 26)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "windows_persistence_monitor_metadata", "services_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(services_initialized IN (0,1))", ct);
+                await Execute(c, "PRAGMA user_version=26; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 27)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v27(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v27(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v27 RENAME TO windows_persistence_snapshot; PRAGMA user_version=27; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 28)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v28(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v28(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v28 RENAME TO windows_persistence_snapshot; PRAGMA user_version=28; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 29)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v29(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v29(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v29 RENAME TO windows_persistence_snapshot; PRAGMA user_version=29; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 30)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v30(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v30(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v30 RENAME TO windows_persistence_snapshot; PRAGMA user_version=30; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 31)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v31(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','registry.machine64.shell.delay','registry.machine32.shell.delay','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v31(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v31 RENAME TO windows_persistence_snapshot; PRAGMA user_version=31; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 32)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v32(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.runonceex','registry.machine64.runonceex','registry.machine32.runonceex','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','registry.machine64.shell.delay','registry.machine32.shell.delay','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v32(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v32 RENAME TO windows_persistence_snapshot; PRAGMA user_version=32; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 33)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v33(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.runonceex','registry.machine64.runonceex','registry.machine32.runonceex','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','registry.machine64.shell.delay','registry.machine32.shell.delay','registry.machine64.silent.exit','registry.machine32.silent.exit','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v33(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v33 RENAME TO windows_persistence_snapshot; PRAGMA user_version=33; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 34)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v34(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 100), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.runonceex','registry.machine64.runonceex','registry.machine32.runonceex','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','registry.machine64.shell.delay','registry.machine32.shell.delay','registry.machine64.silent.exit','registry.machine32.silent.exit','registry.user.startup.approved.run','registry.user.startup.approved.run32','registry.user.startup.approved.startupfolder','registry.machine64.startup.approved.run','registry.machine64.startup.approved.run32','registry.machine64.startup.approved.startupfolder','registry.machine32.startup.approved.run','registry.machine32.startup.approved.run32','registry.machine32.startup.approved.startupfolder','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v34(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v34 RENAME TO windows_persistence_snapshot; PRAGMA user_version=34; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 35)
+        {
+            await Execute(c, "BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS process_change_backlog(queue_id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE CHECK(length(event_id)=36), observed_at TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('Proces zaobserwowany','Proces zniknął z migawki')), process_id INTEGER NOT NULL CHECK(process_id BETWEEN 0 AND 2147483647), process_name TEXT NOT NULL CHECK(length(process_name) BETWEEN 1 AND 260), correlation_id TEXT NULL CHECK(correlation_id IS NULL OR length(correlation_id)=36)); PRAGMA user_version=35; COMMIT;", ct);
+        }
+        if (v < 36)
+        {
+            if (await HasColumnAsync(c, "process_monitor_metadata", "dropped_changes", ct))
+                await Execute(c, "PRAGMA user_version=36", ct);
+            else
+                await Execute(c, "BEGIN IMMEDIATE; ALTER TABLE process_monitor_metadata ADD COLUMN dropped_changes INTEGER NOT NULL DEFAULT 0 CHECK(dropped_changes>=0); PRAGMA user_version=36; COMMIT;", ct);
+        }
+        if (v < 37)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "windows_persistence_monitor_metadata", "ifeo_machine64_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(ifeo_machine64_initialized IN (0,1))", ct);
+                await EnsureColumnAsync(c, "windows_persistence_monitor_metadata", "ifeo_machine32_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(ifeo_machine32_initialized IN (0,1))", ct);
+                if (v >= 30)
+                    await Execute(c, "UPDATE windows_persistence_monitor_metadata SET ifeo_machine64_initialized=initialized,ifeo_machine32_initialized=initialized WHERE id=1", ct);
+                await Execute(c, "PRAGMA user_version=37; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 38)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE windows_persistence_snapshot_v38(entry_key TEXT PRIMARY KEY CHECK(length(entry_key) BETWEEN 1 AND 160), source TEXT NOT NULL CHECK(source IN ('registry.user.run','registry.user.runonce','registry.machine64.run','registry.machine64.runonce','registry.machine32.run','registry.machine32.runonce','registry.user.runonceex','registry.machine64.runonceex','registry.machine32.runonceex','registry.user.policy.run','registry.machine64.policy.run','registry.machine32.policy.run','registry.user.winlogon','registry.machine64.winlogon','registry.machine32.winlogon','registry.machine64.appinit','registry.machine32.appinit','registry.machine64.ifeo','registry.machine32.ifeo','registry.machine64.shell.delay','registry.machine32.shell.delay','registry.machine64.silent.exit','registry.machine32.silent.exit','registry.user.startup.approved.run','registry.user.startup.approved.run32','registry.user.startup.approved.startupfolder','registry.machine64.startup.approved.run','registry.machine64.startup.approved.run32','registry.machine64.startup.approved.startupfolder','registry.machine32.startup.approved.run','registry.machine32.startup.approved.run32','registry.machine32.startup.approved.startupfolder','startup.user','startup.common','scheduled.task','registry.service','registry.driver')), fingerprint TEXT NOT NULL CHECK(length(fingerprint)=64), writable_location INTEGER NOT NULL CHECK(writable_location IN (0,1))); INSERT INTO windows_persistence_snapshot_v38(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v38 RENAME TO windows_persistence_snapshot; PRAGMA user_version=38; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 39)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE process_change_backlog_v39(queue_id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE CHECK(length(event_id)=36), observed_at TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('Proces zaobserwowany','Proces zakończony','Proces zniknął z migawki')), process_id INTEGER NOT NULL CHECK(process_id BETWEEN 0 AND 2147483647), process_name TEXT NOT NULL CHECK(length(process_name) BETWEEN 1 AND 260), correlation_id TEXT NULL CHECK(correlation_id IS NULL OR length(correlation_id)=36)); INSERT INTO process_change_backlog_v39(queue_id,event_id,observed_at,action,process_id,process_name,correlation_id) SELECT queue_id,event_id,observed_at,action,process_id,process_name,correlation_id FROM process_change_backlog; DROP TABLE process_change_backlog; ALTER TABLE process_change_backlog_v39 RENAME TO process_change_backlog; PRAGMA user_version=39; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 40)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "downloaded_file_monitor_metadata", "hash_feed_imported_at", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "downloaded_file_monitor_metadata", "hash_feed_recheck_at", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "downloaded_file_monitor_metadata", "hash_feed_state_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(hash_feed_state_initialized IN (0,1))", ct);
+                await Execute(c, "PRAGMA user_version=40; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        await Execute(c, "CREATE INDEX IF NOT EXISTS ix_event_observations_source_time ON event_observations(source,observed_at,event_row_id)", ct);
+        // Keep restart-time correlation lookup bounded on large retained event histories.
+        if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
+            await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
+            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation_v2 ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
+        // Prove the database can be closed and reopened before declaring readiness.
+        await c.CloseAsync(); await c.OpenAsync(ct);
+    }
+    public async Task<InstalledProductProfile> GetInstallationProfileAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+        var json = await cmd.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("Brak profilu instalacji.");
+        var profile = JsonSerializer.Deserialize<InstalledProductProfile>(json) ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
+        try { return profile.Validate(); } catch (ArgumentException ex) { throw new InvalidDataException("Nieprawidłowy profil instalacji.", ex); }
+    }
+    public async Task UpdateEnterpriseServerAsync(string serverAddress, CancellationToken ct = default)
+    {
+        var server = new InstalledProductProfile(ProductVariant.EnterpriseClient, serverAddress).Validate();
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var read = c.CreateCommand(); read.Transaction = transaction; read.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+        var currentJson = await read.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("Brak profilu instalacji.");
+        var current = JsonSerializer.Deserialize<InstalledProductProfile>(currentJson) ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
+        if (current.Variant != ProductVariant.EnterpriseClient) throw new InvalidOperationException("Adres Enterprise jest dostępny tylko dla wariantu Enterprise Client.");
+        using var write = c.CreateCommand(); write.Transaction = transaction; write.CommandText = "UPDATE installation_profile SET json=$json WHERE id=1";
+        write.Parameters.AddWithValue("$json", JsonSerializer.Serialize(current with { EnterpriseServerUri = server.EnterpriseServerUri }));
+        await write.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    public async Task SetEnterpriseProfileAsync(string serverAddress, bool shareSecurityMetadata, CancellationToken ct = default)
+    {
+        var server = new InstalledProductProfile(ProductVariant.EnterpriseClient, serverAddress, ShareSecurityMetadata: shareSecurityMetadata).Validate();
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var write = c.CreateCommand(); write.Transaction = transaction; write.CommandText = "UPDATE installation_profile SET json=$json WHERE id=1";
+        write.Parameters.AddWithValue("$json", JsonSerializer.Serialize(server));
+        if (await write.ExecuteNonQueryAsync(ct) != 1) throw new InvalidDataException("Brak profilu instalacji.");
+        if (!shareSecurityMetadata)
+        {
+            using var clear = c.CreateCommand(); clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM enterprise_event_queue; DELETE FROM enterprise_event_deferred";
+            await clear.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task<AppSettings> LoadSettingsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT json FROM settings WHERE id=1";
+        var json = await cmd.ExecuteScalarAsync(cancellationToken) as string;
+        var result = json is null ? new AppSettings() : JsonSerializer.Deserialize<AppSettings>(json) ?? throw new InvalidDataException("Nieprawidłowe ustawienia.");
+        Validate(result); return result;
+    }
+
+    public async Task<long?> GetDnsOperationalRecordCursorAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT last_record_id FROM dns_operational_monitor_metadata WHERE id=1";
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    public async Task SetDnsOperationalRecordCursorAsync(long recordId, CancellationToken cancellationToken = default)
+    {
+        if (recordId < 0) throw new ArgumentOutOfRangeException(nameof(recordId));
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO dns_operational_monitor_metadata(id,last_record_id) VALUES(1,$recordId) ON CONFLICT(id) DO UPDATE SET last_record_id=excluded.last_record_id";
+        command.Parameters.AddWithValue("$recordId", recordId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+    private static void Validate(AppSettings s)
+    {
+        if (s.RetentionDays is < 1 or > 365) throw new ArgumentOutOfRangeException(nameof(s), "Retencja: 1–365 dni.");
+        if (s.MinimumIntervalSeconds is < 3 or > 300) throw new ArgumentOutOfRangeException(nameof(s), "Odstęp: 3–300 sekund.");
+        if (s.DnsPollIntervalSeconds is < 10 or > 300) throw new ArgumentOutOfRangeException(nameof(s), "Odstęp DNS: 10–300 sekund.");
+        if (s.ExcludedApplications is null || s.ExcludedWindowTitles is null || s.ExcludedApplications.Length > 2000 || s.ExcludedWindowTitles.Length > 2000)
+            throw new ArgumentException("Nieprawidłowa lista wykluczeń.");
+        if (s.Theme is not ("System" or "Light" or "Dark")) throw new ArgumentException("Nieprawidłowy motyw.");
+        if (s.LocalAIEndpoint is null || s.LocalAIEndpoint.Length > 2000) throw new ArgumentException("Nieprawidłowy adres lokalnego modelu.");
+        if (s.UseLocalAI) _ = Sentinel.Core.Analysis.OllamaLocalProvider.ValidateEndpoint(s.LocalAIEndpoint);
+        if (s.LocalAIModel is null || s.LocalAIModel.Length > 160 || s.LocalAIModel.Any(char.IsControl)) throw new ArgumentException("Nieprawidłowa nazwa lokalnego modelu.");
+        if (s.UseLocalAI && string.IsNullOrWhiteSpace(s.LocalAIModel)) throw new ArgumentException("Wybierz zainstalowany model przed włączeniem lokalnej analizy AI.");
+        if (s.LocalAIEmbeddingModel is null || s.LocalAIEmbeddingModel.Length > 160 || s.LocalAIEmbeddingModel.Any(char.IsControl)) throw new ArgumentException("Nieprawidłowa nazwa lokalnego modelu embeddingów.");
+        if (s.LocalAITimeoutSeconds is < 3 or > 120) throw new ArgumentOutOfRangeException(nameof(s), "Limit czasu modelu: 3–120 sekund.");
+    }
+    public async Task SaveSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        Validate(settings); await using var c = await Open(cancellationToken);
+        await Execute(c, "INSERT INTO settings VALUES(1,$j) ON CONFLICT(id) DO UPDATE SET json=$j", cancellationToken, ("$j", JsonSerializer.Serialize(settings)));
+    }
+    public async Task<long> AddAsync(SecurityEvent item, CancellationToken cancellationToken = default) =>
+        (await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken)).EventRowId;
+    /// <summary>Persists a local-only event without adding it to the Enterprise metadata queue.</summary>
+    public async Task<long> AddLocalOnlyAsync(SecurityEvent item, CancellationToken cancellationToken = default) =>
+        (await AddCoreAsync(item, enqueueEnterprise: false, cancellationToken)).EventRowId;
+    public async Task<IReadOnlyList<long>> ImportForwardedEventsAsync(IReadOnlyList<ForwardedSecurityEvent> items, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count is < 1 or > 4 || items.Any(item => item is null) ||
+            items.Select(item => item.SourceRowId).Distinct().Count() != items.Count ||
+            items.Select(item => item.EventId).Distinct().Count() != items.Count)
+            throw new ArgumentException("Forwarded event batch must contain 1–4 unique events.", nameof(items));
+        // Validate the complete page before persisting any row. Otherwise one malformed item
+        // near the end leaves a partially imported page that cannot be acknowledged as a unit.
+        var validated = items.Select(item => (Item: item, Event: item.ToSecurityEvent()))
+            .OrderBy(entry => entry.Item.SourceRowId).ToArray();
+        var accepted = new List<long>(items.Count);
+        foreach (var entry in validated)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await AddLocalOnlyAsync(entry.Event, cancellationToken);
+            accepted.Add(entry.Item.SourceRowId);
+        }
+        return accepted;
+    }
+    /// <summary>Persists a local-only event unless its source already reported the same signal in the requested interval.</summary>
+    public async Task<bool> AddLocalOnlyDeduplicatedAsync(SecurityEvent item, TimeSpan sourceSignalWindow,
+        CancellationToken cancellationToken = default)
+    {
+        if (item.SignalHash is null || item.SignalHash.Length != 64 || item.SignalHash.Any(character => !Uri.IsHexDigit(character)))
+            throw new ArgumentException("Trwała deduplikacja wymaga 64-znakowego skrótu sygnału.", nameof(item));
+        if (sourceSignalWindow < TimeSpan.FromSeconds(1) || sourceSignalWindow > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(sourceSignalWindow), "Okno deduplikacji musi mieścić się w zakresie 1 s–1 h.");
+        var result = await AddCoreAsync(item, enqueueEnterprise: false, cancellationToken, sameSourceSignalWindow: sourceSignalWindow);
+        return !result.WasDeduplicated;
+    }
+    /// <summary>Atomically persists a detection and its explicitly categorized Enterprise outbox entry when sharing is enabled.</summary>
+    /// <returns>True when Enterprise sharing is enabled but the bounded outbox is full; the local detection remains saved.</returns>
+    public async Task<bool> AddWithEnterpriseMetadataAsync(SecurityEvent item, string category, string ruleCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
+            string.IsNullOrEmpty(ruleCode) || ruleCode.Length > 80 ||
+            ruleCode.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(category));
+        var result = await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken, category, ruleCode);
+        return result.EnterpriseQueueFull;
+    }
+
+    /// <summary>Persists a detection unless the same source reported the same signal within the requested interval.</summary>
+    public async Task<(bool Duplicate, bool EnterpriseQueueFull)> AddWithEnterpriseMetadataDeduplicatedAsync(
+        SecurityEvent item, string category, string ruleCode, TimeSpan sourceSignalWindow,
+        CancellationToken cancellationToken = default)
+    {
+        if (item.SignalHash is null) throw new ArgumentException("Trwała deduplikacja wymaga skrótu sygnału.", nameof(item));
+        if (sourceSignalWindow < TimeSpan.FromSeconds(1) || sourceSignalWindow > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(sourceSignalWindow), "Okno deduplikacji musi mieścić się w zakresie 1 s–1 h.");
+        if (category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
+            string.IsNullOrEmpty(ruleCode) || ruleCode.Length > 80 ||
+            ruleCode.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(category));
+        var result = await AddCoreAsync(item, enqueueEnterprise: true, cancellationToken, category, ruleCode, sourceSignalWindow);
+        return (result.WasDeduplicated, result.EnterpriseQueueFull);
+    }
+
+    /// <summary>Returns a short-lived local correlation id for the registrable domain, storing only its SHA-256 key.</summary>
+    public async Task<Guid> GetDomainCorrelationIdAsync(string host, DateTimeOffset observedAt,
+        TimeSpan? correlationWindow = null, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(host);
+        if (host.Length > 253 || host.Any(char.IsControl)) throw new ArgumentException("Nieprawidłowa nazwa domeny.", nameof(host));
+        var window = correlationWindow ?? TimeSpan.FromSeconds(60);
+        if (window < TimeSpan.FromSeconds(1) || window > TimeSpan.FromMinutes(15))
+            throw new ArgumentOutOfRangeException(nameof(correlationWindow), "Okno korelacji musi mieścić się w zakresie 1 s–15 min.");
+        string asciiHost;
+        try { asciiHost = DomainNames.Ascii(host); }
+        catch (ArgumentException ex) { throw new ArgumentException("Nieprawidłowa nazwa domeny.", nameof(host), ex); }
+        if (asciiHost.Length is 0 or > 253 || IPAddress.TryParse(asciiHost.Trim('[', ']'), out _) ||
+            Uri.CheckHostName(asciiHost) != UriHostNameType.Dns || asciiHost.Split('.').Any(label => label.Length is 0 or > 63))
+            throw new ArgumentException("Korelacja wymaga poprawnej nazwy DNS, a nie adresu IP.", nameof(host));
+        var registrableDomain = CorrelationDomainNames.RegistrableDomain(asciiHost) ?? asciiHost;
+        var domainKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(registrableDomain)));
+        var observedTicks = observedAt.ToUniversalTime().Ticks;
+        var windowTicks = window.Ticks;
+        var pruneBefore = Math.Max(0, observedTicks - Math.Min(long.MaxValue, windowTicks * 2));
+
+        await using var connection = await Open(ct);
+        using var transaction = connection.BeginTransaction();
+        Guid correlationId = Guid.NewGuid();
+        var lastSeenTicksToStore = observedTicks;
+        var persistCorrelation = true;
+        using (var find = connection.CreateCommand())
+        {
+            find.Transaction = transaction;
+            find.CommandText = "SELECT correlation_id,last_seen_ticks FROM domain_correlation WHERE domain_key=$key";
+            find.Parameters.AddWithValue("$key", domainKey);
+            using var reader = await find.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                var previousId = reader.GetString(0);
+                var previousTicks = reader.GetInt64(1);
+                if (Guid.TryParse(previousId, out var parsed))
+                {
+                    if (observedTicks >= previousTicks && observedTicks - previousTicks <= windowTicks)
+                        correlationId = parsed;
+                    else if (observedTicks < previousTicks && previousTicks - observedTicks <= windowTicks)
+                    {
+                        // A late-arriving event may join the recent group, but it
+                        // must never move that group's sliding timestamp backward.
+                        correlationId = parsed;
+                        lastSeenTicksToStore = previousTicks;
+                    }
+                    else if (observedTicks < previousTicks)
+                    {
+                        // Keep the current group intact when an old event arrives
+                        // outside its window; this event receives an isolated ID.
+                        persistCorrelation = false;
+                    }
+                }
+            }
+        }
+        if (persistCorrelation)
+        {
+            using var upsert = connection.CreateCommand();
+            upsert.Transaction = transaction;
+            upsert.CommandText = "INSERT INTO domain_correlation(domain_key,correlation_id,last_seen_ticks) VALUES($key,$id,$seen) ON CONFLICT(domain_key) DO UPDATE SET correlation_id=excluded.correlation_id,last_seen_ticks=excluded.last_seen_ticks";
+            upsert.Parameters.AddWithValue("$key", domainKey);
+            upsert.Parameters.AddWithValue("$id", correlationId.ToString("D"));
+            upsert.Parameters.AddWithValue("$seen", lastSeenTicksToStore);
+            await upsert.ExecuteNonQueryAsync(ct);
+        }
+        using (var prune = connection.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = "DELETE FROM domain_correlation WHERE last_seen_ticks<$cutoff AND domain_key<>$key; DELETE FROM domain_correlation WHERE domain_key IN (SELECT domain_key FROM domain_correlation ORDER BY last_seen_ticks DESC LIMIT -1 OFFSET 2048)";
+            prune.Parameters.AddWithValue("$cutoff", pruneBefore);
+            prune.Parameters.AddWithValue("$key", domainKey);
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+        return correlationId;
+    }
+    public async Task<int> AddLocalOnlyBatchAsync(IReadOnlyCollection<SecurityEvent> items, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count > 100) throw new ArgumentOutOfRangeException(nameof(items), "Limit batcha lokalnego zapisu to 100 zdarzeń.");
+        if (items.Count == 0) return 0;
+        var validated = items.Select(item => { item = item with { ProcessedAt = item.ProcessedAt ?? DateTimeOffset.UtcNow }; return (Item: item, Metadata: ValidateEvent(item)); }).ToArray();
+        await using var c = await Open(cancellationToken);
+        using var transaction = c.BeginTransaction();
+        foreach (var (item, (eventId, source)) in validated)
+        {
+            using var command = c.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            AddEventParameters(command, item, eventId, source);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return validated.Length;
+    }
+    public async Task<NetworkMonitorSnapshot> ReadNetworkMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,tcp_truncated,udp_truncated FROM network_monitor_metadata WHERE id=1";
+        await using var metadataReader = await metadata.ExecuteReaderAsync(ct);
+        if (!await metadataReader.ReadAsync(ct)) throw new InvalidDataException("Brak metadanych migawki sieci.");
+        var initialized = metadataReader.GetInt32(0) == 1;
+        var tcpTruncated = metadataReader.GetInt32(1) == 1;
+        var udpTruncated = metadataReader.GetInt32(2) == 1;
+        await metadataReader.DisposeAsync();
+        using var query = c.CreateCommand(); query.CommandText = "SELECT endpoint_key FROM network_endpoint_snapshot ORDER BY endpoint_key LIMIT 20000";
+        using var reader = await query.ExecuteReaderAsync(ct); var keys = new HashSet<string>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(ct)) keys.Add(reader.GetString(0));
+        return new(initialized, keys, tcpTruncated, udpTruncated);
+    }
+    public async Task ResetNetworkMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "DELETE FROM network_endpoint_snapshot; UPDATE network_monitor_metadata SET initialized=0,tcp_truncated=0,udp_truncated=0 WHERE id=1";
+        await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    public async Task<ProcessMonitorSnapshot> ReadProcessMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,truncated,dropped_changes FROM process_monitor_metadata WHERE id=1";
+        await using var metadataReader = await metadata.ExecuteReaderAsync(ct);
+        if (!await metadataReader.ReadAsync(ct)) throw new InvalidDataException("Brak metadanych migawki procesów.");
+        var initialized = metadataReader.GetInt32(0) == 1;
+        var truncated = metadataReader.GetInt32(1) == 1;
+        var droppedChanges = metadataReader.GetInt64(2);
+        if (droppedChanges < 0) throw new InvalidDataException("Nieprawidłowy licznik pominiętych zmian procesu.");
+        await metadataReader.DisposeAsync();
+        using var query = c.CreateCommand(); query.CommandText = "SELECT process_id,process_name FROM process_snapshot ORDER BY process_id LIMIT 10000";
+        using var reader = await query.ExecuteReaderAsync(ct); var processes = new Dictionary<int, string>();
+        while (await reader.ReadAsync(ct)) processes.Add(reader.GetInt32(0), reader.GetString(1));
+        return new(initialized, processes, truncated, droppedChanges);
+    }
+    public async Task<IReadOnlyList<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>> ReadRecentProcessStartsAsync(
+        DateTimeOffset now, CancellationToken ct = default)
+    {
+        var current = now.ToUniversalTime();
+        var cutoff = current.AddSeconds(-60);
+        await using var c = await Open(ct); using var command = c.CreateCommand();
+        command.CommandText = "SELECT process_id,process_name,timestamp,correlation_id FROM events WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND process_id IS NOT NULL AND process_name IS NOT NULL AND correlation_id IS NOT NULL AND timestamp >= $cutoff AND timestamp <= $now ORDER BY timestamp DESC LIMIT 10000";
+        command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$now", current.ToString("O", CultureInfo.InvariantCulture));
+        var results = new List<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            if (Guid.TryParse(reader.GetString(3), out var correlationId))
+                results.Add((reader.GetInt32(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), correlationId));
+        return results;
+    }
+    public async Task<ProcessChangeQueueSnapshot> ReadPendingProcessChangesAsync(int maximumItems = 20_000,
+        CancellationToken ct = default)
+    {
+        if (maximumItems is < 1 or > 20_000) throw new ArgumentOutOfRangeException(nameof(maximumItems));
+        await using var c = await Open(ct);
+        using var countCommand = c.CreateCommand(); countCommand.CommandText = "SELECT COUNT(*) FROM process_change_backlog";
+        var count = Convert.ToInt32(await countCommand.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        using var query = c.CreateCommand(); query.CommandText = "SELECT queue_id,event_id,observed_at,action,process_id,process_name,correlation_id FROM process_change_backlog ORDER BY queue_id LIMIT $limit";
+        query.Parameters.AddWithValue("$limit", maximumItems);
+        var items = new List<ProcessChangeQueueItem>(Math.Min(count, maximumItems));
+        await using var reader = await query.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var eventId = Guid.Parse(reader.GetString(1));
+            var observedAt = DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+            var action = reader.GetString(3);
+            var processId = reader.GetInt32(4);
+            var processName = reader.GetString(5);
+            Guid? correlationId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6));
+            if (eventId == Guid.Empty || !IsValidProcessChangeAction(action) || processId < 0 ||
+                processName.Length is < 1 or > 260 || processName.Any(char.IsControl) ||
+                (action == "Proces zaobserwowany" && !correlationId.HasValue))
+                throw new InvalidDataException("Nieprawidłowa zmiana oczekująca w kolejce monitora procesów.");
+            items.Add(new(reader.GetInt64(0), eventId, observedAt, action, processId, processName, correlationId));
+        }
+        return new(count, items);
+    }
+    /// <summary>Atomically records process events and advances the persisted process baseline.</summary>
+    public async Task CommitProcessMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
+        IReadOnlyCollection<KeyValuePair<int, string>> upserts, IReadOnlyCollection<int> removedProcessIds,
+        CancellationToken ct = default, bool truncated = false,
+        IReadOnlyCollection<ProcessChangeQueueItem>? backlogToAdd = null,
+        IReadOnlyCollection<Guid>? backlogToRemove = null, bool clearBacklog = false, long droppedChanges = 0)
+    {
+        ArgumentNullException.ThrowIfNull(events); ArgumentNullException.ThrowIfNull(upserts); ArgumentNullException.ThrowIfNull(removedProcessIds);
+        backlogToAdd ??= []; backlogToRemove ??= [];
+        if (events.Count > 100 || upserts.Count > 10_000 || removedProcessIds.Count > 10_000 || droppedChanges < 0)
+            throw new ArgumentOutOfRangeException(nameof(events), "Przekroczono limit zmian migawki procesów.");
+        if (backlogToAdd.Count > 20_000 || backlogToRemove.Count > 20_000 || backlogToAdd.Select(item => item.EventId).Distinct().Count() != backlogToAdd.Count)
+            throw new ArgumentOutOfRangeException(nameof(backlogToAdd), "Przekroczono limit kolejki zmian procesów.");
+        foreach (var item in backlogToAdd)
+            if (item.EventId == Guid.Empty || !IsValidProcessChangeAction(item.Action) ||
+                item.ProcessId < 0 || string.IsNullOrWhiteSpace(item.ProcessName) || item.ProcessName.Length > 260 || item.ProcessName.Any(char.IsControl) ||
+                (item.Action == "Proces zaobserwowany" && !item.CorrelationId.HasValue))
+                throw new ArgumentException("Nieprawidłowa zmiana oczekująca monitora procesów.", nameof(backlogToAdd));
+        foreach (var (processId, processName) in upserts)
+            if (processId < 0 || string.IsNullOrWhiteSpace(processName) || processName.Length > 260 || processName.Any(char.IsControl))
+                throw new ArgumentException("Nieprawidłowy wpis migawki procesu.", nameof(upserts));
+        if (removedProcessIds.Any(processId => processId < 0))
+            throw new ArgumentException("Nieprawidłowy PID w migawce procesów.", nameof(removedProcessIds));
+        var validated = events.Select(item => (Item: item, Metadata: ValidateEvent(item))).ToArray();
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        if (clearBacklog)
+        {
+            using var clear = c.CreateCommand(); clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM process_change_backlog"; await clear.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var item in backlogToAdd)
+        {
+            using var insertPending = c.CreateCommand(); insertPending.Transaction = transaction;
+            insertPending.CommandText = "INSERT INTO process_change_backlog(event_id,observed_at,action,process_id,process_name,correlation_id) VALUES($eventId,$observedAt,$action,$processId,$processName,$correlationId)";
+            insertPending.Parameters.AddWithValue("$eventId", item.EventId.ToString("D"));
+            insertPending.Parameters.AddWithValue("$observedAt", item.ObservedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            insertPending.Parameters.AddWithValue("$action", item.Action); insertPending.Parameters.AddWithValue("$processId", item.ProcessId);
+            insertPending.Parameters.AddWithValue("$processName", item.ProcessName);
+            insertPending.Parameters.AddWithValue("$correlationId", (object?)item.CorrelationId?.ToString("D") ?? DBNull.Value);
+            await insertPending.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var eventId in backlogToRemove)
+        {
+            using var removePending = c.CreateCommand(); removePending.Transaction = transaction;
+            removePending.CommandText = "DELETE FROM process_change_backlog WHERE event_id=$eventId";
+            removePending.Parameters.AddWithValue("$eventId", eventId.ToString("D")); await removePending.ExecuteNonQueryAsync(ct);
+        }
+        using (var count = c.CreateCommand())
+        {
+            count.Transaction = transaction; count.CommandText = "SELECT COUNT(*) FROM process_change_backlog";
+            if (Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) > 20_000)
+                throw new InvalidOperationException("Kolejka zmian procesów osiągnęła bezpieczny limit.");
+        }
+        foreach (var (item, (eventId, source)) in validated)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var processId in removedProcessIds)
+        {
+            using var remove = c.CreateCommand(); remove.Transaction = transaction;
+            remove.CommandText = "DELETE FROM process_snapshot WHERE process_id=$processId";
+            remove.Parameters.AddWithValue("$processId", processId); await remove.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var (processId, processName) in upserts)
+        {
+            using var upsert = c.CreateCommand(); upsert.Transaction = transaction;
+            upsert.CommandText = "INSERT INTO process_snapshot(process_id,process_name) VALUES($processId,$processName) ON CONFLICT(process_id) DO UPDATE SET process_name=excluded.process_name";
+            upsert.Parameters.AddWithValue("$processId", processId); upsert.Parameters.AddWithValue("$processName", processName); await upsert.ExecuteNonQueryAsync(ct);
+        }
+        using (var initialized = c.CreateCommand())
+        {
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE process_monitor_metadata SET initialized=1,truncated=$truncated,dropped_changes=dropped_changes+$droppedChanges WHERE id=1";
+            initialized.Parameters.AddWithValue("$truncated", truncated ? 1 : 0);
+            initialized.Parameters.AddWithValue("$droppedChanges", droppedChanges);
+            await initialized.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+
+    private static bool IsValidProcessChangeAction(string action) =>
+        action is "Proces zaobserwowany" or "Proces zakończony" or "Proces zniknął z migawki";
+    public async Task<DownloadMonitorSnapshot> ReadDownloadedFileMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,hash_feed_imported_at,hash_feed_recheck_at,hash_feed_state_initialized FROM downloaded_file_monitor_metadata WHERE id=1";
+        await using var metadataReader = await metadata.ExecuteReaderAsync(ct);
+        var initialized = false;
+        DateTimeOffset? hashFeedImportedAt = null;
+        DateTimeOffset? hashFeedRecheckAt = null;
+        var hashFeedStateInitialized = false;
+        if (await metadataReader.ReadAsync(ct))
+        {
+            initialized = metadataReader.GetInt32(0) == 1;
+            if (!metadataReader.IsDBNull(1)) hashFeedImportedAt = DateTimeOffset.Parse(metadataReader.GetString(1), CultureInfo.InvariantCulture);
+            if (!metadataReader.IsDBNull(2)) hashFeedRecheckAt = DateTimeOffset.Parse(metadataReader.GetString(2), CultureInfo.InvariantCulture);
+            hashFeedStateInitialized = metadataReader.GetInt32(3) == 1;
+        }
+        await metadataReader.DisposeAsync();
+        using var query = c.CreateCommand(); query.CommandText = "SELECT path,length,last_write_ticks FROM downloaded_file_snapshot ORDER BY path LIMIT 100000";
+        using var reader = await query.ExecuteReaderAsync(ct); var files = new Dictionary<string, DownloadFileFingerprint>(StringComparer.OrdinalIgnoreCase);
+        while (await reader.ReadAsync(ct))
+        {
+            var path = reader.GetString(0); var length = reader.GetInt64(1); var ticks = reader.GetInt64(2);
+            if (path.Length is 0 or > 32767 || length < 0 || ticks < 0) throw new InvalidDataException("Nieprawidłowy baseline monitoringu Downloads.");
+            files[path] = new(path, length, ticks);
+        }
+        return new(initialized, files, hashFeedImportedAt, hashFeedRecheckAt, hashFeedStateInitialized);
+    }
+    public async Task BeginDownloadedFileHashFeedRecheckAsync(DateTimeOffset importedAtUtc, CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        await Execute(c, "UPDATE downloaded_file_monitor_metadata SET hash_feed_recheck_at=$importedAt WHERE id=1",
+            ct, ("$importedAt", importedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
+    }
+    public async Task CompleteDownloadedFileHashFeedRecheckAsync(DateTimeOffset importedAtUtc, CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        await Execute(c, "UPDATE downloaded_file_monitor_metadata SET hash_feed_imported_at=$importedAt,hash_feed_recheck_at=NULL,hash_feed_state_initialized=1 WHERE id=1 AND hash_feed_recheck_at=$importedAt",
+            ct, ("$importedAt", importedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
+    }
+    public async Task InitializeDownloadedFileHashFeedStateAsync(DateTimeOffset? importedAtUtc, CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        await Execute(c, "UPDATE downloaded_file_monitor_metadata SET hash_feed_imported_at=$importedAt,hash_feed_state_initialized=1 WHERE id=1 AND hash_feed_state_initialized=0 AND hash_feed_recheck_at IS NULL",
+            ct, ("$importedAt", (object?)importedAtUtc?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? DBNull.Value));
+    }
+    public async Task InitializeDownloadedFileMonitorSnapshotAsync(IReadOnlyCollection<DownloadFileFingerprint> files,
+        int maximumFiles = 100_000, CancellationToken ct = default)
+    {
+        ValidateDownloadedFiles(files, maximumFiles);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var clear = c.CreateCommand()) { clear.Transaction = transaction; clear.CommandText = "DELETE FROM downloaded_file_snapshot"; await clear.ExecuteNonQueryAsync(ct); }
+        foreach (var file in files)
+            await UpsertDownloadedFileAsync(c, transaction, file, ct);
+        using (var initialized = c.CreateCommand())
+        {
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE downloaded_file_monitor_metadata SET initialized=1 WHERE id=1";
+            await initialized.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task PruneDownloadedFileMonitorSnapshotAsync(IReadOnlyCollection<string> currentPaths, int maximumFiles = 100_000, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(currentPaths);
+        if (currentPaths.Count > maximumFiles || currentPaths.Any(path => string.IsNullOrWhiteSpace(path) || path.Length > 32767 || !Path.IsPathFullyQualified(path)))
+            throw new ArgumentOutOfRangeException(nameof(currentPaths), "Nieprawidłowa lub zbyt duża migawka Downloads.");
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var create = c.CreateCommand()) { create.Transaction = transaction; create.CommandText = "CREATE TEMP TABLE current_download_paths(path TEXT PRIMARY KEY COLLATE NOCASE)"; await create.ExecuteNonQueryAsync(ct); }
+        foreach (var path in currentPaths)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction; insert.CommandText = "INSERT OR IGNORE INTO current_download_paths(path) VALUES($path)";
+            insert.Parameters.AddWithValue("$path", Path.GetFullPath(path)); await insert.ExecuteNonQueryAsync(ct);
+        }
+        using (var prune = c.CreateCommand())
+        {
+            prune.Transaction = transaction; prune.CommandText = "DELETE FROM downloaded_file_snapshot WHERE NOT EXISTS (SELECT 1 FROM current_download_paths current WHERE current.path=downloaded_file_snapshot.path)";
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task CommitDownloadedFileMonitorResultAsync(DownloadFileFingerprint file, SecurityEvent? detectedEvent = null, CancellationToken ct = default)
+    {
+        ValidateDownloadedFile(file);
+        var metadata = detectedEvent is null ? default : ValidateEvent(detectedEvent);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        if (detectedEvent is not null)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction;
+            insert.CommandText = "INSERT OR IGNORE INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            AddEventParameters(insert, detectedEvent, metadata.EventId, metadata.Source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        await UpsertDownloadedFileAsync(c, transaction, file, ct);
+        await transaction.CommitAsync(ct);
+    }
+    public async Task RemoveDownloadedFileMonitorPathAsync(string path, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 32767 || !Path.IsPathFullyQualified(path)) return;
+        await using var c = await Open(ct);
+        await Execute(c, "DELETE FROM downloaded_file_snapshot WHERE path=$path", ct, ("$path", Path.GetFullPath(path)));
+    }
+    public async Task ResetDownloadedFileMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "DELETE FROM downloaded_file_snapshot; UPDATE downloaded_file_monitor_metadata SET initialized=0,hash_feed_imported_at=NULL,hash_feed_recheck_at=NULL,hash_feed_state_initialized=0 WHERE id=1";
+        await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    public async Task<WindowsPersistenceMonitorSnapshot> ReadWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,scheduled_tasks_initialized,services_initialized,ifeo_machine64_initialized,ifeo_machine32_initialized FROM windows_persistence_monitor_metadata WHERE id=1";
+        bool initialized; bool scheduledTasksInitialized; bool servicesInitialized; bool ifeoMachine64Initialized; bool ifeoMachine32Initialized;
+        using (var metadataReader = await metadata.ExecuteReaderAsync(ct))
+        {
+            if (!await metadataReader.ReadAsync(ct)) return new(false, new Dictionary<string, WindowsPersistenceFingerprint>(StringComparer.Ordinal));
+            initialized = metadataReader.GetInt32(0) == 1;
+            scheduledTasksInitialized = metadataReader.GetInt32(1) == 1;
+            servicesInitialized = metadataReader.GetInt32(2) == 1;
+            ifeoMachine64Initialized = metadataReader.GetInt32(3) == 1;
+            ifeoMachine32Initialized = metadataReader.GetInt32(4) == 1;
+        }
+        using var query = c.CreateCommand(); query.CommandText = "SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot ORDER BY entry_key LIMIT 1024";
+        using var reader = await query.ExecuteReaderAsync(ct);
+        var entries = new Dictionary<string, WindowsPersistenceFingerprint>(StringComparer.Ordinal);
+        while (await reader.ReadAsync(ct))
+        {
+            var entry = new WindowsPersistenceFingerprint(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3) == 1);
+            ValidateWindowsPersistenceFingerprint(entry);
+            entries.Add(entry.Key, entry);
+        }
+        return new(initialized, entries, scheduledTasksInitialized, servicesInitialized, ifeoMachine64Initialized, ifeoMachine32Initialized);
+    }
+    public async Task InitializeWindowsPersistenceMonitorSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries,
+        bool scheduledTasksInitialized = false, bool servicesInitialized = false,
+        bool ifeoMachine64Initialized = true, bool ifeoMachine32Initialized = true, CancellationToken ct = default)
+    {
+        ValidateWindowsPersistenceFingerprints(entries);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var clear = c.CreateCommand()) { clear.Transaction = transaction; clear.CommandText = "DELETE FROM windows_persistence_snapshot"; await clear.ExecuteNonQueryAsync(ct); }
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1,scheduled_tasks_initialized=$tasks,services_initialized=$services,ifeo_machine64_initialized=$ifeo64,ifeo_machine32_initialized=$ifeo32 WHERE id=1"; initialized.Parameters.AddWithValue("$tasks", scheduledTasksInitialized ? 1 : 0); initialized.Parameters.AddWithValue("$services", servicesInitialized ? 1 : 0); initialized.Parameters.AddWithValue("$ifeo64", ifeoMachine64Initialized ? 1 : 0); initialized.Parameters.AddWithValue("$ifeo32", ifeoMachine32Initialized ? 1 : 0); await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task InitializeWindowsIfeoSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, string source, CancellationToken ct = default)
+    {
+        if (source is not ("registry.machine64.ifeo" or "registry.machine32.ifeo") || entries.Any(entry => entry.Source != source))
+            throw new ArgumentException("Migawka IFEO zawiera nieprawidłowe źródło.", nameof(source));
+        ValidateWindowsPersistenceFingerprints(entries);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using var initialized = c.CreateCommand(); initialized.Transaction = transaction;
+        var column = source == "registry.machine64.ifeo" ? "ifeo_machine64_initialized" : "ifeo_machine32_initialized";
+        initialized.CommandText = $"UPDATE windows_persistence_monitor_metadata SET {column}=1 WHERE id=1";
+        await initialized.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    public async Task InitializeWindowsScheduledTaskSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, CancellationToken ct = default)
+    {
+        ValidateWindowsPersistenceFingerprints(entries);
+        if (entries.Any(entry => entry.Source != "scheduled.task")) throw new ArgumentException("Migawka zawiera nieprawidłowe źródło zadania.", nameof(entries));
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET scheduled_tasks_initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task InitializeWindowsServiceSnapshotAsync(IReadOnlyCollection<WindowsPersistenceFingerprint> entries, CancellationToken ct = default)
+    {
+        ValidateWindowsPersistenceFingerprints(entries);
+        if (entries.Any(entry => entry.Source is not ("registry.service" or "registry.driver")))
+            throw new ArgumentException("Migawka zawiera nieprawidłowe źródło usługi lub sterownika.", nameof(entries));
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var entry in entries) await UpsertWindowsPersistenceFingerprintAsync(c, transaction, entry, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET services_initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task CommitWindowsPersistenceChangeAsync(string key, WindowsPersistenceFingerprint? current, SecurityEvent item, CancellationToken ct = default)
+    {
+        if (current is not null && !string.Equals(current.Key, key, StringComparison.Ordinal)) throw new ArgumentException("Niezgodny klucz wpisu autostartu.", nameof(current));
+        if (current is not null) ValidateWindowsPersistenceFingerprint(current);
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 160) throw new ArgumentException("Nieprawidłowy klucz wpisu autostartu.", nameof(key));
+        var (eventId, source) = ValidateEvent(item);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using (var insert = c.CreateCommand())
+        {
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        if (current is null)
+        {
+            using var remove = c.CreateCommand(); remove.Transaction = transaction; remove.CommandText = "DELETE FROM windows_persistence_snapshot WHERE entry_key=$key";
+            remove.Parameters.AddWithValue("$key", key); await remove.ExecuteNonQueryAsync(ct);
+        }
+        else await UpsertWindowsPersistenceFingerprintAsync(c, transaction, current, ct);
+        using (var initialized = c.CreateCommand()) { initialized.Transaction = transaction; initialized.CommandText = "UPDATE windows_persistence_monitor_metadata SET initialized=1 WHERE id=1"; await initialized.ExecuteNonQueryAsync(ct); }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task ResetWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "DELETE FROM windows_persistence_snapshot; UPDATE windows_persistence_monitor_metadata SET initialized=0,scheduled_tasks_initialized=0,services_initialized=0,ifeo_machine64_initialized=0,ifeo_machine32_initialized=0 WHERE id=1";
+        await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
+    }
+    private static void ValidateWindowsPersistenceFingerprints(IReadOnlyCollection<WindowsPersistenceFingerprint> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        if (entries.Count > 1024) throw new ArgumentOutOfRangeException(nameof(entries), "Przekroczono limit migawki autostartu.");
+        foreach (var entry in entries) ValidateWindowsPersistenceFingerprint(entry);
+        if (entries.Select(entry => entry.Key).Distinct(StringComparer.Ordinal).Count() != entries.Count)
+            throw new ArgumentException("Migawka autostartu zawiera powtórzone klucze.", nameof(entries));
+    }
+    private static void ValidateWindowsPersistenceFingerprint(WindowsPersistenceFingerprint entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Key) || entry.Key.Length > 160 ||
+            entry.Source is not ("registry.user.run" or "registry.user.runonce" or "registry.machine64.run" or "registry.machine64.runonce" or
+                "registry.machine32.run" or "registry.machine32.runonce" or "registry.user.policy.run" or "registry.machine64.policy.run" or "registry.machine32.policy.run" or
+                "registry.user.winlogon" or "registry.machine64.winlogon" or "registry.machine32.winlogon" or
+                "registry.machine64.appinit" or "registry.machine32.appinit" or "registry.machine64.ifeo" or "registry.machine32.ifeo" or
+                "registry.machine64.shell.delay" or "registry.machine32.shell.delay" or
+                "registry.machine64.silent.exit" or "registry.machine32.silent.exit" or
+                "registry.user.runonceex" or "registry.machine64.runonceex" or "registry.machine32.runonceex" or
+                "startup.user" or "startup.common" or "scheduled.task" or "registry.service" or "registry.driver" or
+                "registry.user.startup.approved.run" or "registry.user.startup.approved.run32" or "registry.user.startup.approved.startupfolder" or
+                "registry.machine64.startup.approved.run" or "registry.machine64.startup.approved.run32" or "registry.machine64.startup.approved.startupfolder" or
+                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder") ||
+            entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
+            throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
+    }
+    private static async Task UpsertWindowsPersistenceFingerprintAsync(SqliteConnection c, SqliteTransaction transaction,
+        WindowsPersistenceFingerprint entry, CancellationToken ct)
+    {
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT INTO windows_persistence_snapshot(entry_key,source,fingerprint,writable_location) VALUES($key,$source,$fingerprint,$writable) ON CONFLICT(entry_key) DO UPDATE SET source=excluded.source,fingerprint=excluded.fingerprint,writable_location=excluded.writable_location";
+        command.Parameters.AddWithValue("$key", entry.Key); command.Parameters.AddWithValue("$source", entry.Source);
+        command.Parameters.AddWithValue("$fingerprint", entry.Fingerprint); command.Parameters.AddWithValue("$writable", entry.WritableLocation ? 1 : 0);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+    private static void ValidateDownloadedFiles(IReadOnlyCollection<DownloadFileFingerprint> files, int maximumFiles)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        if (maximumFiles < 1 || files.Count > maximumFiles) throw new ArgumentOutOfRangeException(nameof(files), "Przekroczono limit baseline'u Downloads.");
+        foreach (var file in files) ValidateDownloadedFile(file);
+        if (files.Select(file => file.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != files.Count)
+            throw new ArgumentException("Migawka Downloads zawiera powtórzone ścieżki.", nameof(files));
+    }
+    private static void ValidateDownloadedFile(DownloadFileFingerprint file)
+    {
+        if (string.IsNullOrWhiteSpace(file.Path) || file.Path.Length > 32767 || !Path.IsPathFullyQualified(file.Path) || file.Length < 0 || file.LastWriteTicks < 0)
+            throw new ArgumentException("Nieprawidłowy wpis baseline'u Downloads.", nameof(file));
+    }
+    private static async Task UpsertDownloadedFileAsync(SqliteConnection c, SqliteTransaction transaction, DownloadFileFingerprint file, CancellationToken ct)
+    {
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT INTO downloaded_file_snapshot(path,length,last_write_ticks) VALUES($path,$length,$ticks) ON CONFLICT(path) DO UPDATE SET length=excluded.length,last_write_ticks=excluded.last_write_ticks";
+        command.Parameters.AddWithValue("$path", Path.GetFullPath(file.Path)); command.Parameters.AddWithValue("$length", file.Length); command.Parameters.AddWithValue("$ticks", file.LastWriteTicks);
+        await command.ExecuteNonQueryAsync(ct);
+    }
+    /// <summary>Atomically records monitor events and advances the persisted endpoint baseline.</summary>
+    public async Task CommitNetworkMonitorChangesAsync(IReadOnlyCollection<SecurityEvent> events,
+        IReadOnlyCollection<string> addedEndpointKeys, IReadOnlyCollection<string> removedEndpointKeys,
+        CancellationToken ct = default, bool tcpTruncated = false, bool udpTruncated = false)
+    {
+        ArgumentNullException.ThrowIfNull(events); ArgumentNullException.ThrowIfNull(addedEndpointKeys); ArgumentNullException.ThrowIfNull(removedEndpointKeys);
+        if (events.Count > 100 || addedEndpointKeys.Count > 20_000 || removedEndpointKeys.Count > 20_000)
+            throw new ArgumentOutOfRangeException(nameof(events), "Przekroczono limit zmian migawki monitoringu sieci.");
+        static void ValidateKeys(IEnumerable<string> keys)
+        {
+            foreach (var key in keys)
+                if (string.IsNullOrEmpty(key) || key.Length > 2048 || key.Any(char.IsControl))
+                    throw new ArgumentException("Nieprawidłowy klucz endpointu sieciowego.", nameof(keys));
+        }
+        ValidateKeys(addedEndpointKeys); ValidateKeys(removedEndpointKeys);
+        var validated = events.Select(item => (Item: item, Metadata: ValidateEvent(item))).ToArray();
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var (item, (eventId, source)) in validated)
+        {
+            using var insert = c.CreateCommand(); insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var key in removedEndpointKeys)
+        {
+            using var remove = c.CreateCommand(); remove.Transaction = transaction;
+            remove.CommandText = "DELETE FROM network_endpoint_snapshot WHERE endpoint_key=$key";
+            remove.Parameters.AddWithValue("$key", key); await remove.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var key in addedEndpointKeys)
+        {
+            using var add = c.CreateCommand(); add.Transaction = transaction;
+            add.CommandText = "INSERT OR IGNORE INTO network_endpoint_snapshot(endpoint_key) VALUES($key)";
+            add.Parameters.AddWithValue("$key", key); await add.ExecuteNonQueryAsync(ct);
+        }
+        using (var initialized = c.CreateCommand())
+        {
+            initialized.Transaction = transaction; initialized.CommandText = "UPDATE network_monitor_metadata SET initialized=1,tcp_truncated=$tcpTruncated,udp_truncated=$udpTruncated WHERE id=1";
+            initialized.Parameters.AddWithValue("$tcpTruncated", tcpTruncated ? 1 : 0);
+            initialized.Parameters.AddWithValue("$udpTruncated", udpTruncated ? 1 : 0);
+            await initialized.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    private async Task<(long EventRowId, bool EnterpriseQueueFull, bool WasDeduplicated)> AddCoreAsync(SecurityEvent item, bool enqueueEnterprise,
+        CancellationToken cancellationToken, string? enterpriseCategoryOverride = null, string? enterpriseRuleCodeOverride = null,
+        TimeSpan? sameSourceSignalWindow = null)
+    {
+        item = item with { ProcessedAt = item.ProcessedAt ?? DateTimeOffset.UtcNow };
+        var (eventId, source) = ValidateEvent(item);
+        await using var c = await Open(cancellationToken);
+        using var transaction = c.BeginTransaction();
+        long id;
+        var enterpriseQueueFull = false;
+        var wasDeduplicated = false;
+        // A retried event id may already be either a canonical event or a merged observation.
+        using (var prior = c.CreateCommand())
+        {
+            prior.Transaction = transaction;
+            prior.CommandText = "SELECT event_row_id FROM event_observations WHERE event_id=$eventId";
+            prior.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+            var priorId = await prior.ExecuteScalarAsync(cancellationToken);
+            if (priorId is not null) id = Convert.ToInt64(priorId, CultureInfo.InvariantCulture);
+            else
+            {
+                var sameSourceDuplicateId = sameSourceSignalWindow is { } window
+                    ? await FindRecentSameSourceSignalAsync(c, transaction, item, source, window, cancellationToken)
+                    : null;
+                if (sameSourceDuplicateId is { } sameSourceId)
+                {
+                    id = sameSourceId;
+                    wasDeduplicated = true;
+                }
+                else
+                {
+                    var duplicateId = await FindCrossSourceDuplicateAsync(c, transaction, item, source, cancellationToken);
+                    if (duplicateId is not null)
+                    {
+                        using var observation = c.CreateCommand(); observation.Transaction = transaction;
+                        observation.CommandText = "INSERT INTO event_observations(event_id,event_row_id,observed_at,source,evidence_codes,processed_at,analysis_limitations) VALUES($eventId,$rowId,$timestamp,$source,$evidence,$processedAt,$analysisLimitations)";
+                        observation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                        observation.Parameters.AddWithValue("$rowId", duplicateId.Value);
+                        observation.Parameters.AddWithValue("$timestamp", item.Timestamp.ToUniversalTime().ToString("O"));
+                        observation.Parameters.AddWithValue("$source", source);
+                        observation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+                        observation.Parameters.AddWithValue("$processedAt", item.ProcessedAt!.Value.ToUniversalTime().ToString("O"));
+                        observation.Parameters.AddWithValue("$analysisLimitations", (object?)SerializeAnalysisLimitations(item.AnalysisLimitations) ?? DBNull.Value);
+                        await observation.ExecuteNonQueryAsync(cancellationToken);
+                        id = duplicateId.Value;
+                    }
+                    else
+                    {
+                        using var insert = c.CreateCommand(); insert.Transaction = transaction;
+                        insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
+                        AddEventParameters(insert, item, eventId, source);
+                        await insert.ExecuteNonQueryAsync(cancellationToken);
+                        using var get = c.CreateCommand(); get.Transaction = transaction;
+                        get.CommandText = "SELECT id FROM events WHERE event_id=$eventId";
+                        get.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                        var storedId = await get.ExecuteScalarAsync(cancellationToken);
+                        if (storedId is null) throw new InvalidDataException("Nie udało się odczytać zapisanego zdarzenia.");
+                        id = Convert.ToInt64(storedId, CultureInfo.InvariantCulture);
+                        using var updateObservation = c.CreateCommand(); updateObservation.Transaction = transaction;
+                        updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+                        updateObservation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+                        updateObservation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+                        await updateObservation.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                }
+            }
+        }
+        if (enqueueEnterprise && !wasDeduplicated && item.Risk >= RiskLevel.Moderate && Enum.IsDefined(item.Risk))
+        {
+            using var profileRead = c.CreateCommand(); profileRead.Transaction = transaction;
+            profileRead.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+            var profileJson = await profileRead.ExecuteScalarAsync(cancellationToken) as string;
+            var profile = profileJson is null ? null : JsonSerializer.Deserialize<InstalledProductProfile>(profileJson)?.Validate();
+            if (profile is { Variant: ProductVariant.EnterpriseClient, ShareSecurityMetadata: true } &&
+                item.Timestamp <= DateTimeOffset.UtcNow.AddMinutes(5) && item.Timestamp >= DateTimeOffset.UtcNow.AddDays(-30))
+            {
+                var category = enterpriseCategoryOverride ?? MapEnterpriseCategory(item, source);
+                var ruleCode = enterpriseRuleCodeOverride ?? "local." + category;
+                enterpriseQueueFull = !await EnqueueEnterpriseEventCoreAsync(c, transaction, new PendingEnterpriseEvent(eventId, item.Timestamp, category,
+                    (int)item.Risk, ruleCode, EnterpriseEventV1Rules.NormalizeSource(source),
+                    EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion), item.SchemaVersion), cancellationToken);
+            }
+        }
+        await transaction.CommitAsync(cancellationToken);
+        return (id, enterpriseQueueFull, wasDeduplicated);
+    }
+    private static bool HasCertEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        string.Equals(code, "reputation.cert", StringComparison.Ordinal) ||
+        code.StartsWith("reputation.cert.", StringComparison.Ordinal)) == true;
+    private static bool HasFileReputationEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        string.Equals(code, "file.sha256.matches-local-list", StringComparison.Ordinal)) == true;
+    private static bool HasUrlSignalEvidence(IEnumerable<string>? evidence) => evidence?.Any(code =>
+        code.StartsWith("url.", StringComparison.Ordinal) || string.Equals(code, "reputation.url-feed", StringComparison.Ordinal)) == true;
+    private static async Task<long?> FindRecentSameSourceSignalAsync(SqliteConnection c, SqliteTransaction transaction,
+        SecurityEvent item, string source, TimeSpan window, CancellationToken ct)
+    {
+        var from = item.Timestamp.ToUniversalTime().Subtract(window).ToString("O");
+        var to = item.Timestamp.ToUniversalTime().Add(window).ToString("O");
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT e.id FROM event_observations o JOIN events e ON e.id=o.event_row_id WHERE o.source=$source AND e.signal_hash=$hash AND e.risk=$risk AND o.observed_at BETWEEN $from AND $to ORDER BY o.observed_at DESC LIMIT 1";
+        command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$hash", item.SignalHash!.ToUpperInvariant());
+        command.Parameters.AddWithValue("$risk", (int)item.Risk);
+        command.Parameters.AddWithValue("$from", from); command.Parameters.AddWithValue("$to", to);
+        var existing = await command.ExecuteScalarAsync(ct);
+        return existing is null ? null : Convert.ToInt64(existing, CultureInfo.InvariantCulture);
+    }
+    private static async Task<long?> FindCrossSourceDuplicateAsync(SqliteConnection c, SqliteTransaction transaction,
+        SecurityEvent item, string source, CancellationToken ct)
+    {
+        var isCertSignal = HasCertEvidence(item.EvidenceCodes);
+        var isFileSignal = HasFileReputationEvidence(item.EvidenceCodes);
+        var isUrlSignal = !isCertSignal && HasUrlSignalEvidence(item.EvidenceCodes) && (source is "manual-analysis" or "browser-extension");
+        if (item.SignalHash is null || (!isCertSignal && !isFileSignal && !isUrlSignal) || (isCertSignal && item.Risk < RiskLevel.Moderate)) return null;
+        var from = item.Timestamp.ToUniversalTime().AddSeconds(-60).ToString("O");
+        var to = item.Timestamp.ToUniversalTime().AddSeconds(60).ToString("O");
+        using var candidates = c.CreateCommand(); candidates.Transaction = transaction;
+        candidates.CommandText = "SELECT id FROM events WHERE signal_hash=$hash AND risk=$risk AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
+        candidates.Parameters.AddWithValue("$hash", item.SignalHash);
+        candidates.Parameters.AddWithValue("$risk", (int)item.Risk);
+        candidates.Parameters.AddWithValue("$from", from); candidates.Parameters.AddWithValue("$to", to);
+        candidates.Parameters.AddWithValue("$timestamp", item.Timestamp.ToUniversalTime().ToString("O"));
+        var ids = new List<long>();
+        await using (var reader = await candidates.ExecuteReaderAsync(ct)) while (await reader.ReadAsync(ct)) ids.Add(reader.GetInt64(0));
+        foreach (var id in ids)
+        {
+            using var observations = c.CreateCommand(); observations.Transaction = transaction;
+            observations.CommandText = "SELECT source,evidence_codes FROM event_observations WHERE event_row_id=$id";
+            observations.Parameters.AddWithValue("$id", id);
+            await using var reader = await observations.ExecuteReaderAsync(ct);
+            var hasSignalFromOtherSource = false;
+            var hasSignalFromSameSource = false;
+            while (await reader.ReadAsync(ct))
+            {
+                var codes = ParseEvidenceCodes(reader.GetString(1));
+                var observationSource = reader.GetString(0);
+                var matchingSignal = isCertSignal ? HasCertEvidence(codes)
+                    : isFileSignal ? HasFileReputationEvidence(codes)
+                    : HasUrlSignalEvidence(codes) && (observationSource is "manual-analysis" or "browser-extension");
+                if (!matchingSignal) continue;
+                if (string.Equals(observationSource, source, StringComparison.Ordinal)) hasSignalFromSameSource = true;
+                else hasSignalFromOtherSource = true;
+            }
+            if (!hasSignalFromSameSource && hasSignalFromOtherSource) return id;
+        }
+        return null;
+    }
+    private static string MapEnterpriseCategory(SecurityEvent item, string source)
+    {
+        // Map stable category identifiers and known event sources. Do not infer a
+        // transport category by searching localized, user-visible text.
+        var category = item.Category.Trim();
+        if (Enum.GetNames<Sentinel.Core.Analysis.ThreatCategory>()
+            .Any(name => string.Equals(name, category, StringComparison.OrdinalIgnoreCase)))
+        {
+            return category.ToLowerInvariant() switch
+            {
+                "suspiciousnavigation" => "url",
+                "credentialphishing" => "login",
+                "unsafeexecution" => "attachment",
+                _ => "message"
+            };
+        }
+        if (string.Equals(category, "url", StringComparison.OrdinalIgnoreCase)) return "url";
+        if (string.Equals(category, "document", StringComparison.OrdinalIgnoreCase)) return "document";
+        if (string.Equals(category, "attachment", StringComparison.OrdinalIgnoreCase)) return "attachment";
+        if (string.Equals(category, "sender", StringComparison.OrdinalIgnoreCase)) return "sender";
+        if (string.Equals(category, "login", StringComparison.OrdinalIgnoreCase)) return "login";
+        return source switch
+        {
+            "browser-extension" or "dns-cache" => "url",
+            "downloads-local-hash" => "attachment",
+            _ => "message"
+        };
+    }
+    private static (Guid EventId, string Source) ValidateEvent(SecurityEvent item)
+    {
+        if (!Enum.IsDefined(item.Risk) || !Enum.IsDefined(item.Status)) throw new ArgumentException("Nieprawidłowe zdarzenie.");
+        foreach (var text in new[] { item.Category, item.Application, item.Explanation, item.Recommendation })
+            if (string.IsNullOrWhiteSpace(text) || text.Length > 2000) throw new ArgumentException("Nieprawidłowe metadane zdarzenia.");
+        var eventId = item.EventId ?? Guid.NewGuid();
+        var source = string.IsNullOrWhiteSpace(item.Source) ? item.Application : item.Source;
+        if (eventId == Guid.Empty || source.Length > 100 || item.RuleVersion?.Length > 80 || item.Confidence is < 0 or > 100 || item.SchemaVersion != 1 ||
+            item.ProcessId < 0 || item.ProcessName?.Length > 260 || item.ProcessName?.Any(char.IsControl) == true || item.CorrelationId == Guid.Empty ||
+            item.EvidenceCodes?.Count > 32 || item.EvidenceCodes?.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 ||
+                code.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))) == true ||
+            item.EvidenceCodes is not null && item.EvidenceCodes.Distinct(StringComparer.Ordinal).Count() != item.EvidenceCodes.Count)
+            throw new ArgumentException("Nieprawidłowe pochodzenie zdarzenia.");
+        if (item.SignalHash is { } hash && (hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character))))
+            throw new ArgumentException("Nieprawidłowy skrót sygnału.");
+        if (item.AnalysisLimitations?.Count > 16 || item.AnalysisLimitations?.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 ||
+                code.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))) == true ||
+            item.AnalysisLimitations is not null && item.AnalysisLimitations.Distinct(StringComparer.Ordinal).Count() != item.AnalysisLimitations.Count)
+            throw new ArgumentException("Nieprawidłowe ograniczenia analizy.");
+        if (item.ProcessImagePath is { } imagePath && (imagePath.Length is 0 or > 4096 || !Path.IsPathFullyQualified(imagePath) || imagePath.StartsWith(@"\\", StringComparison.Ordinal) || imagePath.Any(char.IsControl)))
+            throw new ArgumentException("Nieprawidłowa ścieżka obrazu procesu.");
+        if (item.ProcessImageSha256 is { } imageHash && (imageHash.Length != 64 || imageHash.Any(character => !Uri.IsHexDigit(character))))
+            throw new ArgumentException("Nieprawidłowy skrót obrazu procesu.");
+        if (item.ProcessImageSignatureStatus is { } signatureStatus && signatureStatus is not ("Pending" or "Valid" or "NotSigned" or "HashMismatch" or "NotTrusted" or "Unknown" or "Unavailable" or "TooLarge" or "QueueFull"))
+            throw new ArgumentException("Nieprawidłowy status podpisu obrazu procesu.");
+        if (item.ProcessImagePath is null && (item.ProcessImageSha256 is not null || item.ProcessImageSignatureStatus is not null || item.ProcessImageLocalHashMatch is not null))
+            throw new ArgumentException("Metadane obrazu procesu wymagają ścieżki lokalnej.");
+        return (eventId, source);
+    }
+    private static string? SerializeAnalysisLimitations(IReadOnlyList<string>? limitations) => limitations is null ? null : JsonSerializer.Serialize(limitations);
+    private static IReadOnlyList<string> ParseAnalysisLimitations(string json)
+    {
+        try
+        {
+            var limitations = JsonSerializer.Deserialize<string[]>(json) ?? throw new InvalidDataException("Nieprawidłowe ograniczenia analizy.");
+            if (limitations.Length > 16 || limitations.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 ||
+                    code.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))) ||
+                limitations.Distinct(StringComparer.Ordinal).Count() != limitations.Length) throw new InvalidDataException("Nieprawidłowe ograniczenia analizy.");
+            return limitations;
+        }
+        catch (JsonException exception) { throw new InvalidDataException("Nieprawidłowe ograniczenia analizy.", exception); }
+    }
+    private static IReadOnlyList<string> ParseEvidenceCodes(string? json)
+    {
+        if (json is null) return [];
+        try
+        {
+            var codes = JsonSerializer.Deserialize<string[]>(json) ?? throw new InvalidDataException("Nieprawidłowe kody dowodowe zdarzenia.");
+            if (codes.Length > 32 || codes.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 ||
+                code.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))) ||
+                codes.Distinct(StringComparer.Ordinal).Count() != codes.Length)
+                throw new InvalidDataException("Nieprawidłowe kody dowodowe zdarzenia.");
+            return codes;
+        }
+        catch (JsonException exception) { throw new InvalidDataException("Nieprawidłowe kody dowodowe zdarzenia.", exception); }
+    }
+    private static void AddEventParameters(SqliteCommand command, SecurityEvent item, Guid eventId, string source)
+    {
+        command.Parameters.AddWithValue("$t", item.Timestamp.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$processedAt", (item.ProcessedAt ?? DateTimeOffset.UtcNow).ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$r", (int)item.Risk); command.Parameters.AddWithValue("$c", item.Category);
+        command.Parameters.AddWithValue("$a", item.Application); command.Parameters.AddWithValue("$e", item.Explanation);
+        command.Parameters.AddWithValue("$n", item.Recommendation); command.Parameters.AddWithValue("$s", (int)item.Status);
+        command.Parameters.AddWithValue("$eventId", eventId.ToString("D")); command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$ruleVersion", (object?)item.RuleVersion ?? DBNull.Value);
+        command.Parameters.AddWithValue("$confidence", (object?)item.Confidence ?? DBNull.Value);
+        command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
+        command.Parameters.AddWithValue("$processId", (object?)item.ProcessId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$processName", (object?)item.ProcessName ?? DBNull.Value);
+        command.Parameters.AddWithValue("$correlationId", (object?)item.CorrelationId?.ToString("D") ?? DBNull.Value);
+        command.Parameters.AddWithValue("$evidenceCodes", JsonSerializer.Serialize(item.EvidenceCodes ?? Array.Empty<string>()));
+        command.Parameters.AddWithValue("$analysisLimitations", (object?)SerializeAnalysisLimitations(item.AnalysisLimitations) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$signalHash", (object?)item.SignalHash?.ToUpperInvariant() ?? DBNull.Value);
+        command.Parameters.AddWithValue("$processImagePath", (object?)item.ProcessImagePath ?? DBNull.Value);
+        command.Parameters.AddWithValue("$processImageSha256", (object?)item.ProcessImageSha256?.ToUpperInvariant() ?? DBNull.Value);
+        command.Parameters.AddWithValue("$processImageSignatureStatus", (object?)item.ProcessImageSignatureStatus ?? DBNull.Value);
+        command.Parameters.AddWithValue("$processImageLocalHashMatch", (object?)(item.ProcessImageLocalHashMatch is { } match ? (match ? 1 : 0) : null) ?? DBNull.Value);
+    }
+    public async Task<IReadOnlyList<PendingEnterpriseEvent>> ReadPendingEnterpriseEventsAsync(int limit = 100, CancellationToken ct = default)
+    {
+        if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+        await PromoteDeferredEnterpriseEventsAsync(ct);
+        await using var c = await Open(ct); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version FROM enterprise_event_queue WHERE sent=0 ORDER BY occurred_at LIMIT $limit";
+        cmd.Parameters.AddWithValue("$limit", limit); using var reader = await cmd.ExecuteReaderAsync(ct); var rows = new List<PendingEnterpriseEvent>();
+        while (await reader.ReadAsync(ct)) rows.Add(new(Guid.Parse(reader.GetString(0)), DateTimeOffset.Parse(reader.GetString(1), CultureInfo.InvariantCulture), reader.GetString(2), reader.GetInt32(3), reader.GetString(4),
+            reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7)));
+        return rows;
+    }
+    public async Task MarkEnterpriseEventsSentAsync(IEnumerable<Guid> eventIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(eventIds); var ids = eventIds.Take(101).ToArray(); if (ids.Length > 100) throw new ArgumentOutOfRangeException(nameof(eventIds));
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        foreach (var id in ids)
+        {
+            using var command = c.CreateCommand(); command.Transaction = transaction; command.CommandText = "UPDATE enterprise_event_queue SET sent=1 WHERE event_id=$id";
+            command.Parameters.AddWithValue("$id", id.ToString("D")); await command.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task<bool> EnqueueEnterpriseEventAsync(PendingEnterpriseEvent item, CancellationToken ct = default)
+    {
+        ValidatePendingEnterpriseEvent(item);
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var profileRead = c.CreateCommand(); profileRead.Transaction = transaction;
+        profileRead.CommandText = "SELECT json FROM installation_profile WHERE id=1";
+        var raw = await profileRead.ExecuteScalarAsync(ct) as string ?? throw new InvalidDataException("Brak profilu instalacji.");
+        var profile = JsonSerializer.Deserialize<InstalledProductProfile>(raw)?.Validate() ?? throw new InvalidDataException("Nieprawidłowy profil instalacji.");
+        if (profile.Variant != ProductVariant.EnterpriseClient || !profile.ShareSecurityMetadata)
+            throw new InvalidOperationException("Synchronizacja metadanych nie została jawnie włączona.");
+        var inserted = await EnqueueEnterpriseEventCoreAsync(c, transaction, item, ct);
+        await transaction.CommitAsync(ct);
+        return inserted;
+    }
+    private static void ValidatePendingEnterpriseEvent(PendingEnterpriseEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (item.EventId == Guid.Empty || item.Category is not ("url" or "message" or "document" or "attachment" or "sender" or "login") ||
+            item.RiskLevel is < 2 or > 4 || string.IsNullOrEmpty(item.RuleCode) || item.RuleCode.Length > 80 ||
+            item.RuleCode.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '_' or '-')) ||
+            item.SchemaVersion != 1 || item.OccurredAt > DateTimeOffset.UtcNow.AddMinutes(5) || item.OccurredAt < DateTimeOffset.UtcNow.AddDays(-30))
+            throw new ArgumentException("Nieprawidłowe metadane zdarzenia Enterprise.", nameof(item));
+    }
+    private static async Task<bool> EnqueueEnterpriseEventCoreAsync(SqliteConnection c, SqliteTransaction transaction,
+        PendingEnterpriseEvent item, CancellationToken ct)
+    {
+        ValidatePendingEnterpriseEvent(item);
+        using (var existing = c.CreateCommand())
+        {
+            existing.Transaction = transaction; existing.CommandText = "SELECT 1 FROM enterprise_event_queue WHERE event_id=$id";
+            existing.Parameters.AddWithValue("$id", item.EventId.ToString("D"));
+            existing.CommandText = "SELECT 1 FROM enterprise_event_queue WHERE event_id=$id UNION ALL SELECT 1 FROM enterprise_event_deferred WHERE event_id=$id LIMIT 1";
+            if (await existing.ExecuteScalarAsync(ct) is not null) return true;
+        }
+        using (var prune = c.CreateCommand())
+        {
+            prune.Transaction = transaction;
+            prune.CommandText = "DELETE FROM enterprise_event_queue WHERE event_id IN (SELECT event_id FROM enterprise_event_queue WHERE sent=1 ORDER BY occurred_at LIMIT 1000)";
+            await prune.ExecuteNonQueryAsync(ct);
+        }
+        using (var count = c.CreateCommand())
+        {
+            count.Transaction = transaction; count.CommandText = "SELECT COUNT(*) FROM enterprise_event_queue";
+            if (Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture) >= 10000)
+            {
+                using var deferred = c.CreateCommand(); deferred.Transaction = transaction;
+                deferred.CommandText = "INSERT OR IGNORE INTO enterprise_event_deferred(event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version) VALUES($id,$time,$category,$risk,$rule,$source,$ruleVersion,$schemaVersion)";
+                BindEnterpriseEvent(deferred, item);
+                await deferred.ExecuteNonQueryAsync(ct);
+                return false;
+            }
+        }
+        using var command = c.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "INSERT OR IGNORE INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version) VALUES($id,$time,$category,$risk,$rule,$source,$ruleVersion,$schemaVersion)";
+        BindEnterpriseEvent(command, item);
+        return await command.ExecuteNonQueryAsync(ct) == 1;
+    }
+    private static void BindEnterpriseEvent(SqliteCommand command, PendingEnterpriseEvent item)
+    {
+        command.Parameters.AddWithValue("$id", item.EventId.ToString("D")); command.Parameters.AddWithValue("$time", item.OccurredAt.ToUniversalTime().ToString("O"));
+        command.Parameters.AddWithValue("$category", item.Category); command.Parameters.AddWithValue("$risk", item.RiskLevel); command.Parameters.AddWithValue("$rule", item.RuleCode);
+        command.Parameters.AddWithValue("$source", EnterpriseEventV1Rules.NormalizeSource(item.Source));
+        command.Parameters.AddWithValue("$ruleVersion", (object?)EnterpriseEventV1Rules.NormalizeRuleVersion(item.RuleVersion) ?? DBNull.Value);
+        command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
+    }
+    private async Task PromoteDeferredEnterpriseEventsAsync(CancellationToken ct)
+    {
+        await using var c = await Open(ct); using var transaction = c.BeginTransaction();
+        using var prune = c.CreateCommand(); prune.Transaction = transaction;
+        prune.CommandText = "DELETE FROM enterprise_event_queue WHERE event_id IN (SELECT event_id FROM enterprise_event_queue WHERE sent=1 ORDER BY occurred_at LIMIT 1000)";
+        await prune.ExecuteNonQueryAsync(ct);
+        using var count = c.CreateCommand(); count.Transaction = transaction; count.CommandText = "SELECT MAX(0,10000-COUNT(*)) FROM enterprise_event_queue";
+        var available = Convert.ToInt32(await count.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+        if (available > 0)
+        {
+            using var promote = c.CreateCommand(); promote.Transaction = transaction;
+            promote.CommandText = "INSERT OR IGNORE INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version) SELECT event_id,occurred_at,category,risk_level,rule_code,source,rule_version,schema_version FROM enterprise_event_deferred ORDER BY occurred_at LIMIT $available";
+            promote.Parameters.AddWithValue("$available", available); await promote.ExecuteNonQueryAsync(ct);
+            using var removePromoted = c.CreateCommand(); removePromoted.Transaction = transaction;
+            removePromoted.CommandText = "DELETE FROM enterprise_event_deferred WHERE event_id IN (SELECT event_id FROM enterprise_event_queue)";
+            await removePromoted.ExecuteNonQueryAsync(ct);
+        }
+        await transaction.CommitAsync(ct);
+    }
+    public async Task<int> CountPendingEnterpriseEventsAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); using var command = c.CreateCommand(); command.CommandText = "SELECT (SELECT COUNT(*) FROM enterprise_event_queue WHERE sent=0)+(SELECT COUNT(*) FROM enterprise_event_deferred)";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
+    }
+    public async Task ClearEnterpriseEventQueueAsync(CancellationToken ct = default)
+    {
+        await using var c = await Open(ct); await Execute(c, "DELETE FROM enterprise_event_queue; DELETE FROM enterprise_event_deferred", ct);
+    }
+    public async Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default)
+    {
+        await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations FROM events ORDER BY id DESC LIMIT 500";
+        using var r = await cmd.ExecuteReaderAsync(cancellationToken); var rows = new List<SecurityEvent>();
+        while (await r.ReadAsync(cancellationToken)) rows.Add(new(r.GetInt64(0), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture),
+            (RiskLevel)r.GetInt32(2), r.GetString(3), r.GetString(4), r.GetString(5), r.GetString(6), (EventStatus)r.GetInt32(7),
+            r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
+            r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17),
+            ProcessImagePath: r.IsDBNull(18) ? null : r.GetString(18), ProcessImageSha256: r.IsDBNull(19) ? null : r.GetString(19),
+            ProcessImageSignatureStatus: r.IsDBNull(20) ? null : r.GetString(20), ProcessImageLocalHashMatch: r.IsDBNull(21) ? null : r.GetInt32(21) != 0, ProcessedAt: r.IsDBNull(22) ? null : DateTimeOffset.Parse(r.GetString(22), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(23) ? null : ParseAnalysisLimitations(r.GetString(23))));
+        await r.DisposeAsync();
+        return await AttachObservationsAsync(c, rows, cancellationToken);
+    }
+    public async Task<IReadOnlyList<SecurityEvent>> ReadAfterAsync(long afterId, int limit = 32, CancellationToken cancellationToken = default)
+    {
+        if (afterId < 0) throw new ArgumentOutOfRangeException(nameof(afterId));
+        if (limit is < 1 or > 32) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,processed_at,analysis_limitations FROM events WHERE id>$afterId ORDER BY id LIMIT $limit";
+        cmd.Parameters.AddWithValue("$afterId", afterId); cmd.Parameters.AddWithValue("$limit", limit);
+        using var r = await cmd.ExecuteReaderAsync(cancellationToken); var rows = new List<SecurityEvent>();
+        while (await r.ReadAsync(cancellationToken)) rows.Add(new(r.GetInt64(0), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture),
+            (RiskLevel)r.GetInt32(2), r.GetString(3), r.GetString(4), r.GetString(5), r.GetString(6), (EventStatus)r.GetInt32(7),
+            r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
+            r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)),
+            ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17),
+            ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture),
+            AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19))));
+        await r.DisposeAsync();
+        return await AttachObservationsAsync(c, rows, cancellationToken);
+    }
+    public async Task<int> CountEventsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var c = await Open(cancellationToken); using var command = c.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM events";
+        return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+    public async Task<long> GetLatestEventRowIdAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await Open(cancellationToken); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(MAX(id),0) FROM events";
+        return Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+    }
+    public async Task<DownloadedFileQuarantineCandidate> ReadDownloadedFileQuarantineCandidateAsync(long eventRowId, CancellationToken cancellationToken = default)
+    {
+        if (eventRowId <= 0) throw new ArgumentOutOfRangeException(nameof(eventRowId));
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT event_id,source,evidence_codes,signal_hash,EXISTS(SELECT 1 FROM event_observations WHERE event_row_id=events.id AND source='downloads-local-hash') FROM events WHERE id=$id";
+        command.Parameters.AddWithValue("$id", eventRowId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken) || reader.IsDBNull(0) || !Guid.TryParse(reader.GetString(0), out var eventId) ||
+            eventId == Guid.Empty || reader.IsDBNull(1) ||
+            (!string.Equals(reader.GetString(1), "downloads-local-hash", StringComparison.Ordinal) && reader.GetInt64(4) != 1))
+            throw new InvalidOperationException("Tylko zdarzenie z dopasowaniem lokalnej reputacji nowego pliku może zostać przeniesione do kwarantanny.");
+        var evidence = ParseEvidenceCodes(reader.IsDBNull(2) ? null : reader.GetString(2));
+        var hash = reader.IsDBNull(3) ? null : reader.GetString(3);
+        if (!evidence.Contains("file.sha256.matches-local-list", StringComparer.Ordinal) ||
+            hash is null || hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
+            throw new InvalidOperationException("Zdarzenie nie zawiera prawidłowego potwierdzenia lokalnego hasha pliku.");
+        return new(eventId, hash.ToUpperInvariant());
+    }
+    public async Task UpdateProcessImageInspectionAsync(Guid eventId, string? sha256, string signatureStatus, bool? localHashMatch, CancellationToken cancellationToken = default)
+    {
+        if (eventId == Guid.Empty || signatureStatus is not ("Valid" or "NotSigned" or "HashMismatch" or "NotTrusted" or "Unknown" or "Unavailable" or "TooLarge" or "QueueFull"))
+            throw new ArgumentException("Nieprawidłowy wynik inspekcji pliku procesu.");
+        if (sha256 is not null && (sha256.Length != 64 || sha256.Any(character => !Uri.IsHexDigit(character))))
+            throw new ArgumentException("Nieprawidłowy SHA-256 pliku procesu.");
+        await using var c = await Open(cancellationToken); using var transaction = c.BeginTransaction();
+        using var read = c.CreateCommand(); read.Transaction = transaction;
+        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source IN ('process-snapshot','process-wmi')";
+        read.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+        long rowId; IReadOnlyList<string> evidence; Guid? processCorrelationId; DateTimeOffset processTimestamp;
+        await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
+        {
+            if (!await reader.ReadAsync(cancellationToken)) { await transaction.RollbackAsync(cancellationToken); return; }
+            rowId = reader.GetInt64(0); evidence = ParseEvidenceCodes(reader.GetString(1));
+            processCorrelationId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2));
+            processTimestamp = DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture);
+        }
+        var codes = evidence.ToList();
+        void AddCode(string code) { if (codes.Count < 32 && !codes.Contains(code, StringComparer.Ordinal)) codes.Add(code); }
+        if (sha256 is not null) AddCode("process.image.sha256.available");
+        if (signatureStatus is "Valid" or "NotSigned" or "HashMismatch" or "NotTrusted") AddCode("process.image.authenticode." + signatureStatus.ToLowerInvariant());
+        if (localHashMatch == true) AddCode("process.image.local-hash-match");
+        using var update = c.CreateCommand(); update.Transaction = transaction;
+        update.CommandText = "UPDATE events SET process_image_sha256=$sha256,process_image_signature_status=$signatureStatus,process_image_local_hash_match=$localHashMatch,evidence_codes=$evidence WHERE id=$id";
+        update.Parameters.AddWithValue("$sha256", (object?)sha256?.ToUpperInvariant() ?? DBNull.Value);
+        update.Parameters.AddWithValue("$signatureStatus", signatureStatus);
+        update.Parameters.AddWithValue("$localHashMatch", (object?)(localHashMatch is { } match ? (match ? 1 : 0) : null) ?? DBNull.Value);
+        update.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(codes)); update.Parameters.AddWithValue("$id", rowId);
+        await update.ExecuteNonQueryAsync(cancellationToken);
+        using var updateObservation = c.CreateCommand(); updateObservation.Transaction = transaction;
+        updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+        updateObservation.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(codes)); updateObservation.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
+        await updateObservation.ExecuteNonQueryAsync(cancellationToken);
+
+        if (sha256 is not null)
+            await CorrelateProcessWithDownloadedHashAsync(c, transaction, rowId, eventId, sha256.ToUpperInvariant(),
+                processTimestamp, processCorrelationId, codes, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task CorrelateProcessWithDownloadedHashAsync(SqliteConnection connection, SqliteTransaction transaction,
+        long processRowId, Guid processEventId, string sha256, DateTimeOffset processTimestamp, Guid? processCorrelationId,
+        List<string> processEvidence, CancellationToken cancellationToken)
+    {
+        var from = processTimestamp.ToUniversalTime().AddMinutes(-10).ToString("O", CultureInfo.InvariantCulture);
+        var to = processTimestamp.ToUniversalTime().AddMinutes(10).ToString("O", CultureInfo.InvariantCulture);
+        using var find = connection.CreateCommand(); find.Transaction = transaction;
+        find.CommandText = "SELECT id,event_id,evidence_codes,correlation_id FROM events WHERE source='downloads-local-hash' AND signal_hash=$hash AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
+        find.Parameters.AddWithValue("$hash", sha256); find.Parameters.AddWithValue("$from", from); find.Parameters.AddWithValue("$to", to);
+        find.Parameters.AddWithValue("$timestamp", processTimestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        var candidates = new List<(long RowId, Guid EventId, IReadOnlyList<string> Evidence, Guid? CorrelationId)>();
+        await using (var reader = await find.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+                if (Guid.TryParse(reader.GetString(1), out var downloadEventId))
+                    candidates.Add((reader.GetInt64(0), downloadEventId, ParseEvidenceCodes(reader.GetString(2)),
+                        reader.IsDBNull(3) ? null : Guid.Parse(reader.GetString(3))));
+
+        foreach (var candidate in candidates)
+        {
+            if (processCorrelationId is { } existingProcessId && candidate.CorrelationId is { } existingDownloadId && existingProcessId != existingDownloadId)
+                continue;
+            var correlationId = processCorrelationId ?? candidate.CorrelationId ?? Guid.NewGuid();
+            const string evidenceCode = "correlation.download-process.same-sha256";
+            if (!processEvidence.Contains(evidenceCode, StringComparer.Ordinal)) processEvidence.Add(evidenceCode);
+            var downloadEvidence = candidate.Evidence.ToList();
+            if (!downloadEvidence.Contains(evidenceCode, StringComparer.Ordinal)) downloadEvidence.Add(evidenceCode);
+
+            using (var updateProcess = connection.CreateCommand())
+            {
+                updateProcess.Transaction = transaction;
+                updateProcess.CommandText = "UPDATE events SET correlation_id=$correlationId,evidence_codes=$evidence WHERE id=$id";
+                updateProcess.Parameters.AddWithValue("$correlationId", correlationId.ToString("D"));
+                updateProcess.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(processEvidence));
+                updateProcess.Parameters.AddWithValue("$id", processRowId);
+                await updateProcess.ExecuteNonQueryAsync(cancellationToken);
+            }
+            using (var updateDownload = connection.CreateCommand())
+            {
+                updateDownload.Transaction = transaction;
+                updateDownload.CommandText = "UPDATE events SET correlation_id=$correlationId,evidence_codes=$evidence WHERE id=$id";
+                updateDownload.Parameters.AddWithValue("$correlationId", correlationId.ToString("D"));
+                updateDownload.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(downloadEvidence));
+                updateDownload.Parameters.AddWithValue("$id", candidate.RowId);
+                await updateDownload.ExecuteNonQueryAsync(cancellationToken);
+            }
+            using (var observations = connection.CreateCommand())
+            {
+                observations.Transaction = transaction;
+                observations.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
+                observations.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(processEvidence));
+                observations.Parameters.AddWithValue("$eventId", processEventId.ToString("D"));
+                await observations.ExecuteNonQueryAsync(cancellationToken);
+            }
             using (var observations = connection.CreateCommand())
             {
                 observations.Transaction = transaction;
@@ -538,4 +1913,3 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
     }
 }
-

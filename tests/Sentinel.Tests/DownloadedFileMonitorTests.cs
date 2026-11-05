@@ -798,4 +798,3 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         }
     }
 }
-

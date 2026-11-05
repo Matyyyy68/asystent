@@ -12,4 +12,3 @@
 There is no unified signed, versioned, incremental intelligence database spanning hashes/domains/IP/certificates/CVEs. Local user-imported lists do not carry a verified publisher signature, expiry, confidence or provenance contract. UI wording marks those matches as local and source-limited. No fabricated threat records are included. Offline rules and monitoring continue without remote reputation availability.
 
 The product must expose feed source, last successful update and stale/unavailable status. It must not treat a missing feed as “clean.” See [privacy](PRIVACY.md), [network monitoring](NETWORK_MONITORING.md), and [detection](DETECTION_ENGINE.md).
-

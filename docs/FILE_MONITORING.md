@@ -15,4 +15,3 @@
 - No automatic quarantine based only on a weak heuristic.
 
 The Downloads watcher and reconciliation path have tests for bounded work, symlink/junction races, persistence, and safe file handling. See [Windows monitoring](WINDOWS_MONITORING.md) and [privacy](PRIVACY.md).
-

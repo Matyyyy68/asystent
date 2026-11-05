@@ -49,4 +49,3 @@ Niezależność usługi jest częściowa: jej profil Downloads to izolowany kata
 ## Weryfikacja
 
 Test integrujący krótkotrwały proces z syntetycznym wejściem WMI jest w `ProcessSnapshotMonitorTests`. Test nie uruchamia WMI ani nie zmienia konfiguracji systemu. Testy regresji wykonuje się przez `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`.
-

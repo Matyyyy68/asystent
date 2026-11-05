@@ -770,4 +770,3 @@ public sealed class DownloadedFileMonitor : IDisposable
         pending.Clear();
     }
 }
-

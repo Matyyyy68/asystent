@@ -19,4 +19,3 @@ The Engine IPC integration self-test starts the published Engine with isolated s
 - Independent threat-detection precision/recall holdout metrics.
 
 CI on a Windows runner is required for packaging and integration claims; a runner is not the user's physical device. Existing runs are listed in [project progress](PROJECT_PROGRESS.md).
-
