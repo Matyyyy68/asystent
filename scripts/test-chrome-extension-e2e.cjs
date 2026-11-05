@@ -591,7 +591,18 @@ async function main() {
     if (fs.readFileSync(path.join(downloadPath, 'sentinel-link-download.txt'), 'utf8') !== 'sentinel-link-download-fixture') {
       throw new Error(`${browserConfig.displayName} downloaded unexpected link fixture contents.`);
     }
-    if (analyzeCount() <= beforeLinkDownloadCount) throw new Error(`${browserConfig.displayName} did not analyze a link-initiated download.`);
+    if (analyzeCount() <= beforeLinkDownloadCount) {
+      let runtimeDiagnostics = null;
+      try {
+        const result = await worker.command('Runtime.evaluate', {
+          expression: `Promise.all([new Promise(resolve => chrome.downloads.search({filename: 'sentinel-link-download.txt'}, items => resolve(items.map(item => ({ state: item.state, byExtension: item.byExtension, hasTabId: Number.isInteger(item.tabId), urlMatchesFixture: item.url === ${JSON.stringify(linkDownloadUrl)} || item.finalUrl === ${JSON.stringify(linkDownloadUrl)} }))))), Promise.resolve({ enabled: integrationEnabled, hostAvailable, pendingRequests: pending.size, matchingNavigationStates: [...navigationStatesByTab.values()].filter(state => state.url === ${JSON.stringify(linkDownloadUrl)}).map(state => ({ ageMs: Date.now() - state.startedAt, hasDownloadId: Number.isInteger(state.downloadId), hasWarningToken: Boolean(state.warningToken) })) })]).then(([downloads, extension]) => ({ downloads, extension }))`,
+          awaitPromise: true,
+          returnByValue: true
+        });
+        runtimeDiagnostics = result.result?.value ?? null;
+      } catch (error) { runtimeDiagnostics = { error: String(error) }; }
+      throw new Error(`${browserConfig.displayName} did not analyze a link-initiated download (runtime metadata: ${JSON.stringify(runtimeDiagnostics)}).`);
+    }
     if (!linkWarningTab?.webSocketDebuggerUrl) {
       let runtimeDiagnostics = null;
       try {
