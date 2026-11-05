@@ -101,7 +101,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 38) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 39) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -430,6 +430,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
+        if (v < 39)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE process_change_backlog_v39(queue_id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE CHECK(length(event_id)=36), observed_at TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('Proces zaobserwowany','Proces zakończony','Proces zniknął z migawki')), process_id INTEGER NOT NULL CHECK(process_id BETWEEN 0 AND 2147483647), process_name TEXT NOT NULL CHECK(length(process_name) BETWEEN 1 AND 260), correlation_id TEXT NULL CHECK(correlation_id IS NULL OR length(correlation_id)=36)); INSERT INTO process_change_backlog_v39(queue_id,event_id,observed_at,action,process_id,process_name,correlation_id) SELECT queue_id,event_id,observed_at,action,process_id,process_name,correlation_id FROM process_change_backlog; DROP TABLE process_change_backlog; ALTER TABLE process_change_backlog_v39 RENAME TO process_change_backlog; PRAGMA user_version=39; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
         await Execute(c, "CREATE INDEX IF NOT EXISTS ix_event_observations_source_time ON event_observations(source,observed_at,event_row_id)", ct);
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
@@ -752,7 +761,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             var processId = reader.GetInt32(4);
             var processName = reader.GetString(5);
             Guid? correlationId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6));
-            if (eventId == Guid.Empty || action is not ("Proces zaobserwowany" or "Proces zniknął z migawki") || processId < 0 ||
+            if (eventId == Guid.Empty || !IsValidProcessChangeAction(action) || processId < 0 ||
                 processName.Length is < 1 or > 260 || processName.Any(char.IsControl) ||
                 (action == "Proces zaobserwowany" && !correlationId.HasValue))
                 throw new InvalidDataException("Nieprawidłowa zmiana oczekująca w kolejce monitora procesów.");
@@ -774,7 +783,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (backlogToAdd.Count > 20_000 || backlogToRemove.Count > 20_000 || backlogToAdd.Select(item => item.EventId).Distinct().Count() != backlogToAdd.Count)
             throw new ArgumentOutOfRangeException(nameof(backlogToAdd), "Przekroczono limit kolejki zmian procesów.");
         foreach (var item in backlogToAdd)
-            if (item.EventId == Guid.Empty || item.Action is not ("Proces zaobserwowany" or "Proces zniknął z migawki") ||
+            if (item.EventId == Guid.Empty || !IsValidProcessChangeAction(item.Action) ||
                 item.ProcessId < 0 || string.IsNullOrWhiteSpace(item.ProcessName) || item.ProcessName.Length > 260 || item.ProcessName.Any(char.IsControl) ||
                 (item.Action == "Proces zaobserwowany" && !item.CorrelationId.HasValue))
                 throw new ArgumentException("Nieprawidłowa zmiana oczekująca monitora procesów.", nameof(backlogToAdd));
@@ -840,6 +849,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         await transaction.CommitAsync(ct);
     }
+
+    private static bool IsValidProcessChangeAction(string action) =>
+        action is "Proces zaobserwowany" or "Proces zakończony" or "Proces zniknął z migawki";
     public async Task<DownloadMonitorSnapshot> ReadDownloadedFileMonitorSnapshotAsync(CancellationToken ct = default)
     {
         await using var c = await Open(ct);
@@ -1747,7 +1759,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores local events and settings from a verified v6-v38 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores local events and settings from a verified v6-v39 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -1765,7 +1777,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is < 6 or > 38)
+            if (backupVersion is < 6 or > 39)
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
