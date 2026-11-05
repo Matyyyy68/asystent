@@ -92,8 +92,13 @@ internal static class Program
             Application.Exit();
         };
         ApplicationConfiguration.Initialize();
-        using var agent = new AgentContext();
-        if (diagnosticsSelfTest) return await agent.SelfTestCoreEngineDiagnosticsAsync() ? 0 : 1;
+        using var agent = new AgentContext(enableBackgroundMonitoring: !diagnosticsSelfTest);
+        if (diagnosticsSelfTest)
+        {
+            agent.BeginCoreEngineDiagnosticsSelfTest();
+            Application.Run(agent);
+            return Environment.ExitCode;
+        }
         Application.Run(agent);
         AgentLog($"AGENT_MESSAGE_LOOP_EXIT exitCode={Environment.ExitCode}");
         GC.KeepAlive(singleInstance);
@@ -217,7 +222,7 @@ internal static class Program
         private bool collecting;
         private bool disposed;
 
-        public AgentContext()
+        public AgentContext(bool enableBackgroundMonitoring = true)
         {
             var appRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
             engine = new EngineProxy(Path.Combine(AppContext.BaseDirectory, "Sentinel.Engine.exe"));
@@ -243,10 +248,28 @@ internal static class Program
             tray.BalloonTipClicked += (_, _) => OpenUi(appRoot);
             collector.Tick += async (_, _) => await CollectAsync();
             serviceEventCollector.Tick += async (_, _) => await CheckSystemServiceEventsAsync();
-            collector.Start();
-            serviceEventCollector.Start();
+            if (enableBackgroundMonitoring)
+            {
+                collector.Start();
+                serviceEventCollector.Start();
+            }
             server = Task.Run(() => ServeClientsAsync(shutdown.Token));
             AgentLog("AGENT_CONTEXT_READY");
+        }
+
+        public void BeginCoreEngineDiagnosticsSelfTest()
+        {
+            dispatcher.BeginInvoke((Action)(async () =>
+            {
+                try { Environment.ExitCode = await SelfTestCoreEngineDiagnosticsAsync() ? 0 : 1; }
+                catch (Exception exception)
+                {
+                    var message = exception.Message.Replace('\r', ' ').Replace('\n', ' ');
+                    Console.Error.WriteLine($"SELF_TEST_FAILED agent-engine-diagnostics type={exception.GetType().Name} hresult=0x{exception.HResult:X8} message={message[..Math.Min(message.Length, 300)]}");
+                    Environment.ExitCode = 1;
+                }
+                ExitThread();
+            }));
         }
 
         private static Icon TryLoadIcon(string appPath)
