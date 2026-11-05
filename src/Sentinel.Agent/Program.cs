@@ -36,6 +36,13 @@ internal static class Program
     [STAThread]
     private static async Task<int> Main(string[] args)
     {
+        try
+        {
+        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+        {
+            if (eventArgs.ExceptionObject is Exception exception) LogFatalException("AGENT_UNHANDLED", exception);
+            else AgentLog("AGENT_UNHANDLED type=System.Exception hresult=unknown");
+        };
         if (!OperatingSystem.IsWindows()) return 2;
         if (args.Contains("--self-test-service-events", StringComparer.OrdinalIgnoreCase))
         {
@@ -76,12 +83,31 @@ internal static class Program
         AgentLog("AGENT_PROCESS_START");
         singleInstance = new Mutex(initiallyOwned: true, "Local\\SentinelAI.CoreAgent.v1", out var created);
         if (!created) { AgentLog("AGENT_DUPLICATE_INSTANCE"); return AgentAlreadyRunningExitCode; }
+        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+        Application.ThreadException += (_, eventArgs) =>
+        {
+            LogFatalException("AGENT_UI_THREAD_UNHANDLED", eventArgs.Exception);
+            Environment.ExitCode = 1;
+            Application.Exit();
+        };
         ApplicationConfiguration.Initialize();
         using var agent = new AgentContext();
         Application.Run(agent);
         AgentLog($"AGENT_MESSAGE_LOOP_EXIT exitCode={Environment.ExitCode}");
         GC.KeepAlive(singleInstance);
         return Environment.ExitCode;
+        }
+        catch (Exception exception)
+        {
+            LogFatalException("AGENT_FATAL", exception);
+            return 1;
+        }
+    }
+
+    private static void LogFatalException(string category, Exception exception)
+    {
+        var type = EngineFatalDiagnostic.SanitizeExceptionType(exception.GetType().FullName);
+        AgentLog($"{category} type={type} hresult=0x{exception.HResult:X8}");
     }
 
     private static async Task<int> RunWatchdogAsync()

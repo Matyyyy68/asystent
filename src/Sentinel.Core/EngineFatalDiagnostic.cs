@@ -8,10 +8,11 @@ public static class EngineFatalDiagnostic
     public static string? ReadExceptionType(string? line)
     {
         if (line is null || !line.StartsWith(Prefix, StringComparison.Ordinal)) return null;
-        var type = line[Prefix.Length..];
-        if (type.Length is 0 or > 160 || type.Any(character =>
-                !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '+' or '`')))
-            return "System.Exception";
-        return type;
+        return SanitizeExceptionType(line[Prefix.Length..]);
     }
+
+    public static string SanitizeExceptionType(string? type) =>
+        type is null || type.Length is 0 or > 160 || type.Any(character =>
+            !(char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '+' or '`'))
+                ? "System.Exception" : type;
 }

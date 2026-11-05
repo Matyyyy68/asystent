@@ -24,5 +24,7 @@ public sealed class EngineFatalDiagnosticTests
         Assert.Equal("System.Exception", EngineFatalDiagnostic.ReadExceptionType("SENTINEL_ENGINE_FATAL type=Type with path"));
         Assert.Equal("System.Exception", EngineFatalDiagnostic.ReadExceptionType("SENTINEL_ENGINE_FATAL type=System.IO.IOException C:\\Users\\Alice\\secret.txt"));
         Assert.Equal("System.Exception", EngineFatalDiagnostic.ReadExceptionType("SENTINEL_ENGINE_FATAL type=" + new string('A', 161)));
+        Assert.Equal("System.Exception", EngineFatalDiagnostic.SanitizeExceptionType("CustomException\rpath=C:\\Users\\Alice"));
+        Assert.Equal("System.Exception", EngineFatalDiagnostic.SanitizeExceptionType(null));
     }
 }
