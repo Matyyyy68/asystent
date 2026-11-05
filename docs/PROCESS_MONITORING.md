@@ -7,7 +7,7 @@ Engine używa dwóch źródeł:
 1. Zdarzeń WMI start/stop (`Win32_ProcessStartTrace`, `Win32_ProcessStopTrace`) w kolejce do 4096 wpisów.
 2. Snapshotu PID/nazw jako fallbacku i rekonsyliacji.
 
-Alerty procesu zawierają źródło (`process-wmi` albo `process-snapshot`), PID, nazwę, czas obserwacji i kody dowodów. Relacja parent-child jest odczytywana z Windows dla nadal działających procesów. WMI start może zachować fakt uruchomienia krótkiego procesu, lecz niekoniecznie jego ścieżkę, hash czy rodzica.
+Alerty procesu zawierają źródło (`process-wmi` albo `process-snapshot`), PID, nazwę, czas obserwacji i kody dowodów. WMI dostarcza Parent PID nawet dla krótkiego procesu; jeśli jego nazwy nie da się ustalić, zapisujemy Parent PID jako ograniczone wyjaśnienie bez przypisywania nazwy. Relacja parent-child z nazwami jest odczytywana z Windows dla nadal działających procesów. WMI start może zachować fakt uruchomienia krótkiego procesu, lecz niekoniecznie jego ścieżkę ani hash.
 
 Dla dostępnego obrazu kolejka asynchroniczna oblicza SHA-256, sprawdza lokalną reputację i Authenticode. Odczyt nie zapisuje command line. Zmiana rozmiaru lub czasu pliku podczas hashowania unieważnia hash. Wynik nie podpisuje samodzielnie werdyktu malware; niezaufany hash nie powoduje automatycznej blokady.
 

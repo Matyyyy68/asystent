@@ -72,6 +72,8 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         Assert.Equal(observedAt, item.Timestamp);
         Assert.Contains("process.wmi.start-event", item.EvidenceCodes!);
         Assert.Contains("process.image.path-unavailable", item.EvidenceCodes!);
+        Assert.Contains("process.parent-pid.wmi-observed", item.EvidenceCodes!);
+        Assert.Contains("Parent PID 1", item.Explanation);
     }
 
     [Fact]

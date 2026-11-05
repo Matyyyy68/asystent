@@ -127,6 +127,7 @@ public sealed class ProcessSnapshotMonitor
         var previousSnapshotTruncated = knownSnapshotTruncated;
         var changes = GetChanges(knownProcesses, current, excludedApplications, previousSnapshotTruncated, currentTruncated);
         var wmiStarts = new HashSet<(int ProcessId, string ProcessName)>();
+        var wmiParentProcessIds = new Dictionary<(int ProcessId, string ProcessName), int>();
         if (traceEvents is { Count: > 0 } && !paused)
         {
             var excluded = new HashSet<string>((excludedApplications ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), StringComparer.OrdinalIgnoreCase)
@@ -138,7 +139,12 @@ public sealed class ProcessSnapshotMonitor
                 if (excluded.Contains(trace.ProcessName) || trace.ProcessId <= 0) continue;
                 var key = (IsStart(trace.Action), trace.ProcessId, trace.ProcessName);
                 if (observed.Add(key)) changes.Add(new(trace.Action, trace.ProcessId, trace.ProcessName, trace.ObservedAt));
-                if (trace.Action == "Proces zaobserwowany") wmiStarts.Add((trace.ProcessId, trace.ProcessName));
+                if (trace.Action == "Proces zaobserwowany")
+                {
+                    var processKey = (trace.ProcessId, trace.ProcessName);
+                    wmiStarts.Add(processKey);
+                    if (trace.ParentProcessId > 0) wmiParentProcessIds[processKey] = trace.ParentProcessId;
+                }
             }
         }
         var persistedCurrent = GetPersistableProcesses(current, excludedApplications ?? "");
@@ -215,6 +221,9 @@ public sealed class ProcessSnapshotMonitor
                 behavior = ProcessLaunchBehaviorRules.Evaluate(parent.ProcessName, change.ProcessName);
             }
             if (behavior is not null) LastSuspiciousLaunchMatches++;
+            var observedFromWmi = change.Action == "Proces zaobserwowany" && wmiStarts.Contains((change.ProcessId, change.ProcessName));
+            var wmiParentProcessId = 0;
+            var hasWmiParentId = observedFromWmi && wmiParentProcessIds.TryGetValue((change.ProcessId, change.ProcessName), out wmiParentProcessId);
             var delayed = now - change.ObservedAt > TimeSpan.FromSeconds(2);
             var explanation = change.Action == "Proces zaobserwowany"
                 ? behavior is not null && parent is not null
@@ -225,12 +234,14 @@ public sealed class ProcessSnapshotMonitor
                 : delayed
                     ? $"Windows zaobserwował zniknięcie PID {change.ProcessId} ({change.ProcessName}) wcześniej; zapis zdarzenia opóźniło oczekiwanie w kolejce."
                     : $"PID {change.ProcessId} ({change.ProcessName}) nie występuje już w migawce procesów.";
-            var observedFromWmi = change.Action == "Proces zaobserwowany" && wmiStarts.Contains((change.ProcessId, change.ProcessName));
+            if (hasWmiParentId && parent is null)
+                explanation += $" Zdarzenie WMI podaje Parent PID {wmiParentProcessId}; Sentinel nie ustalił nazwy rodzica.";
             var evidenceCodes = new List<string> { change.Action == "Proces zaobserwowany"
                 ? observedFromWmi ? "process.wmi.start-event" : "process.snapshot.new-pid"
                 : change.Action == "Proces zakończony" ? "process.wmi.stop-event" : "process.snapshot.pid-absent" };
             if (change.Action == "Proces zaobserwowany") evidenceCodes.Add(imagePath is null ? "process.image.path-unavailable" : "process.image.path-available");
             if (parent is not null) evidenceCodes.Add("process.parent-child.relationship-observed");
+            else if (hasWmiParentId) evidenceCodes.Add("process.parent-pid.wmi-observed");
             if (behavior is not null) evidenceCodes.Add(behavior.RuleCode);
             return new SecurityEvent(0, change.ObservedAt, behavior is not null ? RiskLevel.Moderate : RiskLevel.Information,
                 behavior is not null ? "Nietypowe uruchomienie procesu" : change.Action, change.ProcessName, explanation,
