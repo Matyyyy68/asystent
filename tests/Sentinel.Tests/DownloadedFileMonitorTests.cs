@@ -577,6 +577,102 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportedHashFeedRechecksFilesThatWereHashedBeforeFeedWasAvailable()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        var store = new LocalStore(data); await store.InitializeAsync();
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        using var monitor = new DownloadedFileMonitor(downloads);
+        await monitor.SetEnabledAsync(store, true);
+        const string content = "file received before the local reputation list";
+        await File.WriteAllTextAsync(Path.Combine(downloads, "prior-to-feed.bin"), content);
+
+        var deadline = DateTime.UtcNow.AddSeconds(8);
+        while ((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Count == 0 && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+            await monitor.CollectAsync(store, reputation);
+        }
+        Assert.Single((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files);
+        Assert.Empty(await store.ReadAsync());
+
+        var importedAt = DateTimeOffset.UtcNow.AddSeconds(1);
+        reputation.Import(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))), importedAt);
+        var detections = 0;
+        deadline = DateTime.UtcNow.AddSeconds(8);
+        while (detections == 0 && DateTime.UtcNow < deadline)
+        {
+            detections += await monitor.CollectAsync(store, reputation);
+            if (detections == 0) await Task.Delay(100);
+        }
+
+        Assert.Equal(1, detections);
+        var detected = Assert.Single(await store.ReadAsync());
+        Assert.Equal("downloads-local-hash", detected.Source);
+        Assert.Equal(importedAt, (await store.ReadDownloadedFileMonitorSnapshotAsync()).HashFeedImportedAtUtc);
+        Assert.Null((await store.ReadDownloadedFileMonitorSnapshotAsync()).HashFeedRecheckAtUtc);
+        Assert.Equal(0, await monitor.CollectAsync(store, reputation));
+        Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
+    public async Task InterruptedHashFeedRecheckResumesAfterMonitorRestart()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        var store = new LocalStore(data); await store.InitializeAsync();
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        const string content = "download rechecked after monitor restart";
+        var file = Path.Combine(downloads, "resume-recheck.bin");
+        using (var first = new DownloadedFileMonitor(downloads))
+        {
+            await first.SetEnabledAsync(store, true);
+            await File.WriteAllTextAsync(file, content);
+            var deadline = DateTime.UtcNow.AddSeconds(8);
+            while ((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Count == 0 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(100);
+                await first.CollectAsync(store, reputation);
+            }
+        }
+
+        var importedAt = DateTimeOffset.UtcNow;
+        reputation.Import(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))), importedAt);
+        await store.BeginDownloadedFileHashFeedRecheckAsync(importedAt);
+
+        using var resumed = new DownloadedFileMonitor(downloads);
+        await resumed.SetEnabledAsync(store, true);
+        var detections = 0;
+        var resumeDeadline = DateTime.UtcNow.AddSeconds(8);
+        while (detections == 0 && DateTime.UtcNow < resumeDeadline)
+        {
+            detections += await resumed.CollectAsync(store, reputation);
+            if (detections == 0) await Task.Delay(100);
+        }
+
+        Assert.Equal(1, detections);
+        Assert.Equal(importedAt, (await store.ReadDownloadedFileMonitorSnapshotAsync()).HashFeedImportedAtUtc);
+        Assert.Null((await store.ReadDownloadedFileMonitorSnapshotAsync()).HashFeedRecheckAtUtc);
+        Assert.Single(await store.ReadAsync());
+
+        await store.BeginDownloadedFileHashFeedRecheckAsync(importedAt);
+        using var retried = new DownloadedFileMonitor(downloads);
+        await retried.SetEnabledAsync(store, true);
+        var retriedDetections = 0;
+        var retryDeadline = DateTime.UtcNow.AddSeconds(8);
+        while (retriedDetections == 0 && DateTime.UtcNow < retryDeadline)
+        {
+            retriedDetections += await retried.CollectAsync(store, reputation);
+            if (retriedDetections == 0) await Task.Delay(100);
+        }
+        Assert.Equal(1, retriedDetections);
+        Assert.Single(await store.ReadAsync());
+    }
+
+    [Fact]
     public async Task DisablingMonitorClearsPersistedBaselineAndResumeExcludesExistingFiles()
     {
         var downloads = Path.Combine(root, "Downloads");
@@ -702,3 +798,4 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         }
     }
 }
+

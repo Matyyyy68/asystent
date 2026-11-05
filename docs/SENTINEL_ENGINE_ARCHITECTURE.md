@@ -28,6 +28,7 @@ Niezależność usługi jest częściowa: jej profil Downloads to izolowany kata
 - Kanał Agent–Engine używa odziedziczonego stdin/stdout i wersjonowanych komunikatów JSON-lines; nie nasłuchuje na porcie TCP.
 - WMI dostarcza obserwacje startu/zakończenia procesów do ograniczonej kolejki. Procesy i relacje są uzupełniane snapshotem; snapshot jest też ścieżką awaryjną.
 - Pliki z Downloads są obserwowane przez `FileSystemWatcher` i okresowe uzgadnianie. Nie jest to systemowy minifilter ani pełne monitorowanie wszystkich katalogów.
+- Zmiana wersji importowanej listy SHA-256 uruchamia ponowne hashowanie ograniczonego baseline Downloads. SQLite przechowuje checkpoint i wznowi przerwaną kolejkę po restarcie.
 - Tabele połączeń i wybrane wpisy persistence są odczytywane okresowo. Nie ma kolektora WFP ani pełnego ETW.
 - Korelacja używa identyfikatorów procesu w oknie czasu i wspólnego SHA-256 pobranego pliku/uruchomionego obrazu. Nie tworzy jeszcze uniwersalnego grafu incydentów.
 - Lokalna lista hashy jest wejściem reputacji, a nie automatyczną blokadą; źródło listy i jej aktualność muszą być pokazane.
@@ -48,3 +49,4 @@ Niezależność usługi jest częściowa: jej profil Downloads to izolowany kata
 ## Weryfikacja
 
 Test integrujący krótkotrwały proces z syntetycznym wejściem WMI jest w `ProcessSnapshotMonitorTests`. Test nie uruchamia WMI ani nie zmienia konfiguracji systemu. Testy regresji wykonuje się przez `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`.
+

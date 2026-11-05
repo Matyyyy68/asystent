@@ -66,7 +66,8 @@ public sealed record NetworkMonitorSnapshot(bool Initialized, IReadOnlySet<strin
     bool TcpTruncated = false, bool UdpTruncated = false);
 public sealed record ProcessMonitorSnapshot(bool Initialized, IReadOnlyDictionary<int, string> Processes, bool Truncated = false, long DroppedChanges = 0);
 public sealed record DownloadFileFingerprint(string Path, long Length, long LastWriteTicks);
-public sealed record DownloadMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, DownloadFileFingerprint> Files);
+public sealed record DownloadMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, DownloadFileFingerprint> Files,
+    DateTimeOffset? HashFeedImportedAtUtc = null, DateTimeOffset? HashFeedRecheckAtUtc = null, bool HashFeedStateInitialized = false);
 public sealed record WindowsPersistenceFingerprint(string Key, string Source, string Fingerprint, bool WritableLocation);
 public sealed record WindowsPersistenceMonitorSnapshot(bool Initialized, IReadOnlyDictionary<string, WindowsPersistenceFingerprint> Entries,
     bool ScheduledTasksInitialized = false, bool ServicesInitialized = false,

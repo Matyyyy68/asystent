@@ -33,6 +33,8 @@ public sealed class DownloadedFileMonitor : IDisposable
     private readonly TimeSpan reconciliationInterval;
     private readonly ConcurrentDictionary<string, DateTimeOffset> pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, byte> processedFingerprints = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, byte> forceRecheckPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> hashFeedRecheckPaths = new();
     private readonly ConcurrentDictionary<string, FileFingerprint> baseline = new(StringComparer.OrdinalIgnoreCase);
     private readonly object pendingGate = new();
     internal Action<string>? BeforeVerifiedReadStreamOpenForTest { get; set; }
@@ -115,6 +117,8 @@ public sealed class DownloadedFileMonitor : IDisposable
             watcher = null;
             pending.Clear();
             baseline.Clear();
+            forceRecheckPaths.Clear();
+            hashFeedRecheckPaths.Clear();
             Interlocked.Exchange(ref rescanCompletedVersion, Interlocked.Read(ref rescanRequestedVersion));
             await store.ResetDownloadedFileMonitorSnapshotAsync(cancellationToken);
             State = "Monitoring pobranych plików wyłączony.";
@@ -171,6 +175,8 @@ public sealed class DownloadedFileMonitor : IDisposable
                 await store.PruneDownloadedFileMonitorSnapshotAsync(currentPaths, maximumBaselineFiles, cancellationToken);
                 var currentSet = new HashSet<string>(currentPaths, StringComparer.OrdinalIgnoreCase);
                 foreach (var stalePath in baseline.Keys.Where(path => !currentSet.Contains(path)).ToArray()) baseline.TryRemove(stalePath, out _);
+                if (saved.HashFeedRecheckAtUtc is not null)
+                    QueueHashFeedRecheck(baseline.Keys);
                 Interlocked.Increment(ref rescanRequestedVersion);
             }
             State = saved.Initialized
@@ -197,6 +203,8 @@ public sealed class DownloadedFileMonitor : IDisposable
         if (DateTimeOffset.UtcNow - lastReconciledAtUtc >= reconciliationInterval) RequestRescan();
         await ReconcileIfNeededAsync(store, cancellationToken);
         var reputationStatus = reputation.Status();
+        var feedRecheckAtUtc = await PrepareHashFeedRecheckAsync(store, reputationStatus, cancellationToken);
+        QueueHashFeedRecheckBatch();
         var cutoff = DateTimeOffset.UtcNow - SettleTime;
         var ready = pending.Where(item => item.Value <= cutoff).Take(MaximumFilesPerSample).ToArray();
         var detections = 0;
@@ -205,6 +213,7 @@ public sealed class DownloadedFileMonitor : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!pending.TryRemove(item.Key, out _)) continue;
+            var isFeedRecheck = forceRecheckPaths.ContainsKey(item.Key);
             try
             {
                 var info = new FileInfo(item.Key);
@@ -212,35 +221,39 @@ public sealed class DownloadedFileMonitor : IDisposable
                 {
                     await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
                     baseline.TryRemove(info.FullName, out _);
+                    forceRecheckPaths.TryRemove(info.FullName, out _);
                     continue;
                 }
                 if (!info.Exists)
                 {
                     await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
                     baseline.TryRemove(info.FullName, out _);
+                    forceRecheckPaths.TryRemove(info.FullName, out _);
                     continue;
                 }
                 if ((info.Attributes & FileAttributes.ReparsePoint) != 0)
                 {
                     await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
                     baseline.TryRemove(info.FullName, out _);
+                    forceRecheckPaths.TryRemove(info.FullName, out _);
                     continue;
                 }
                 var fileFingerprint = Fingerprint(info);
-                if (baseline.TryGetValue(info.FullName, out var previousFingerprint) && previousFingerprint == fileFingerprint) continue;
+                if (baseline.TryGetValue(info.FullName, out var previousFingerprint) && previousFingerprint == fileFingerprint && !isFeedRecheck) continue;
                 if (!baseline.ContainsKey(info.FullName) && baseline.Count >= maximumBaselineFiles)
                 {
                     StopAtBaselineLimit();
                     break;
                 }
                 var fingerprint = ToProcessedFingerprint(info.FullName, fileFingerprint);
-                if (processedFingerprints.ContainsKey(fingerprint)) continue;
+                if (!isFeedRecheck && processedFingerprints.ContainsKey(fingerprint)) continue;
 
                 var verifiedStream = OpenVerifiedReadStream(info.FullName);
                 if (verifiedStream is null)
                 {
                     await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
                     baseline.TryRemove(info.FullName, out _);
+                    forceRecheckPaths.TryRemove(info.FullName, out _);
                     continue;
                 }
 
@@ -259,6 +272,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                         {
                             await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
                             baseline.TryRemove(info.FullName, out _);
+                            forceRecheckPaths.TryRemove(info.FullName, out _);
                             continue;
                         }
                         var oversizedAfter = new FileInfo(info.FullName);
@@ -268,6 +282,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                             continue;
                         }
                         if (!await CommitBaselineAsync(store, info.FullName, Fingerprint(oversizedAfter), cancellationToken)) break;
+                        forceRecheckPaths.TryRemove(info.FullName, out _);
                         continue;
                     }
                     if (openedLength > MaximumBytesPerSample - bytesScanned)
@@ -284,6 +299,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                     {
                         await store.RemoveDownloadedFileMonitorPathAsync(info.FullName, cancellationToken);
                         baseline.TryRemove(info.FullName, out _);
+                        forceRecheckPaths.TryRemove(info.FullName, out _);
                         continue;
                     }
                 }
@@ -302,19 +318,22 @@ public sealed class DownloadedFileMonitor : IDisposable
                 {
                     if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
                     RememberFingerprint(fingerprint);
+                    forceRecheckPaths.TryRemove(info.FullName, out _);
                     continue;
                 }
                 var itemEvent = new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
                     "Pobrany plik pasuje do lokalnej listy hashy", "Monitoring Downloads",
                     "Nowy plik z Downloads pasuje do lokalnej listy SHA-256. Źródło listy nie jest niezależnie zweryfikowane.",
                     "Sprawdź pochodzenie pliku i źródło listy. Dopasowanie nie jest automatycznym werdyktem zagrożenia.",
-                    EventStatus.New, EventId: Guid.NewGuid(), Source: "downloads-local-hash",
+                    EventStatus.New, EventId: isFeedRecheck && reputationStatus.ImportedAt is { } importedAt
+                        ? CreateHashFeedRecheckEventId(importedAt, hash) : Guid.NewGuid(), Source: "downloads-local-hash",
                     RuleVersion: ThreatAnalysisEngine.RulesVersion,
                     EvidenceCodes: ["file.sha256.matches-local-list", "file.local-list-source-unverified"],
                     SignalHash: hash);
                 await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), itemEvent, cancellationToken);
                 baseline[info.FullName] = fileFingerprint;
                 RememberFingerprint(fingerprint);
+                forceRecheckPaths.TryRemove(info.FullName, out _);
                 detections++;
             }
             catch (SqliteException exception) when (exception.SqliteErrorCode == 13)
@@ -331,19 +350,87 @@ public sealed class DownloadedFileMonitor : IDisposable
             catch (IOException)
             {
                 if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
+                else forceRecheckPaths.TryRemove(item.Key, out _);
             }
             catch (Win32Exception)
             {
                 if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
+                else forceRecheckPaths.TryRemove(item.Key, out _);
             }
-            catch (UnauthorizedAccessException) { }
+            catch (UnauthorizedAccessException)
+            {
+                if (File.Exists(item.Key)) pending[item.Key] = DateTimeOffset.UtcNow;
+                else forceRecheckPaths.TryRemove(item.Key, out _);
+            }
         }
+        if (feedRecheckAtUtc is { } completedFeed && hashFeedRecheckPaths.Count == 0 && forceRecheckPaths.IsEmpty)
+            await store.CompleteDownloadedFileHashFeedRecheckAsync(completedFeed, cancellationToken);
         if (watcher is not null && State == stateBeforeCollection &&
             !State.Contains("odtworzył", StringComparison.OrdinalIgnoreCase))
             State = reputationStatus.HashCount == 0
                 ? $"Monitoring Downloads działa; nowe pliki są hashowane lokalnie, ale brak lokalnej listy reputacji. Brak dopasowania nie potwierdza bezpieczeństwa. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}."
                 : $"Monitoring Downloads działa; nowe pliki są hashowane i porównywane z lokalną listą reputacji ({reputationStatus.HashCount} hashy). Źródło listy nie jest niezależnie weryfikowane. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
         return detections;
+    }
+
+    private async Task<DateTimeOffset?> PrepareHashFeedRecheckAsync(LocalStore store, FileHashReputationStatus reputationStatus,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await store.ReadDownloadedFileMonitorSnapshotAsync(cancellationToken);
+        if (!snapshot.HashFeedStateInitialized)
+        {
+            await store.InitializeDownloadedFileHashFeedStateAsync(reputationStatus.ImportedAt, cancellationToken);
+            return null;
+        }
+
+        if (snapshot.HashFeedRecheckAtUtc is { } inProgress)
+        {
+            if (reputationStatus.HashCount > 0 && reputationStatus.ImportedAt is { } latest && latest != inProgress)
+            {
+                hashFeedRecheckPaths.Clear();
+                forceRecheckPaths.Clear();
+                await store.BeginDownloadedFileHashFeedRecheckAsync(latest, cancellationToken);
+                QueueHashFeedRecheck(baseline.Keys);
+                return latest;
+            }
+
+            if (hashFeedRecheckPaths.Count == 0 && forceRecheckPaths.IsEmpty)
+                QueueHashFeedRecheck(baseline.Keys);
+            return inProgress;
+        }
+
+        if (reputationStatus.HashCount == 0 || reputationStatus.ImportedAt is not { } importedAt ||
+            snapshot.HashFeedImportedAtUtc == importedAt)
+            return null;
+
+        await store.BeginDownloadedFileHashFeedRecheckAsync(importedAt, cancellationToken);
+        QueueHashFeedRecheck(baseline.Keys);
+        return importedAt;
+    }
+
+    private void QueueHashFeedRecheck(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+            if (forceRecheckPaths.TryAdd(path, 0)) hashFeedRecheckPaths.Enqueue(path);
+    }
+
+    private void QueueHashFeedRecheckBatch()
+    {
+        lock (pendingGate)
+        {
+            while (hashFeedRecheckPaths.Count > 0 && pending.Count < maximumPendingFiles)
+            {
+                var path = hashFeedRecheckPaths.Dequeue();
+                if (forceRecheckPaths.ContainsKey(path)) pending[path] = DateTimeOffset.UtcNow - SettleTime;
+            }
+        }
+    }
+
+    private static Guid CreateHashFeedRecheckEventId(DateTimeOffset importedAtUtc, string sha256)
+    {
+        var material = $"downloads-hash-feed-match-v1\n{importedAtUtc.ToUniversalTime():O}\n{sha256}";
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(material));
+        return new Guid(bytes.AsSpan(0, 16));
     }
 
     private bool IsInsideDownloadsTreeWithoutReparsePoints(string path)
@@ -683,3 +770,4 @@ public sealed class DownloadedFileMonitor : IDisposable
         pending.Clear();
     }
 }
+
