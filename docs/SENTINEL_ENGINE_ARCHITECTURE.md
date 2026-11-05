@@ -5,18 +5,23 @@ Stan na 2026-11-05. Ten dokument opisuje kod w repozytorium, a nie docelowy diag
 ## Przepływ
 
 ```text
-Windows SCM service (health + service events)
-        │ secured local named pipe
+Windows SCM (LocalService)
+        │ starts/restarts independent Engine; protected ProgramData store
+        ├─ Sentinel.Engine: system-context collection and service event history
+        │
 Per-user Agent ── inherited stdio JSON-lines IPC ── Sentinel.Engine
-                                                   ├─ WMI process lifecycle queue
-                                                   ├─ process/TCP/persistence snapshots
-                                                   ├─ Downloads FileSystemWatcher + reconciliation
-                                                   ├─ DNS Client Operational event log (when enabled)
-                                                   ├─ local SQLite event store
-                                                   └─ rule-based analysis, reputation, notifications
+        │                                          ├─ user-context collectors, including real Downloads
+        │                                          ├─ local SQLite event store
+        │                                          └─ rules, reputation, analysis
+        │
+        ├─ SID-restricted named pipe: status, service history, acknowledgements
+        └─ bounded event batches + durable cursor ──> Service Engine/store
+                 UI reads protection status/history; Agent delivers tray notifications
 ```
 
-Engine i Agent działają w sesji użytkownika; usługa SCM jest osobnym procesem o odrębnych uprawnieniach. UI nie jest wymagane do działania usługi, ale część kolektorów i analizy użytkownika działa w procesie Engine uruchamianym przez Agenta. Sam fakt działania usługi SCM nie oznacza, że każdy kolektor działa jako usługa.
+Instalator rejestruje host SCM z zweryfikowanego payloadu. Usługa działa jako `LocalService`, chroni własny katalog ProgramData ACL-em i uruchamia własny Engine, który wykonuje kolekcję bez otwartego UI; po błędzie stosuje ograniczony backoff. Agent i usługa mają oddzielne Engine'y oraz bazy. Agent przesyła ograniczone porcje zdarzeń named pipe z ACL dla SID instalującego użytkownika; kursor przesuwa się dopiero po pełnym potwierdzeniu, a identyfikator zdarzenia zabezpiecza powtórzenia. Usługa udostępnia status i historię przez uwierzytelniony pipe, a Agent odczytuje nowe zdarzenia do lokalnych powiadomień.
+
+Niezależność usługi jest częściowa: jej profil Downloads to izolowany katalog usługi, nie profil użytkownika. Rzeczywisty Downloads użytkownika jest monitorowany przez per-user Engine, więc ochrona tego obszaru wymaga aktywnej sesji Agenta. Windows CI potwierdza instalację/rollback/deinstalację oraz SCM na izolowanym Windows Server runnerze; fizyczna instalacja i restart Windows użytkownika nie zostały zweryfikowane.
 
 ## Granice ochrony
 
@@ -30,11 +35,11 @@ Engine i Agent działają w sesji użytkownika; usługa SCM jest osobnym procese
 
 ## Stan modułów
 
-**Działa:** lokalny magazyn i retencja, IPC procesu Engine, obserwacja procesów WMI z kolejką ograniczoną i snapshotowym fallbackiem, monitor Downloads, snapshoty TCP/DNS/persistence, reguły detekcji, inspekcja SHA-256/Authenticode asynchronicznie, lokalna kwarantanna i powiadomienia tray.
+**Działa i przetestowano:** SCM host LocalService, restart/backoff Engine, chroniony ProgramData, uwierzytelniony pipe statusu/historii, przekazywanie zdarzeń Agent→Service z ACK i trwałym kursorem, testy install/repair/update/rollback/uninstall na runnerze Windows; WMI lifecycle z kolejką ograniczoną i snapshot fallbackiem; monitor Downloads z uzgadnianiem; snapshoty TCP/DNS/persistence; reguły detekcji; inspekcja SHA-256/Authenticode; ręczna kwarantanna; powiadomienia tray. Pełny Windows CI dla `cd1aad0` [42062610505](https://github.com/Matyyyy68/asystent/actions/runs/42062610505) przeszedł build/testy (.NET 485/485, desktop 112/112), SCM/pipe, Electron, Downloads/junction soak, autostart, Chrome/Edge, headless i widoczny instalator oraz Enterprise API (23/23).
 
-**Częściowo działa:** ciągła ochrona wymaga uruchomionego Agenta, bo to Agent utrzymuje Engine użytkownika i wywołuje cykl `collect`; WMI nie gwarantuje odbioru zdarzeń podczas awarii/restartu. Engine publikuje jednolity, obliczany w Core stan zdrowia źródeł, świeżości kolekcji i Windows Security Center; UI zachowuje nadrzędny sygnał dostępności uprzywilejowanej usługi. Korelacja jest ograniczona do dostępnych kluczy i okien czasu.
+**Częściowo działa:** usługa jest niezależna od UI, ale nie zastępuje per-user Engine dla Downloads i ustawień właściwych dla użytkownika; część historii i kolektorów działa w obu instancjach. WMI nie gwarantuje odbioru zdarzeń podczas awarii/restartu. Core liczy fail-closed status świeżości i źródeł oraz uwzględnia Windows Security Center. Korelacja jest ograniczona do dostępnych kluczy i okien czasu.
 
-**Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalny risk engine 0–100, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna niezależna od sesji użytkownika usługa kolektorów i czysty test Windows po instalacji.
+**Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalny risk engine 0–100, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna konsolidacja stanu i korelacji pomiędzy dwiema bazami oraz fizyczny test instalacji i restartu na czystym Windows użytkownika.
 
 ## Modułowe notatki
 
