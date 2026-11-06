@@ -161,6 +161,26 @@ public sealed class StoreTests : IDisposable
             new("existing-run", "registry.user.run", existingFingerprint, false)
         ]);
 
+        await using (var downgrade = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await downgrade.OpenAsync();
+            string schema;
+            using (var inspect = downgrade.CreateCommand())
+            {
+                inspect.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
+                schema = (string)(await inspect.ExecuteScalarAsync())!;
+            }
+            const string tablePrefix = "CREATE TABLE windows_persistence_snapshot";
+            var version41Schema = schema
+                .Replace(tablePrefix, "CREATE TABLE windows_persistence_snapshot_v41", StringComparison.Ordinal)
+                .Replace(",'security.file.hosts'", "", StringComparison.Ordinal);
+            using var create = downgrade.CreateCommand(); create.CommandText = version41Schema;
+            await create.ExecuteNonQueryAsync();
+            using var copy = downgrade.CreateCommand();
+            copy.CommandText = "INSERT INTO windows_persistence_snapshot_v41 SELECT * FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v41 RENAME TO windows_persistence_snapshot; PRAGMA user_version=41;";
+            await copy.ExecuteNonQueryAsync();
+        }
+
         await store.InitializeAsync();
 
         var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
