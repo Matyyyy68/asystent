@@ -7,6 +7,7 @@ using Microsoft.Win32.SafeHandles;
 using Microsoft.Data.Sqlite;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
+using Sentinel.Engine;
 
 /// <summary>Opt-in, local-only watcher for new files in the user's Downloads tree.</summary>
 public sealed class DownloadedFileMonitor : IDisposable
