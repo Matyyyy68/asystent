@@ -13,6 +13,42 @@ public sealed class DownloadedFileMonitorTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "sentinel-download-monitor-" + Guid.NewGuid());
 
     [Fact]
+    public async Task DownloadedFileTypeMismatchIsReportedWithoutMalwareVerdict()
+    {
+        var downloads = Path.Combine(root, "Downloads");
+        var data = Path.Combine(root, "data");
+        Directory.CreateDirectory(downloads);
+        var store = new LocalStore(data);
+        await store.InitializeAsync();
+        var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
+        using var monitor = new DownloadedFileMonitor(downloads);
+        await monitor.SetEnabledAsync(store, true);
+
+        // Minimal PE signature, stored under a misleading document extension.
+        var pe = new byte[128];
+        pe[0] = (byte)'M'; pe[1] = (byte)'Z';
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(pe.AsSpan(0x3c, 4), 64);
+        "PE\0\0"u8.CopyTo(pe.AsSpan(64));
+        await File.WriteAllBytesAsync(Path.Combine(downloads, "invoice.pdf"), pe);
+        await Task.Delay(TimeSpan.FromMilliseconds(900));
+
+        var detected = 0;
+        for (var attempt = 0; attempt < 30 && detected == 0; attempt++)
+        {
+            detected += await monitor.CollectAsync(store, reputation);
+            if (detected == 0) await Task.Delay(100);
+        }
+
+        Assert.Equal(1, detected);
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("downloads-file-type", item.Source);
+        Assert.Equal(RiskLevel.Information, item.Risk);
+        Assert.Equal(0, item.RiskScore);
+        Assert.Contains("file.extension.signature-mismatch", item.EvidenceCodes!);
+        Assert.Contains("typ pe", item.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ResolvedPathContainmentRejectsSiblingPrefixesAndParentTraversal()
     {
         var downloads = Path.Combine(root, "Downloads");
@@ -798,3 +834,4 @@ public sealed class DownloadedFileMonitorTests : IDisposable
         }
     }
 }
+
