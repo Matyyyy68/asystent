@@ -10,7 +10,6 @@ namespace Sentinel.Agent;
 internal static class SystemServiceEventsClient
 {
     private const string PipeName = "SentinelAI.Service.Status.v1";
-    private const int MaximumResponseChars = 32_768;
     private const int MaximumRequestChars = 24_000;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
 
@@ -64,35 +63,7 @@ internal static class SystemServiceEventsClient
         var request = JsonSerializer.Serialize(requestPayload);
         await writer.WriteLineAsync(request.AsMemory(), timeout.Token);
         var line = await reader.ReadLineAsync(timeout.Token) ?? throw new EndOfStreamException("System service returned no event response.");
-        if (line.Length > MaximumResponseChars) throw new InvalidDataException("System service event response exceeded its size limit.");
-
-        using var document = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 8 });
-        var root = document.RootElement;
-        if (!root.TryGetProperty("id", out var id) || id.GetString() != "agent-events" ||
-            !root.TryGetProperty("version", out var version) || version.GetInt32() != 1 ||
-            !root.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
-            !root.TryGetProperty("result", out var result) ||
-            !result.TryGetProperty("latestEventId", out var latestEventId) || !latestEventId.TryGetInt64(out var latestId) || latestId < 0 ||
-            !result.TryGetProperty("events", out var events) ||
-            events.ValueKind != JsonValueKind.Array || events.GetArrayLength() > 12)
-            throw new InvalidDataException("System service returned an invalid event response.");
-
-        var parsed = new List<SystemServiceEvent>(events.GetArrayLength());
-        foreach (var item in events.EnumerateArray())
-        {
-            if (!item.TryGetProperty("id", out var eventId) || !eventId.TryGetInt64(out var value) || value <= 0 ||
-                !item.TryGetProperty("risk", out var risk) || risk.ValueKind != JsonValueKind.String ||
-                !item.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String)
-                throw new InvalidDataException("System service returned a malformed event.");
-            var riskValue = risk.GetString();
-            if (riskValue is not ("Information" or "Low" or "Moderate" or "High" or "Critical"))
-                throw new InvalidDataException("System service returned an unknown risk level.");
-            var statusValue = status.GetString();
-            if (statusValue is not ("New" or "Reviewed" or "FalsePositive"))
-                throw new InvalidDataException("System service returned an unknown event status.");
-            parsed.Add(new SystemServiceEvent(value, riskValue, statusValue));
-        }
-        return new SystemServiceEventBatch(latestId, parsed);
+        return ServiceEventPipeProtocol.ParseResponse(line);
     }
 }
 
