@@ -52,6 +52,8 @@ jobs:
         run: ./scripts/audit-nuget.ps1
       - name: Build and test application
         shell: pwsh
+        env:
+          SENTINEL_TEST_REQUIRE_WMI: '1'
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
       - name: Verify SCM service startup, identity, data ACL, and first collection
         shell: pwsh

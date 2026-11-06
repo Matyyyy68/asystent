@@ -181,6 +181,8 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         if (!source.State.StartsWith("Odbieranie zdarzeń", StringComparison.Ordinal))
         {
             Assert.Contains("awaryjny snapshot PID", source.State);
+            var requireWmi = string.Equals(Environment.GetEnvironmentVariable("SENTINEL_TEST_REQUIRE_WMI"), "1", StringComparison.Ordinal);
+            Assert.False(requireWmi, $"Windows CI requires a live WMI process-event subscription, but got: {source.State}");
             return;
         }
 
