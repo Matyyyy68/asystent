@@ -473,14 +473,19 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                     snapshotSchema = await schema.ExecuteScalarAsync(ct) as string;
                 }
                 const string tableName = "windows_persistence_snapshot";
-                const string oldSourceTail = "'registry.driver'))";
                 var tableNameIndex = snapshotSchema?.IndexOf(tableName, StringComparison.Ordinal) ?? -1;
-                if (snapshotSchema is null || tableNameIndex < 0 || !snapshotSchema.Contains(oldSourceTail, StringComparison.Ordinal))
+                if (snapshotSchema is null || tableNameIndex < 0)
                     throw new InvalidDataException("Nie można bezpiecznie zaktualizować ograniczenia źródeł monitorowania autostartu.");
                 var updatedSchema = snapshotSchema[..tableNameIndex] +
                     "windows_persistence_snapshot_v42" +
                     snapshotSchema[(tableNameIndex + tableName.Length)..];
-                updatedSchema = updatedSchema.Replace(oldSourceTail, "'registry.driver','security.file.hosts'))", StringComparison.Ordinal);
+                if (!updatedSchema.Contains("'security.file.hosts'", StringComparison.Ordinal))
+                {
+                    const string existingSource = "'registry.driver'";
+                    if (!updatedSchema.Contains(existingSource, StringComparison.Ordinal))
+                        throw new InvalidDataException("Nie można bezpiecznie zaktualizować ograniczenia źródeł monitorowania autostartu.");
+                    updatedSchema = updatedSchema.Replace(existingSource, "'registry.driver','security.file.hosts'", StringComparison.Ordinal);
+                }
                 await Execute(c, updatedSchema, ct);
                 await Execute(c, "INSERT INTO windows_persistence_snapshot_v42(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v42 RENAME TO windows_persistence_snapshot; PRAGMA user_version=42; COMMIT;", ct);
             }
