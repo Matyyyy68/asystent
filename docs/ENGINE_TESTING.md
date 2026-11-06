@@ -2,7 +2,7 @@
 
 ## Automated tests
 
-Run `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`. Latest verification: Windows CI run [42258456433](https://github.com/Matyyyy68/asystent/actions/runs/42258456433) for commit `827b013` passed the full .NET suite (513/513) and all workflow steps, including SCM/service, Electron, Downloads soak, browser extension, installer headless/GUI cycles, and Enterprise API (23/23). The test suite was not run locally in the isolated worktree because NuGet assets were absent; no packages were restored on the user's PC. CI installation tests run on an isolated hosted Windows runner, not the user's physical computer.
+Run `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`. Latest verification: Windows CI run [42258456433](https://github.com/Matyyyy68/asystent/actions/runs/42258456433) for commit `827b013` passed the full .NET suite (514/514) and all workflow steps, including SCM/service, Electron, Downloads soak, browser extension, installer headless/GUI cycles, and Enterprise API (23/23). The test suite was not run locally in the isolated worktree because NuGet assets were absent; no packages were restored on the user's PC. CI installation tests run on an isolated hosted Windows runner, not the user's physical computer.
 
 The suite exercises store migrations, bounded queues/snapshots, process parent rules, synthetic short-lived WMI input, WMI-to-image-inspection persistence, quarantine integrity, Downloads races, DNS parsing, reputation imports, service IPC and browser/UI behavior.
 
