@@ -101,7 +101,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 42) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 43) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -488,6 +488,37 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 }
                 await Execute(c, updatedSchema, ct);
                 await Execute(c, "INSERT INTO windows_persistence_snapshot_v42(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v42 RENAME TO windows_persistence_snapshot; PRAGMA user_version=42; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 43)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                string? snapshotSchema;
+                using (var schema = c.CreateCommand())
+                {
+                    schema.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
+                    snapshotSchema = await schema.ExecuteScalarAsync(ct) as string;
+                }
+                const string tableName = "windows_persistence_snapshot";
+                var tableNameIndex = snapshotSchema?.IndexOf(tableName, StringComparison.Ordinal) ?? -1;
+                if (snapshotSchema is null || tableNameIndex < 0)
+                    throw new InvalidDataException("Nie można bezpiecznie zaktualizować źródeł snapshotu zabezpieczeń Windows.");
+                var updatedSchema = snapshotSchema[..tableNameIndex] +
+                    "windows_persistence_snapshot_v43" +
+                    snapshotSchema[(tableNameIndex + tableName.Length)..];
+                if (!updatedSchema.Contains("'security.registry.defender.exclusion'", StringComparison.Ordinal))
+                {
+                    const string existingSource = "'security.file.hosts'";
+                    if (!updatedSchema.Contains(existingSource, StringComparison.Ordinal))
+                        throw new InvalidDataException("Nie można bezpiecznie zaktualizować źródeł snapshotu zabezpieczeń Windows.");
+                    updatedSchema = updatedSchema.Replace(existingSource,
+                        "'security.file.hosts','security.registry.defender.exclusion'", StringComparison.Ordinal);
+                }
+                await Execute(c, updatedSchema, ct);
+                await Execute(c, "INSERT INTO windows_persistence_snapshot_v43(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v43 RENAME TO windows_persistence_snapshot; PRAGMA user_version=43; COMMIT;", ct);
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
@@ -1152,7 +1183,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 "startup.user" or "startup.common" or "scheduled.task" or "registry.service" or "registry.driver" or
                 "registry.user.startup.approved.run" or "registry.user.startup.approved.run32" or "registry.user.startup.approved.startupfolder" or
                 "registry.machine64.startup.approved.run" or "registry.machine64.startup.approved.run32" or "registry.machine64.startup.approved.startupfolder" or
-                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder" or "security.file.hosts") ||
+                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder" or "security.file.hosts" or "security.registry.defender.exclusion") ||
             entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
             throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
     }
@@ -1885,7 +1916,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is < 6 or > 42)
+            if (backupVersion is < 6 or > 43)
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
