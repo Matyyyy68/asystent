@@ -18,6 +18,6 @@ The same persistence snapshot hashes the Windows `hosts` file (up to 4 MiB) duri
 - No verified signed, incremental malware database with provenance and expiry.
 - No automatic quarantine based only on a weak heuristic.
 
-The Windows persistence snapshot also fingerprints Defender exclusions for paths, processes and extensions. It stores opaque entry keys and SHA-256 fingerprints only; an event reports that an exclusion changed without retaining or displaying its path/value. The watcher is read-only, bounded to 10,000 entries and 16 KiB per registry value, and uses periodic snapshots rather than registry event subscriptions.
+The Windows persistence snapshot also fingerprints Defender exclusions for paths, processes and extensions. It stores opaque entry keys and SHA-256 fingerprints only; an event reports that an exclusion changed without retaining or displaying its path/value. These stable hashes are local identifying metadata, not a guarantee of anonymity. The watcher is read-only, bounded to 10,000 entries and 16 KiB per registry value, and uses periodic snapshots rather than registry event subscriptions.
 
 The Downloads watcher and reconciliation path have tests for bounded work, symlink/junction races, persistence, and safe file handling. See [Windows monitoring](WINDOWS_MONITORING.md) and [privacy](PRIVACY.md).
