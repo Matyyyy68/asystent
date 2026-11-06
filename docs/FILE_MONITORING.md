@@ -6,6 +6,8 @@
 
 The persistence monitor also watches the user and common Startup folders with non-recursive, bounded-buffer `FileSystemWatcher` instances. Notifications only request an early snapshot; the existing snapshot diff remains the source of stored events and alerts. If watcher creation or delivery fails, the monitor exposes a degraded diagnostic and retains its periodic snapshot fallback. Watchers are disposed when monitoring is paused or the monitor stops. This covers the selected Startup folders; it is not system-wide file monitoring.
 
+The same persistence snapshot hashes the Windows `hosts` file (up to 4 MiB) during its regular collection cycle. A change is reported as informational; the initial snapshot is silent. The file contents, individual host mappings, and file path are not stored in the event. An unavailable, oversized, reparse-point, or concurrently changing file is excluded from that sample rather than treated as a deletion. This remains a targeted check, not full system-file monitoring.
+
 `DownloadedFileQuarantine` supports an explicit local quarantine/restore flow with hash verification and metadata. A local hash-list match is recorded as a signal; it is not an automatic malware verdict or automatic deletion.
 
 ## Does not run
