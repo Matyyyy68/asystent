@@ -36,7 +36,7 @@ public sealed class DownloadProcessCorrelationTests : IDisposable
             await Task.Delay(100);
         }
 
-        var download = Assert.Single((await store.ReadAsync()).Where(item => item.Source == "downloads-executable-observed"));
+        var download = Assert.Single(await store.ReadAsync(), item => item.Source == "downloads-executable-observed");
         Assert.Equal(RiskLevel.Information, download.Risk);
         Assert.Equal(0, download.RiskScore);
         Assert.Equal(hash, download.SignalHash);
