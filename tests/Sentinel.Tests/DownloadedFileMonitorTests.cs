@@ -4,6 +4,7 @@ using System.Diagnostics;
 using Microsoft.Win32;
 using Sentinel.Core;
 using Sentinel.Core.Analysis;
+using Sentinel.Engine;
 using Xunit;
 
 namespace Sentinel.Tests;
