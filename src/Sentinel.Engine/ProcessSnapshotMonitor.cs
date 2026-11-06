@@ -196,7 +196,7 @@ public sealed class ProcessSnapshotMonitor
             }
             else if ((change.Action is "Proces zakończony" or "Proces zniknął z migawki") &&
                 recentlyObservedStarts.TryGetValue(change.ProcessId, out var stoppedProcess) &&
-                stoppedProcess.Timestamp <= change.ObservedAt && string.Equals(stoppedProcess.ProcessName, change.ProcessName, StringComparison.OrdinalIgnoreCase))
+                stoppedProcess.Timestamp <= change.ObservedAt)
             {
                 recentlyObservedStarts.Remove(change.ProcessId);
             }

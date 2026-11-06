@@ -93,6 +93,23 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         Assert.Null(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
     }
 
+
+    [Fact]
+    public async Task NewerStopForReusedPidExpiresOldImageAssociation()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string>());
+        var startedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(startedAt, "Proces zaobserwowany", 808, "old-worker", 1)]);
+        Assert.NotNull(monitor.WasRecentlyObservedStart(808, "old-worker", DateTimeOffset.UtcNow));
+
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zakończony", 808, "new-worker", 1)]);
+
+        Assert.Null(monitor.WasRecentlyObservedStart(808, "old-worker", DateTimeOffset.UtcNow));
+    }
+
     [Fact]
     public async Task SnapshotRemovalExpiresProcessCorrelation()
     {
