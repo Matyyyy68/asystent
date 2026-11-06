@@ -317,13 +317,14 @@ public sealed class DownloadedFileMonitor : IDisposable
                 // collection and content inspection independent of optional intelligence.
                 // A missing list is not a clean verdict; it simply cannot match anything.
                 var check = reputation.Check(hash);
-                var mismatchEvent = fileType is null ? null : CreateFileTypeMismatchEvent(fileType, info.Name);
+                var mismatchEvent = fileType is null ? null : CreateFileTypeMismatchEvent(fileType, info.Name, hash);
+                var fileEvent = mismatchEvent ?? CreateExecutableObservationEvent(fileType, info.Name, hash);
                 if (!check.FeedImported || !check.Match)
                 {
-                    if (mismatchEvent is not null)
+                    if (fileEvent is not null)
                     {
-                        await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), mismatchEvent, cancellationToken);
-                        detections++;
+                        await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), fileEvent, cancellationToken);
+                        if (mismatchEvent is not null) detections++;
                     }
                     else if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
                     RememberFingerprint(fingerprint);
@@ -386,16 +387,32 @@ public sealed class DownloadedFileMonitor : IDisposable
         return detections;
     }
 
-    private static SecurityEvent? CreateFileTypeMismatchEvent(DownloadedFileTypeResult? result, string fileName)
+    private static SecurityEvent? CreateFileTypeMismatchEvent(DownloadedFileTypeResult? result, string fileName, string sha256)
     {
         if (result is null || !result.ExtensionMismatch || result.DetectedType is null) return null;
         var extension = Path.GetExtension(fileName);
+        var evidence = result.DetectedType == "pe"
+            ? new[] { "file.extension.signature-mismatch", "file.downloads.pe-observed" }
+            : new[] { "file.extension.signature-mismatch" };
         return new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
             "Rozszerzenie pobranego pliku nie zgadza się z jego sygnaturą", "Monitoring Downloads",
             $"Sygnatura pliku wskazuje typ {result.DetectedType}, ale rozszerzenie to {extension}. Sprawdzenie sygnatury jest ograniczone i samo nie potwierdza zagrożenia.",
             "Sprawdź źródło oraz otwieraj plik tylko w zaufanej aplikacji.", EventStatus.New,
             EventId: Guid.NewGuid(), Source: "downloads-file-type", RuleVersion: ThreatAnalysisEngine.RulesVersion,
-            EvidenceCodes: ["file.extension.signature-mismatch"],
+            EvidenceCodes: evidence, SignalHash: sha256,
+            AnalysisLimitations: ["file.type.recognition-limited"],
+            RiskScore: 0);
+    }
+
+    private static SecurityEvent? CreateExecutableObservationEvent(DownloadedFileTypeResult? result, string fileName, string sha256)
+    {
+        if (result?.DetectedType != "pe") return null;
+        return new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
+            "Zaobserwowano plik wykonywalny w Downloads", "Monitoring Downloads",
+            "W folderze Downloads zaobserwowano plik o sygnaturze PE. Samo pobranie ani uruchomienie pliku nie jest werdyktem zagrożenia; Sentinel nie uruchomił ani nie zablokował pliku.",
+            "Sprawdź pochodzenie pliku, wydawcę i powiązane zdarzenia, jeśli pojawią się dodatkowe sygnały.", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "downloads-executable-observed", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+            EvidenceCodes: ["file.downloads.pe-observed"], SignalHash: sha256,
             AnalysisLimitations: ["file.type.recognition-limited"],
             RiskScore: 0);
     }

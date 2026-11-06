@@ -1741,7 +1741,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var from = processTimestamp.ToUniversalTime().AddMinutes(-10).ToString("O", CultureInfo.InvariantCulture);
         var to = processTimestamp.ToUniversalTime().AddMinutes(10).ToString("O", CultureInfo.InvariantCulture);
         using var find = connection.CreateCommand(); find.Transaction = transaction;
-        find.CommandText = "SELECT id,event_id,evidence_codes,correlation_id FROM events WHERE source='downloads-local-hash' AND signal_hash=$hash AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
+        find.CommandText = "SELECT id,event_id,evidence_codes,correlation_id FROM events WHERE signal_hash=$hash AND (source='downloads-local-hash' OR source='downloads-executable-observed' OR (source='downloads-file-type' AND evidence_codes LIKE '%file.downloads.pe-observed%')) AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
         find.Parameters.AddWithValue("$hash", sha256); find.Parameters.AddWithValue("$from", from); find.Parameters.AddWithValue("$to", to);
         find.Parameters.AddWithValue("$timestamp", processTimestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
         var candidates = new List<(long RowId, Guid EventId, IReadOnlyList<string> Evidence, Guid? CorrelationId)>();
