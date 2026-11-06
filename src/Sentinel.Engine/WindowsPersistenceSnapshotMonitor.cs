@@ -345,6 +345,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var sourceName = source switch
             {
                 "security.file.hosts" => "plik hosts Windows",
+                "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
+                "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
                 "registry.user.run" => "HKCU Run",
                 "registry.user.runonce" => "HKCU RunOnce",
                 "registry.machine64.run" => "HKLM Run (64-bit)",
@@ -389,7 +391,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 _ => "wpis autostartu"
             };
             var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source == "security.file.hosts"
-                ? "Konfiguracja sieci Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
+                ? "Konfiguracja sieci Windows · " + sourceName : source == "security.registry.defender.exclusion"
+                ? "Konfiguracja Microsoft Defender · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
                 or "registry.machine64.ifeo" or "registry.machine32.ifeo"
                 or "registry.machine64.silent.exit" or "registry.machine32.silent.exit"
                 or "registry.machine64.shell.delay" or "registry.machine32.shell.delay"
@@ -397,7 +400,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             if (isStartupApproved) eventApplication = "Autostart Windows · StartupApproved";
             var recommendation = source switch
             {
-                "security.file.hosts" => "Sprawdź lokalną zmianę mapowania nazw hostów. Sentinel zapisuje tylko skrót pliku, nie jego treść ani wpisy.",
+                "security.file.hosts" => "Sprawdź zmianę lokalnego mapowania nazw hostów. Sentinel zapisuje wyłącznie skrót pliku.",
+                "security.registry.defender.exclusion" => "Sprawdź wykluczenia Microsoft Defender w Zabezpieczeniach Windows. Sentinel nie zapisuje nazw ani ścieżek wykluczeń i nie zmienia ustawień ochrony.",
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Sprawdź konfigurację IFEO Debugger dla aplikacji w rejestrze Windows. Sentinel nie zmienia wpisu ani nie uruchamia debuggera.",
@@ -441,6 +445,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "registry.service" => "service",
                 "registry.driver" => "driver",
                 "security.file.hosts" => "hosts",
+                "security.registry.defender.exclusion" => "defender-exclusion",
                 _ => "unknown"
             };
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
@@ -450,6 +455,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 isWinlogon ? "Zmiana konfiguracji logowania Windows" : source switch
                 {
                     "security.file.hosts" => "Zmiana pliku hosts Windows",
+                    "security.registry.defender.exclusion" => "Zmiana wykluczeń Microsoft Defender",
                     "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
@@ -461,6 +467,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 }, eventApplication,
                 source == "security.file.hosts"
                     ? $"Wykryto, że {verb} plik hosts Windows. Treść pliku nie jest zapisywana."
+                    : source == "security.registry.defender.exclusion"
+                    ? $"Wykryto, że {verb} wykluczenie Microsoft Defender. Nazwa i wartość wykluczenia nie są zapisywane."
                     : isWinlogon
                     ? $"Wykryto zmianę konfiguracji logowania Windows ({verb}). Surowa nazwa wartości i polecenie nie są zapisywane."
                     : $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
@@ -597,7 +605,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private static bool IsSupportedBaseSource(string source) => source is
         "registry.user.run" or "registry.user.runonce" or "registry.user.runonceex" or "registry.user.policy.run" or
         "registry.user.winlogon" or "registry.user.startup.approved" or "startup.user" or "startup.common" or
-        "security.file.hosts" or
+        "security.file.hosts" or "security.registry.defender.exclusion" or
         "registry.machine64.run" or "registry.machine64.runonce" or "registry.machine64.runonceex" or
         "registry.machine64.policy.run" or "registry.machine64.winlogon" or "registry.machine64.appinit" or
         "registry.machine64.startup.approved" or "registry.machine64.silent.exit" or "registry.machine64.shell.delay" or
@@ -662,7 +670,59 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         CaptureSource("startup.common", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries), entries, unavailableSources);
         CaptureSource("security.file.hosts", () => CaptureSecurityConfigurationFile(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "etc", "hosts"), entries), entries, unavailableSources);
+        var defenderView = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default;
+        CaptureSource("security.registry.defender.exclusion", () => CaptureDefenderExclusions(defenderView, entries), entries, unavailableSources);
         return new(true, entries, ifeoMachine64Available, ifeoMachine32Available, string.Join(", ", unavailable), unavailableSources);
+    }
+
+    private const string DefenderExclusionSource = "security.registry.defender.exclusion";
+    private const string DefenderExclusionRegistryPath = "SOFTWARE\\Microsoft\\Windows Defender\\Exclusions";
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureDefenderExclusions(RegistryView view, IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+        using var exclusions = baseKey.OpenSubKey(DefenderExclusionRegistryPath, writable: false);
+        if (exclusions is null) return;
+        var inspected = 0;
+        foreach (var category in new[] { "Paths", "Processes", "Extensions" })
+        {
+            using var values = exclusions.OpenSubKey(category, writable: false);
+            if (values is null) continue;
+            foreach (var name in values.GetValueNames().OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                if (++inspected > MaximumEntries) throw new InvalidDataException("Liczba wykluczeń Defendera przekracza limit snapshotu.");
+                var value = values.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                var valueKind = values.GetValueKind(name);
+                var snapshot = CreateDefenderExclusionSnapshotEntry(category, name, valueKind, value);
+                if (!entries.ContainsKey(snapshot.Key) && entries.Count >= MaximumEntries)
+                    throw new InvalidDataException("Łączna liczba źródeł autostartu i zabezpieczeń przekracza limit snapshotu.");
+                entries[snapshot.Key] = snapshot.Entry;
+            }
+        }
+    }
+
+    internal static (string Key, PersistenceSnapshotEntry Entry) CreateDefenderExclusionSnapshotEntry(
+        string category, string name, RegistryValueKind kind, object? value)
+    {
+        if (category is not ("Paths" or "Processes" or "Extensions") || string.IsNullOrWhiteSpace(name) || name.Length > 4096)
+            throw new ArgumentException("Nieprawidłowy wpis wykluczeń Defendera.");
+        var data = value switch
+        {
+            null => string.Empty,
+            string text => text,
+            string[] values => string.Join("\\0", values),
+            byte[] bytes => Convert.ToHexString(bytes),
+            int number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            long number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty
+        };
+        if (data.Length > 16384) throw new InvalidDataException("Wartość wykluczenia Defendera przekracza limit snapshotu.");
+        var canonical = category.ToUpperInvariant() + "\\0" + name.ToUpperInvariant() + "\\0" + kind + "\\0" + data;
+        var key = CreateKey(DefenderExclusionSource, category + "\\0" + name);
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        return (key, new PersistenceSnapshotEntry(DefenderExclusionSource, fingerprint, false));
     }
 
     private static void CaptureSecurityConfigurationFile(string path, IDictionary<string, PersistenceSnapshotEntry> entries)
