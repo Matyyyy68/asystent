@@ -10,6 +10,27 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "sentinel-persistence-monitor-" + Guid.NewGuid());
 
     [Fact]
+    public void DefenderExclusionSnapshotUsesOpaqueIdentifiersAndDetectsValueChanges()
+    {
+        const string privatePath = @"C:\Users\Mateusz\AppData\Local\Microsoft\Windows Defender\Exclusions\private";
+        var first = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
+            "Paths", privatePath, Microsoft.Win32.RegistryValueKind.DWord, 0);
+        var unchanged = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
+            "Paths", privatePath, Microsoft.Win32.RegistryValueKind.DWord, 0);
+        var changed = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
+            "Paths", privatePath, Microsoft.Win32.RegistryValueKind.DWord, 1);
+
+        Assert.Equal(first.Key, unchanged.Key);
+        Assert.Equal(first.Entry.Fingerprint, unchanged.Entry.Fingerprint);
+        Assert.Equal(first.Key, changed.Key);
+        Assert.NotEqual(first.Entry.Fingerprint, changed.Entry.Fingerprint);
+        Assert.Equal("security.registry.defender.exclusion", first.Entry.Source);
+        Assert.DoesNotContain("Mateusz", first.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Mateusz", first.Entry.Fingerprint, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Windows Defender", first.Key, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SecurityConfigurationFingerprintHashesContentWithoutRetainingIt()
     {
         var path = Path.Combine(root, "hosts");
@@ -1040,7 +1061,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync();
         using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(42L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
