@@ -695,7 +695,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 if (++inspected > MaximumEntries) throw new InvalidDataException("Liczba wykluczeń Defendera przekracza limit snapshotu.");
                 var value = values.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
                 var valueKind = values.GetValueKind(name);
-                var snapshot = CreateDefenderExclusionSnapshotEntry(category, name, valueKind, value);
+                var snapshot = CreateDefenderExclusionSnapshotEntry(category, name, valueKind.ToString(), value);
                 if (!entries.ContainsKey(snapshot.Key) && entries.Count >= MaximumEntries)
                     throw new InvalidDataException("Łączna liczba źródeł autostartu i zabezpieczeń przekracza limit snapshotu.");
                 entries[snapshot.Key] = snapshot.Entry;
@@ -704,7 +704,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     }
 
     internal static (string Key, PersistenceSnapshotEntry Entry) CreateDefenderExclusionSnapshotEntry(
-        string category, string name, RegistryValueKind kind, object? value)
+        string category, string name, string kind, object? value)
     {
         if (category is not ("Paths" or "Processes" or "Extensions") || string.IsNullOrWhiteSpace(name) || name.Length > 4096)
             throw new ArgumentException("Nieprawidłowy wpis wykluczeń Defendera.");
