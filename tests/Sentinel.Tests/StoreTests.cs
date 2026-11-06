@@ -1455,4 +1455,3 @@ public sealed class StoreTests : IDisposable
     public void Dispose() { if(Directory.Exists(dir)) Directory.Delete(dir,true); }
 }
 
-

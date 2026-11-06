@@ -40,7 +40,7 @@ Niezależność usługi jest częściowa: jej profil Downloads to izolowany kata
 
 **Częściowo działa:** usługa jest niezależna od UI, ale nie zastępuje per-user Engine dla Downloads i ustawień właściwych dla użytkownika; część historii i kolektorów działa w obu instancjach. WMI nie gwarantuje odbioru zdarzeń podczas awarii/restartu. Core liczy fail-closed status świeżości i źródeł oraz uwzględnia Windows Security Center. Korelacja jest ograniczona do dostępnych kluczy i okien czasu.
 
-**Częściowo zaimplementowano:** `RiskEngine` oblicza deterministyczną heurystykę 0–100 dla ręcznej analizy tekstu/URL, a `ThreatAssessment` zwraca wynik wraz z poziomem i wskaźnikami. To nie jest skalibrowane prawdopodobieństwo; SQLite v41 zachowuje wynik w historii, CSV/JSON, kopii bazy i przekazaniu Agent→Service. Wynik nie jest skalibrowany i nie jest stosowany do monitorów systemowych.
+**Częściowo zaimplementowano:** `RiskEngine` oblicza deterministyczną heurystykę 0–100 dla ręcznej analizy tekstu/URL i dla jawnie obsługiwanych kodów dowodów z monitorów procesu, TCP, DNS, persistence i Downloads. Wynik jest utrwalany obok poziomu w historii, CSV/JSON, kopii bazy i przekazaniu Agent→Service. To nie jest skalibrowane prawdopodobieństwo: nieznane kody są ignorowane, a niezweryfikowana lista hashy nie podnosi ryzyka sama z siebie. Wynik nie steruje automatyczną izolacją procesów ani ruchem sieciowym.
 
 **Nie zaimplementowano:** WFP, pełne ETW, systemowy monitoring wszystkich plików, uniwersalna i skalibrowana ocena ryzyka, automatyczna izolacja procesów lub sieci, podpisywane przyrostowe aktualizacje bazy threat intelligence, pełna konsolidacja stanu i korelacji pomiędzy dwiema bazami oraz fizyczny test instalacji i restartu na czystym Windows użytkownika.
 
@@ -50,4 +50,4 @@ Niezależność usługi jest częściowa: jej profil Downloads to izolowany kata
 
 ## Weryfikacja
 
-Test integrujący krótkotrwały proces z syntetycznym wejściem WMI jest w `ProcessSnapshotMonitorTests`. Test nie uruchamia WMI ani nie zmienia konfiguracji systemu. Testy regresji wykonuje się przez `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`.
+Test integrujący krótkotrwały proces z syntetycznym wejściem WMI jest w `ProcessSnapshotMonitorTests`. Testy korelacji obejmują też usunięcie cache po stopie WMI i zniknięciu ze snapshotu oraz odbudowę cache z najnowszego zdarzenia cyklu życia PID po restarcie. Nie uruchamiają one WMI ani nie zmieniają konfiguracji systemu; dostarczenie zdarzeń WMI na rzeczywistym koncie nadal wymaga osobnej weryfikacji. Testy regresji wykonuje się przez `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`.

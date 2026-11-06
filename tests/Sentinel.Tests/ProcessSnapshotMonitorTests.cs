@@ -552,4 +552,3 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
     }
 }
-

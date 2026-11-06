@@ -380,4 +380,3 @@ public sealed class ProcessSnapshotMonitor
 
     private sealed record ProcessChange(string Action, int ProcessId, string ProcessName, DateTimeOffset ObservedAt);
 }
-
