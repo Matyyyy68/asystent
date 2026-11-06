@@ -396,7 +396,7 @@ public sealed class DownloadedFileMonitor : IDisposable
             "Sprawdź źródło oraz otwieraj plik tylko w zaufanej aplikacji.", EventStatus.New,
             EventId: Guid.NewGuid(), Source: "downloads-file-type", RuleVersion: ThreatAnalysisEngine.RulesVersion,
             EvidenceCodes: ["file.extension.signature-mismatch"],
-            AnalysisLimitations: ["Rozpoznawany jest ograniczony zestaw sygnatur; brak dopasowania nie oznacza, że plik jest bezpieczny."],
+            AnalysisLimitations: ["file.type.recognition-limited"],
             RiskScore: 0);
     }
 
