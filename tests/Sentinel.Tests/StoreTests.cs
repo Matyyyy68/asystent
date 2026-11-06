@@ -152,11 +152,12 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.HashFeedRecheckAtUtc);
     }
 
-    [Fact] public async Task VersionFortyOneMigrationAllowsHostsFingerprintAndPreservesExistingPersistenceRows()
+    [Fact] public async Task VersionFortyOneMigrationAllowsSecurityFingerprintsAndPreservesExistingPersistenceRows()
     {
         var store = await Store();
         var existingFingerprint = new string('A', 64);
         var hostsFingerprint = new string('B', 64);
+        var defenderFingerprint = new string('C', 64);
         await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
             new("existing-run", "registry.user.run", existingFingerprint, false)
         ]);
@@ -192,10 +193,13 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(existingFingerprint, Assert.Single(migrated.Entries.Values).Fingerprint);
         await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
             new("existing-run", "registry.user.run", existingFingerprint, false),
-            new("security.file.hosts:system-hosts", "security.file.hosts", hostsFingerprint, false)
+            new("security.file.hosts:system-hosts", "security.file.hosts", hostsFingerprint, false),
+            new("security.registry.defender.exclusion:" + new string('D', 64),
+                "security.registry.defender.exclusion", defenderFingerprint, false)
         ]);
         var expanded = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
         Assert.Contains(expanded.Entries.Values, entry => entry.Source == "security.file.hosts" && entry.Fingerprint == hostsFingerprint);
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "security.registry.defender.exclusion" && entry.Fingerprint == defenderFingerprint);
 
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync();
