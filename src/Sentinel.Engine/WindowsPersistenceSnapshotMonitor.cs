@@ -712,15 +712,15 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         {
             null => string.Empty,
             string text => text,
-            string[] values => string.Join("\\0", values),
+            string[] values => string.Join("\0", values),
             byte[] bytes => Convert.ToHexString(bytes),
             int number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
             long number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
             _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty
         };
         if (data.Length > 16384) throw new InvalidDataException("Wartość wykluczenia Defendera przekracza limit snapshotu.");
-        var canonical = category.ToUpperInvariant() + "\\0" + name.ToUpperInvariant() + "\\0" + kind + "\\0" + data;
-        var key = CreateKey(DefenderExclusionSource, category + "\\0" + name);
+        var canonical = category.ToUpperInvariant() + "\0" + name.ToUpperInvariant() + "\0" + kind + "\0" + data;
+        var key = CreateKey(DefenderExclusionSource, category + "\0" + name);
         var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         return (key, new PersistenceSnapshotEntry(DefenderExclusionSource, fingerprint, false));
     }
