@@ -346,7 +346,6 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             {
                 "security.file.hosts" => "plik hosts Windows",
                 "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
-                "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
                 "registry.user.run" => "HKCU Run",
                 "registry.user.runonce" => "HKCU RunOnce",
                 "registry.machine64.run" => "HKLM Run (64-bit)",
@@ -381,6 +380,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var sourceSubject = source switch
             {
                 "security.file.hosts" => "plik hosts Windows",
+                "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
                 "scheduled.task" => "zaplanowane zadanie Windows",
                 "registry.service" => "usługę Windows",
                 "registry.driver" => "sterownik Windows",
