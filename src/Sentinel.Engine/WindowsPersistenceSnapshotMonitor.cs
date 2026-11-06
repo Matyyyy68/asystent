@@ -344,6 +344,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var isStartupApproved = source.Contains(".startup.approved.", StringComparison.Ordinal);
             var sourceName = source switch
             {
+                "security.file.hosts" => "plik hosts Windows",
                 "registry.user.run" => "HKCU Run",
                 "registry.user.runonce" => "HKCU RunOnce",
                 "registry.machine64.run" => "HKLM Run (64-bit)",
@@ -377,6 +378,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             };
             var sourceSubject = source switch
             {
+                "security.file.hosts" => "plik hosts Windows",
                 "scheduled.task" => "zaplanowane zadanie Windows",
                 "registry.service" => "usługę Windows",
                 "registry.driver" => "sterownik Windows",
@@ -386,7 +388,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 _ when isStartupApproved => "stan zatwierdzenia wpisu autostartu Windows",
                 _ => "wpis autostartu"
             };
-            var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
+            var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source == "security.file.hosts"
+                ? "Konfiguracja sieci Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
                 or "registry.machine64.ifeo" or "registry.machine32.ifeo"
                 or "registry.machine64.silent.exit" or "registry.machine32.silent.exit"
                 or "registry.machine64.shell.delay" or "registry.machine32.shell.delay"
@@ -394,6 +397,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             if (isStartupApproved) eventApplication = "Autostart Windows · StartupApproved";
             var recommendation = source switch
             {
+                "security.file.hosts" => "Sprawdź lokalną zmianę mapowania nazw hostów. Sentinel zapisuje tylko skrót pliku, nie jego treść ani wpisy.",
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Sprawdź konfigurację IFEO Debugger dla aplikacji w rejestrze Windows. Sentinel nie zmienia wpisu ani nie uruchamia debuggera.",
@@ -436,6 +440,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "scheduled.task" => "scheduled-task",
                 "registry.service" => "service",
                 "registry.driver" => "driver",
+                "security.file.hosts" => "hosts",
                 _ => "unknown"
             };
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
@@ -444,6 +449,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var item = new SecurityEvent(0, now, assessment.Level,
                 isWinlogon ? "Zmiana konfiguracji logowania Windows" : source switch
                 {
+                    "security.file.hosts" => "Zmiana pliku hosts Windows",
                     "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
@@ -453,7 +459,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     _ when isStartupApproved => "Zmiana statusu aplikacji startowej Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
-                isWinlogon
+                source == "security.file.hosts"
+                    ? $"Wykryto, że {verb} plik hosts Windows. Treść pliku nie jest zapisywana."
+                    : isWinlogon
                     ? $"Wykryto zmianę konfiguracji logowania Windows ({verb}). Surowa nazwa wartości i polecenie nie są zapisywane."
                     : $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
                 recommendation,
@@ -589,6 +597,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private static bool IsSupportedBaseSource(string source) => source is
         "registry.user.run" or "registry.user.runonce" or "registry.user.runonceex" or "registry.user.policy.run" or
         "registry.user.winlogon" or "registry.user.startup.approved" or "startup.user" or "startup.common" or
+        "security.file.hosts" or
         "registry.machine64.run" or "registry.machine64.runonce" or "registry.machine64.runonceex" or
         "registry.machine64.policy.run" or "registry.machine64.winlogon" or "registry.machine64.appinit" or
         "registry.machine64.startup.approved" or "registry.machine64.silent.exit" or "registry.machine64.shell.delay" or
@@ -651,7 +660,37 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         }
         CaptureSource("startup.user", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries), entries, unavailableSources);
         CaptureSource("startup.common", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries), entries, unavailableSources);
+        CaptureSource("security.file.hosts", () => CaptureSecurityConfigurationFile(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "etc", "hosts"), entries), entries, unavailableSources);
         return new(true, entries, ifeoMachine64Available, ifeoMachine32Available, string.Join(", ", unavailable), unavailableSources);
+    }
+
+    private static void CaptureSecurityConfigurationFile(string path, IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        var fingerprint = ComputeSecurityConfigurationFingerprint(path);
+        if (fingerprint is not null)
+            entries[CreateKey("security.file.hosts", "system-hosts")] = new("security.file.hosts", fingerprint, false);
+    }
+
+    internal static string? ComputeSecurityConfigurationFingerprint(string path)
+    {
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(path); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+        if ((attributes & FileAttributes.Directory) != 0 || (attributes & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Security configuration file is not a regular file.");
+
+        var before = new FileInfo(path);
+        const long maximumBytes = 4 * 1024 * 1024;
+        if (!before.Exists || before.Length > maximumBytes) throw new IOException("Security configuration file exceeds its size limit.");
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length > maximumBytes) throw new IOException("Security configuration file exceeds its size limit.");
+        var fingerprint = Convert.ToHexString(SHA256.HashData(stream));
+        var after = new FileInfo(path);
+        if (!after.Exists || after.Length != before.Length || after.LastWriteTimeUtc != before.LastWriteTimeUtc)
+            throw new IOException("Security configuration file changed during hashing.");
+        return fingerprint;
     }
 
     private static void CaptureSource(string source, Action capture, IDictionary<string, PersistenceSnapshotEntry> entries,
@@ -1046,3 +1085,4 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private sealed record PersistenceChange(string Key, PersistenceChangeKind Kind,
         PersistenceSnapshotEntry? Previous, PersistenceSnapshotEntry? Current);
 }
+
