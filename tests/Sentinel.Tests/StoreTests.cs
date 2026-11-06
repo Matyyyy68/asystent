@@ -170,9 +170,12 @@ public sealed class StoreTests : IDisposable
                 inspect.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
                 schema = (string)(await inspect.ExecuteScalarAsync())!;
             }
-            const string tablePrefix = "CREATE TABLE windows_persistence_snapshot";
-            var version41Schema = schema
-                .Replace(tablePrefix, "CREATE TABLE windows_persistence_snapshot_v41", StringComparison.Ordinal)
+            const string tableName = "windows_persistence_snapshot";
+            var tableNameIndex = schema.IndexOf(tableName, StringComparison.Ordinal);
+            Assert.True(tableNameIndex >= 0);
+            var version41Schema = (schema[..tableNameIndex] +
+                "windows_persistence_snapshot_v41" +
+                schema[(tableNameIndex + tableName.Length)..])
                 .Replace(",'security.file.hosts'", "", StringComparison.Ordinal);
             using var create = downgrade.CreateCommand(); create.CommandText = version41Schema;
             await create.ExecuteNonQueryAsync();
