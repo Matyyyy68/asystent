@@ -27,7 +27,7 @@ internal static class SystemServiceEventsClient
         await using var writer = new StreamWriter(pipe, new UTF8Encoding(false), 1024, leaveOpen: true) { AutoFlush = true };
         await writer.WriteLineAsync(request.AsMemory(), timeout.Token);
         var line = await reader.ReadLineAsync(timeout.Token) ?? throw new EndOfStreamException("System service returned no ingest acknowledgement.");
-        if (line.Length > MaximumResponseChars) throw new InvalidDataException("System service ingest acknowledgement exceeded its size limit.");
+        if (line.Length > ServiceEventPipeProtocol.MaximumResponseChars) throw new InvalidDataException("System service ingest acknowledgement exceeded its size limit.");
         using var document = JsonDocument.Parse(line, new JsonDocumentOptions { MaxDepth = 8 });
         var root = document.RootElement;
         if (!root.TryGetProperty("id", out var id) || id.GetString() != "agent-forward-events" ||
@@ -66,7 +66,4 @@ internal static class SystemServiceEventsClient
         return ServiceEventPipeProtocol.ParseResponse(line);
     }
 }
-
-internal sealed record SystemServiceEvent(long Id, string Risk, string Status);
-internal sealed record SystemServiceEventBatch(long LatestEventId, IReadOnlyList<SystemServiceEvent> Events);
 
