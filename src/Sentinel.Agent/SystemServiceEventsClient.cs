@@ -81,17 +81,21 @@ internal static class SystemServiceEventsClient
         foreach (var item in events.EnumerateArray())
         {
             if (!item.TryGetProperty("id", out var eventId) || !eventId.TryGetInt64(out var value) || value <= 0 ||
+                !item.TryGetProperty("risk", out var risk) || risk.ValueKind != JsonValueKind.String ||
                 !item.TryGetProperty("status", out var status) || status.ValueKind != JsonValueKind.String)
                 throw new InvalidDataException("System service returned a malformed event.");
+            var riskValue = risk.GetString();
+            if (riskValue is not ("Information" or "Low" or "Moderate" or "High" or "Critical"))
+                throw new InvalidDataException("System service returned an unknown risk level.");
             var statusValue = status.GetString();
             if (statusValue is not ("New" or "Reviewed" or "FalsePositive"))
                 throw new InvalidDataException("System service returned an unknown event status.");
-            parsed.Add(new SystemServiceEvent(value, statusValue));
+            parsed.Add(new SystemServiceEvent(value, riskValue, statusValue));
         }
         return new SystemServiceEventBatch(latestId, parsed);
     }
 }
 
-internal sealed record SystemServiceEvent(long Id, string Status);
+internal sealed record SystemServiceEvent(long Id, string Risk, string Status);
 internal sealed record SystemServiceEventBatch(long LatestEventId, IReadOnlyList<SystemServiceEvent> Events);
 
