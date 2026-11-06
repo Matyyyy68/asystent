@@ -1122,7 +1122,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 "startup.user" or "startup.common" or "scheduled.task" or "registry.service" or "registry.driver" or
                 "registry.user.startup.approved.run" or "registry.user.startup.approved.run32" or "registry.user.startup.approved.startupfolder" or
                 "registry.machine64.startup.approved.run" or "registry.machine64.startup.approved.run32" or "registry.machine64.startup.approved.startupfolder" or
-                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder") ||
+                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder" or "security.file.hosts") ||
             entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
             throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
     }
