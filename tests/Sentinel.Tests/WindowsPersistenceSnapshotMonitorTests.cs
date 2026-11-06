@@ -10,6 +10,46 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "sentinel-persistence-monitor-" + Guid.NewGuid());
 
     [Fact]
+    public void SecurityConfigurationFingerprintHashesContentWithoutRetainingIt()
+    {
+        var path = Path.Combine(root, "hosts");
+        const string contents = "127.0.0.1 sensitive-test-host.example";
+        Assert.Null(WindowsPersistenceSnapshotMonitor.ComputeSecurityConfigurationFingerprint(path));
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(path, contents);
+        var fingerprint = WindowsPersistenceSnapshotMonitor.ComputeSecurityConfigurationFingerprint(path);
+
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contents))), fingerprint);
+        Assert.DoesNotContain(contents, fingerprint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HostsFileChangeIsReportedAsInformationalAndWithoutContentsOrPath()
+    {
+        var store = await CreateStore();
+        var entryKey = "security.file.hosts:synthetic-system-hosts";
+        var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            [entryKey] = Entry("security.file.hosts", "hosts-fingerprint-v1", false)
+        };
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        snapshot[entryKey] = Entry("security.file.hosts", "hosts-fingerprint-v2", false);
+
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana pliku hosts Windows", item.Category);
+        Assert.Equal(RiskLevel.Information, item.Risk);
+        Assert.Contains("persistence.hosts.changed", item.EvidenceCodes!);
+        Assert.Contains("Treść pliku nie jest zapisywana", item.Explanation);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(item);
+        Assert.DoesNotContain("synthetic-system-hosts", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("hosts-fingerprint", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BaselineIsSilentAndLaterChangesAreLocalAndRedacted()
     {
         var store = await CreateStore();
@@ -1077,3 +1117,4 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         catch { }
     }
 }
+
