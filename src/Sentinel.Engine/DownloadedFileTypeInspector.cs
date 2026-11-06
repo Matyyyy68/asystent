@@ -44,12 +44,12 @@ public static class DownloadedFileTypeInspector
         }
         if (bytes.StartsWith("%PDF-"u8)) return "pdf";
         if (bytes.StartsWith("PK\x03\x04"u8) || bytes.StartsWith("PK\x05\x06"u8) || bytes.StartsWith("PK\x07\x08"u8)) return "zip";
-        if (bytes.StartsWith([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return "ole";
-        if (bytes.StartsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png";
-        if (bytes.StartsWith([0xff, 0xd8, 0xff])) return "jpeg";
+        if (bytes.StartsWith(new byte[] { 0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1 })) return "ole";
+        if (bytes.StartsWith(new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a })) return "png";
+        if (bytes.StartsWith(new byte[] { 0xff, 0xd8, 0xff })) return "jpeg";
         if (bytes.StartsWith("GIF87a"u8) || bytes.StartsWith("GIF89a"u8)) return "gif";
         if (bytes.StartsWith("{\\rtf"u8)) return "rtf";
-        if (bytes.StartsWith([0x7f, 0x45, 0x4c, 0x46])) return "elf";
+        if (bytes.StartsWith(new byte[] { 0x7f, 0x45, 0x4c, 0x46 })) return "elf";
         return null;
     }
 
