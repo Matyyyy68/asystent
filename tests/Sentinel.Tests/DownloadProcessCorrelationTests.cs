@@ -17,16 +17,16 @@ public sealed class DownloadProcessCorrelationTests : IDisposable
         var downloads = Path.Combine(root, "Downloads");
         var data = Path.Combine(root, "data");
         Directory.CreateDirectory(downloads);
-        var path = Path.Combine(downloads, "sample.exe");
-        var pe = MinimalPe();
-        await File.WriteAllBytesAsync(path, pe);
-        var hash = Convert.ToHexString(SHA256.HashData(pe));
-
         var store = new LocalStore(data);
         await store.InitializeAsync();
         var reputation = new FileHashReputation(Path.Combine(data, "reputation"));
         using var monitor = new DownloadedFileMonitor(downloads);
         await monitor.SetEnabledAsync(store, true);
+
+        var path = Path.Combine(downloads, "sample.exe");
+        var pe = MinimalPe();
+        var hash = Convert.ToHexString(SHA256.HashData(pe));
+        await File.WriteAllBytesAsync(path, pe);
         await Task.Delay(900);
 
         for (var attempt = 0; attempt < 30; attempt++)
