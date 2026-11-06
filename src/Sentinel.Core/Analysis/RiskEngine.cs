@@ -34,6 +34,10 @@ public static class RiskEngine
         // evidence to assign a numeric risk score.
         if (allCodes.Contains("file.local-list-source-unverified", StringComparer.Ordinal))
             codes = codes.Where(code => code != "file.sha256.matches-local-list").ToArray();
+        // A user-imported IP list has no trusted provenance/signature contract.
+        // Preserve the match as event context, but do not let it raise numeric risk.
+        if (allCodes.Contains("reputation.local-ip-feed-source-unverified", StringComparer.Ordinal))
+            codes = codes.Where(code => code != "reputation.ip-feed.match").ToArray();
         var indicators = codes.Select(code =>
             {
                 var evidence = EventEvidence[code];

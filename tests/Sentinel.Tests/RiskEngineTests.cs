@@ -72,6 +72,17 @@ public sealed class RiskEngineTests
     }
 
     [Fact]
+    public void UnverifiedLocalIpFeedDoesNotProduceNumericRisk()
+    {
+        var result = RiskEngine.EvaluateEvidenceCodes([
+            "network.tcp.connection-snapshot", "reputation.ip-feed.match",
+            "reputation.local-ip-feed-source-unverified"]);
+
+        Assert.Equal(0, result.Score);
+        Assert.Equal(RiskLevel.Information, result.Level);
+    }
+
+    [Fact]
     public void UnverifiedLocalHashFeedDoesNotProduceNumericRisk()
     {
         var result = RiskEngine.EvaluateEvidenceCodes([

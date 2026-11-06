@@ -81,10 +81,12 @@ public sealed class TcpConnectionSnapshotMonitorTests : IDisposable
         Assert.Equal(1, monitor.LastIpReputationMatches);
 
         var alert = Assert.Single(await store.ReadAsync());
-        Assert.Equal(RiskLevel.High, alert.Risk);
+        Assert.Equal(RiskLevel.Information, alert.Risk);
+        Assert.Equal(0, alert.RiskScore);
         Assert.Equal("Połączenie z adresem na lokalnej liście IP", alert.Category);
         Assert.Contains("198.51.100.7:8443", alert.Explanation);
         Assert.Contains("reputation.ip-feed.match", alert.EvidenceCodes!);
+        Assert.Contains("reputation.local-ip-feed-source-unverified", alert.EvidenceCodes!);
         Assert.Contains("nie blokuje ruchu", alert.Recommendation);
 
         clock.Advance(TimeSpan.FromSeconds(1));

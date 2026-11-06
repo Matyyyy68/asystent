@@ -208,8 +208,8 @@ public sealed class TcpConnectionSnapshotMonitor
                     : "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.";
             var evidenceCodes = item.IsUdp ? new[] { "network.udp.local-endpoint-seen" } : ipReputationMatch
                 ? correlatedSuspiciousLaunch
-                    ? new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
-                    : new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match" }
+                    ? new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match", "reputation.local-ip-feed-source-unverified", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
+                    : new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match", "reputation.local-ip-feed-source-unverified" }
                 : correlatedSuspiciousLaunch
                     ? new[] { "network.tcp.connection-snapshot", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
                     : new[] { "network.tcp.connection-snapshot" };
@@ -249,7 +249,8 @@ public sealed class TcpConnectionSnapshotMonitor
                 return 0;
             }
         }
-        LastIpReputationMatches = events.Count(item => item.Risk == RiskLevel.High && item.Source == "tcp-connection-snapshot");
+        LastIpReputationMatches = events.Count(item => item.Source == "tcp-connection-snapshot" &&
+            item.EvidenceCodes?.Contains("reputation.ip-feed.match", StringComparer.Ordinal) == true);
         knownConnections.ExceptWith(removedTcpKeys);
         knownConnections.UnionWith(addedTcpKeys);
         knownUdpEndpoints.ExceptWith(removedUdpKeys);
