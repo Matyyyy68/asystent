@@ -14,11 +14,11 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     {
         const string privatePath = @"C:\Users\Mateusz\AppData\Local\Microsoft\Windows Defender\Exclusions\private";
         var first = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
-            "Paths", privatePath, Microsoft.Win32.RegistryValueKind.DWord, 0);
+            "Paths", privatePath, "DWord", 0);
         var unchanged = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
-            "Paths", privatePath, Microsoft.Win32.RegistryValueKind.DWord, 0);
+            "Paths", privatePath, "DWord", 0);
         var changed = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
-            "Paths", privatePath, Microsoft.Win32.RegistryValueKind.DWord, 1);
+            "Paths", privatePath, "DWord", 1);
 
         Assert.Equal(first.Key, unchanged.Key);
         Assert.Equal(first.Entry.Fingerprint, unchanged.Entry.Fingerprint);
