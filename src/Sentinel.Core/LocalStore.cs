@@ -101,7 +101,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 41) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 42) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -458,6 +458,29 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             {
                 await EnsureColumnAsync(c, "events", "risk_score", "INTEGER NULL CHECK(risk_score IS NULL OR risk_score BETWEEN 0 AND 100)", ct);
                 await Execute(c, "PRAGMA user_version=41; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 42)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                string? snapshotSchema;
+                using (var schema = c.CreateCommand())
+                {
+                    schema.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
+                    snapshotSchema = await schema.ExecuteScalarAsync(ct) as string;
+                }
+                const string tablePrefix = "CREATE TABLE windows_persistence_snapshot";
+                const string oldSourceTail = "'registry.driver'))";
+                if (snapshotSchema is null || !snapshotSchema.StartsWith(tablePrefix, StringComparison.Ordinal) || !snapshotSchema.Contains(oldSourceTail, StringComparison.Ordinal))
+                    throw new InvalidDataException("Nie można bezpiecznie zaktualizować ograniczenia źródeł monitorowania autostartu.");
+                var updatedSchema = snapshotSchema
+                    .Replace(tablePrefix, "CREATE TABLE windows_persistence_snapshot_v42", StringComparison.Ordinal)
+                    .Replace(oldSourceTail, "'registry.driver','security.file.hosts'))", StringComparison.Ordinal);
+                await Execute(c, updatedSchema, ct);
+                await Execute(c, "INSERT INTO windows_persistence_snapshot_v42(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v42 RENAME TO windows_persistence_snapshot; PRAGMA user_version=42; COMMIT;", ct);
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
@@ -1855,7 +1878,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is < 6 or > 41)
+            if (backupVersion is < 6 or > 42)
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
