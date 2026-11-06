@@ -9,7 +9,7 @@ function sourceFamily(codes) {
   if (codes.some(code => code.startsWith('network.') || code.startsWith('reputation.ip'))) return 'network';
   if (codes.some(code => code.startsWith('dns.'))) return 'dns';
   if (codes.some(code => code.startsWith('persistence.') || code.startsWith('security.'))) return 'system';
-  if (codes.some(code => code.startsWith('url.') || code.startsWith('reputation.url'))) return 'web';
+  if (codes.some(code => code.startsWith('url.') || code.startsWith('reputation.url') || code.startsWith('reputation.cert'))) return 'web';
   return 'other';
 }
 

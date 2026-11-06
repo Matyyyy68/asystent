@@ -44,3 +44,11 @@ test('invalid risk and arbitrary fields are discarded', async () => {
   assert.equal('ruleScore' in payload.events[0], false);
   assert.deepEqual(payload.events[0].evidenceCodes, []);
 });
+
+test('CERT reputation evidence is classified as web context', async () => {
+  const { buildIncidentAnalysisContext } = await import('../src/incident-ai-context.js');
+  const payload = JSON.parse(buildIncidentAnalysisContext({ kind: 'domain', events: [{
+    id: 7, evidenceCodes: ['reputation.cert.match']
+  }]}).split('\n').at(-1));
+  assert.equal(payload.events[0].sourceFamily, 'web');
+});
