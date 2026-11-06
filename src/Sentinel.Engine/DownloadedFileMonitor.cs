@@ -258,6 +258,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                 }
 
                 string hash;
+                DownloadedFileTypeResult? fileType = null;
                 await using (var stream = verifiedStream.Stream)
                 {
                     var openedLength = stream.Length;
@@ -292,6 +293,7 @@ public sealed class DownloadedFileMonitor : IDisposable
                     }
 
                     BeforeFileContentReadForTest?.Invoke(info.FullName);
+                    fileType = await DownloadedFileTypeInspector.InspectAsync(stream, info.Name, cancellationToken);
                     hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
                     AfterSha256ForTest?.Invoke(info.FullName, hash);
                     bytesScanned += openedLength;
@@ -314,21 +316,30 @@ public sealed class DownloadedFileMonitor : IDisposable
                 // collection and content inspection independent of optional intelligence.
                 // A missing list is not a clean verdict; it simply cannot match anything.
                 var check = reputation.Check(hash);
+                var mismatchEvent = fileType is null ? null : CreateFileTypeMismatchEvent(fileType, info.Name);
                 if (!check.FeedImported || !check.Match)
                 {
-                    if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
+                    if (mismatchEvent is not null)
+                    {
+                        await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), mismatchEvent, cancellationToken);
+                        detections++;
+                    }
+                    else if (!await CommitBaselineAsync(store, info.FullName, fileFingerprint, cancellationToken)) break;
                     RememberFingerprint(fingerprint);
                     forceRecheckPaths.TryRemove(info.FullName, out _);
                     continue;
                 }
                 var itemEvent = new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
                     "Pobrany plik pasuje do lokalnej listy hashy", "Monitoring Downloads",
-                    "Nowy plik z Downloads pasuje do lokalnej listy SHA-256. Źródło listy nie jest niezależnie zweryfikowane.",
+                    "Nowy plik z Downloads pasuje do lokalnej listy SHA-256. Źródło listy nie jest niezależnie zweryfikowane." +
+                    (mismatchEvent is null ? string.Empty : " Rozszerzenie nie zgadza się z rozpoznaną sygnaturą pliku."),
                     "Sprawdź pochodzenie pliku i źródło listy. Dopasowanie nie jest automatycznym werdyktem zagrożenia.",
                     EventStatus.New, EventId: isFeedRecheck && reputationStatus.ImportedAt is { } importedAt
                         ? CreateHashFeedRecheckEventId(importedAt, hash) : Guid.NewGuid(), Source: "downloads-local-hash",
                     RuleVersion: ThreatAnalysisEngine.RulesVersion,
-                    EvidenceCodes: ["file.sha256.matches-local-list", "file.local-list-source-unverified"],
+                    EvidenceCodes: mismatchEvent is null
+                        ? ["file.sha256.matches-local-list", "file.local-list-source-unverified"]
+                        : ["file.sha256.matches-local-list", "file.local-list-source-unverified", "file.extension.signature-mismatch"],
                     SignalHash: hash,
                     RiskScore: RiskEngine.EvaluateEvidenceCodes(["file.sha256.matches-local-list", "file.local-list-source-unverified"]).Score);
                 await store.CommitDownloadedFileMonitorResultAsync(ToStoredFingerprint(info.FullName, fileFingerprint), itemEvent, cancellationToken);
@@ -372,6 +383,20 @@ public sealed class DownloadedFileMonitor : IDisposable
                 ? $"Monitoring Downloads działa; nowe pliki są hashowane lokalnie, ale brak lokalnej listy reputacji. Brak dopasowania nie potwierdza bezpieczeństwa. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}."
                 : $"Monitoring Downloads działa; nowe pliki są hashowane i porównywane z lokalną listą reputacji ({reputationStatus.HashCount} hashy). Źródło listy nie jest niezależnie weryfikowane. Utracone powiadomienia: {Interlocked.Read(ref droppedPendingFiles)}.";
         return detections;
+    }
+
+    private static SecurityEvent? CreateFileTypeMismatchEvent(DownloadedFileTypeResult? result, string fileName)
+    {
+        if (result is null || !result.ExtensionMismatch || result.DetectedType is null) return null;
+        var extension = Path.GetExtension(fileName);
+        return new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Information,
+            "Rozszerzenie pobranego pliku nie zgadza się z jego sygnaturą", "Monitoring Downloads",
+            $"Sygnatura pliku wskazuje typ {result.DetectedType}, ale rozszerzenie to {extension}. Sprawdzenie sygnatury jest ograniczone i samo nie potwierdza zagrożenia.",
+            "Sprawdź źródło oraz otwieraj plik tylko w zaufanej aplikacji.", EventStatus.New,
+            EventId: Guid.NewGuid(), Source: "downloads-file-type", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+            EvidenceCodes: ["file.extension.signature-mismatch"],
+            AnalysisLimitations: ["Rozpoznawany jest ograniczony zestaw sygnatur; brak dopasowania nie oznacza, że plik jest bezpieczny."],
+            RiskScore: 0);
     }
 
     private async Task<DateTimeOffset?> PrepareHashFeedRecheckAsync(LocalStore store, FileHashReputationStatus reputationStatus,
@@ -771,3 +796,4 @@ public sealed class DownloadedFileMonitor : IDisposable
         pending.Clear();
     }
 }
+
