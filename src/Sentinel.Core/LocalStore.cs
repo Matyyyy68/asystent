@@ -472,13 +472,15 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                     schema.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
                     snapshotSchema = await schema.ExecuteScalarAsync(ct) as string;
                 }
-                const string tablePrefix = "CREATE TABLE windows_persistence_snapshot";
+                const string tableName = "windows_persistence_snapshot";
                 const string oldSourceTail = "'registry.driver'))";
-                if (snapshotSchema is null || !snapshotSchema.StartsWith(tablePrefix, StringComparison.Ordinal) || !snapshotSchema.Contains(oldSourceTail, StringComparison.Ordinal))
+                var tableNameIndex = snapshotSchema?.IndexOf(tableName, StringComparison.Ordinal) ?? -1;
+                if (snapshotSchema is null || tableNameIndex < 0 || !snapshotSchema.Contains(oldSourceTail, StringComparison.Ordinal))
                     throw new InvalidDataException("Nie można bezpiecznie zaktualizować ograniczenia źródeł monitorowania autostartu.");
-                var updatedSchema = snapshotSchema
-                    .Replace(tablePrefix, "CREATE TABLE windows_persistence_snapshot_v42", StringComparison.Ordinal)
-                    .Replace(oldSourceTail, "'registry.driver','security.file.hosts'))", StringComparison.Ordinal);
+                var updatedSchema = snapshotSchema[..tableNameIndex] +
+                    "windows_persistence_snapshot_v42" +
+                    snapshotSchema[(tableNameIndex + tableName.Length)..];
+                updatedSchema = updatedSchema.Replace(oldSourceTail, "'registry.driver','security.file.hosts'))", StringComparison.Ordinal);
                 await Execute(c, updatedSchema, ct);
                 await Execute(c, "INSERT INTO windows_persistence_snapshot_v42(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v42 RENAME TO windows_persistence_snapshot; PRAGMA user_version=42; COMMIT;", ct);
             }
