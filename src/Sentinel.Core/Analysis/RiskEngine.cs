@@ -33,7 +33,7 @@ public static class RiskEngine
         return risk switch
         {
             RiskLevel.Information => new(ResponseAction.RecordOnly, "response.record-only",
-                "Zapisz zdarzenie w historii; nie generuj alertu.", false),
+                "Zapisz zdarzenie w historii; powiadomienia zależą od ustawień i typu źródła.", false),
             RiskLevel.Low => new(ResponseAction.ReviewInHistory, "response.review-in-history",
                 "Pozostaw w historii do weryfikacji użytkownika.", false),
             RiskLevel.Moderate => new(ResponseAction.NotifyForReview, "response.notify-review",
