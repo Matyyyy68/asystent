@@ -7,12 +7,28 @@ public sealed class ServiceEventNotificationPolicyTests
 {
     [Theory]
     [InlineData("Information", false)]
-    [InlineData("Low", true)]
+    [InlineData("Low", false)]
     [InlineData("Moderate", true)]
     [InlineData("High", true)]
     [InlineData("Critical", true)]
     [InlineData("Unknown", false)]
     [InlineData(null, false)]
-    public void OnlyNonInformationalKnownRiskLevelsNotify(string? risk, bool expected)
+    public void OnlyResponseDecisionsThatRecommendAlertsNotify(string? risk, bool expected)
         => Assert.Equal(expected, ServiceEventNotificationPolicy.ShouldNotify(risk));
+
+    [Theory]
+    [InlineData("Information", false)]
+    [InlineData("Low", false)]
+    [InlineData("Moderate", true)]
+    [InlineData("High", true)]
+    [InlineData("Critical", true)]
+    public void NotificationPolicyMatchesCentralResponseActions(string risk, bool expected)
+    {
+        var level = Enum.Parse<RiskLevel>(risk);
+        var action = Sentinel.Core.Analysis.RiskEngine.DecideResponse(level).Action;
+        var recommendsNotification = action is Sentinel.Core.Analysis.ResponseAction.NotifyForReview or Sentinel.Core.Analysis.ResponseAction.UrgentReview;
+
+        Assert.Equal(expected, recommendsNotification);
+        Assert.Equal(recommendsNotification, ServiceEventNotificationPolicy.ShouldNotify(risk));
+    }
 }
