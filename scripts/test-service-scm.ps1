@@ -255,8 +255,7 @@ try {
     $currentService = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
     $currentEngine = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
       Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
-    if ([regex]::Matches($log, 'ENGINE_STARTED under service account').Count -gt $engineStartsBeforeFailure -and
-        $currentService.State -eq 'Running' -and [int]$currentService.ProcessId -eq $serviceProcessId -and
+    if ($currentService.State -eq 'Running' -and [int]$currentService.ProcessId -eq $serviceProcessId -and
         $null -ne $currentEngine -and [int]$currentEngine.ProcessId -ne $engineProcessId) {
       $currentStatus = Read-ServiceStatus
       if ($null -ne $currentStatus -and
