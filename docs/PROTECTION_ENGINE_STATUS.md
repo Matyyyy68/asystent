@@ -5,7 +5,7 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Dowody wykonania
 
-Pełny Windows CI dla merge commita [19f90f1](https://github.com/Matyyyy68/asystent/commit/19f90f115da5d71f94fe8660370e5de9c937cd48), zawierającego aktualny `main` (w tym poprawkę ilustracji) i zmiany PR, zakończył się sukcesem w [run 42400520468](https://github.com/Matyyyy68/asystent/actions/runs/42400520468). Wynik obejmuje .NET 552/552, audyt NuGet, test wydajności, WMI, usługę SCM pod LocalService i ACL, Electron, przekierowany Known Folder Downloads wraz z 120-sekundowym soak, autostart, Chrome/Edge, instalację headless i widoczny cykl instalatora, oraz Enterprise API 23/23 i HTTP smoke. To test izolowanego runnera GitHub; nie jest dowodem działania na czystym, fizycznym komputerze.
+Pełny Windows CI dla gałęzi zawierającej merge commit [19f90f1](https://github.com/Matyyyy68/asystent/commit/19f90f115da5d71f94fe8660370e5de9c937cd48) i raport [`ff742eb`](https://github.com/Matyyyy68/asystent/commit/ff742eb4dc9ac4c1d91f031f028741561f4d377c) zakończył się sukcesem w [run 42402176917](https://github.com/Matyyyy68/asystent/actions/runs/42402176917). Wynik obejmuje .NET 555/555, audyt NuGet, test wydajności, WMI, usługę SCM pod LocalService i ACL, Electron, przekierowany Known Folder Downloads wraz z 120-sekundowym soak, autostart, Chrome/Edge, instalację headless i widoczny cykl instalatora, oraz Enterprise API 23/23 i HTTP smoke. To test izolowanego runnera GitHub; nie jest dowodem działania na czystym, fizycznym komputerze.
 
 ## Zaimplementowane i zweryfikowane
 
