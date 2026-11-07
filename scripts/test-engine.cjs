@@ -181,6 +181,16 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const matchingDownloadedEvent = downloadedHistory.find(event => (event.source === 'downloads-local-hash' || event.observations?.some(observation => observation.source === 'downloads-local-hash')) &&
     event.evidenceCodes?.includes('file.sha256.matches-local-list'));
   assert.ok(matchingDownloadedEvent, 'the matching Downloads signal must be eligible for an explicitly requested quarantine action');
+  const responseCodes = {
+    Information: 'response.record-only',
+    Low: 'response.review-in-history',
+    Moderate: 'response.notify-review',
+    High: 'response.high-review',
+    Critical: 'response.critical-review'
+  };
+  assert.ok(responseCodes[matchingDownloadedEvent.risk], 'the detected risk must map to a supported response action');
+  assert.ok(matchingDownloadedEvent.recommendation.includes(responseCodes[matchingDownloadedEvent.risk]),
+    'the central response decision must be persisted with the detection visible in history');
   const quarantined = await call('quarantineDownloadedFile', { eventId: matchingDownloadedEvent.id, path: downloadedFixture });
   assert.equal(quarantined.ok, true, quarantined.error);
   assert.equal(quarantined.result.state, 'Quarantined');
@@ -278,6 +288,10 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     assert.ok(matchedTcpEvent,
       'enabled monitor must persist the controlled non-loopback TCP connection with its remote IP');
     assert.equal(matchedTcpEvent.risk, 'High', 'new TCP connection matching the imported feed must raise a local high-risk alert');
+    assert.ok(matchedTcpEvent.recommendation.includes('response.high-review'),
+      'a high-risk network detection must carry the central urgent-review response decision');
+    assert.match(matchedTcpEvent.recommendation, /proces lub ruch nie zostały zablokowane/,
+      'response guidance must not claim an automatic block that did not occur');
     assert.ok(matchedTcpEvent.evidenceCodes.includes('reputation.ip-feed.match'));
     tcpMonitorClient.end(); await new Promise(resolve => tcpMonitorServer.close(resolve)); tcpMonitorClient = null; tcpMonitorServer = null;
     console.log('PASS: opt-in TCP monitor matched the controlled non-loopback connection against the imported local IP feed');
