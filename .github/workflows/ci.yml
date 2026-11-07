@@ -53,6 +53,8 @@ jobs:
       - name: Build and test application
         shell: pwsh
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
+      - name: Verify illustration library and its use in the app, installer and website
+        run: node scripts/test-illustrations.mjs
       - name: Verify SCM service startup, identity, data ACL, and first collection
         shell: pwsh
         timeout-minutes: 5
