@@ -8,6 +8,44 @@ public static class RiskEngine
 {
     public sealed record Result(int Score, RiskLevel Level);
 
+    public enum ResponseAction
+    {
+        RecordOnly,
+        ReviewInHistory,
+        NotifyForReview,
+        UrgentReview
+    }
+
+    public sealed record ResponseDecision(
+        ResponseAction Action,
+        string Code,
+        string Guidance,
+        bool AutomaticProtectionPerformed);
+
+    /// <summary>
+    /// Chooses a proportionate, auditable response from the evidence-derived risk.
+    /// Current response capabilities are notification and user-directed review;
+    /// this policy never claims that a process or connection was blocked.
+    /// </summary>
+    public static ResponseDecision DecideResponse(RiskLevel risk)
+    {
+        if (!Enum.IsDefined(risk)) throw new ArgumentOutOfRangeException(nameof(risk));
+        return risk switch
+        {
+            RiskLevel.Information => new(ResponseAction.RecordOnly, "response.record-only",
+                "Zapisz zdarzenie w historii; nie generuj alertu.", false),
+            RiskLevel.Low => new(ResponseAction.ReviewInHistory, "response.review-in-history",
+                "Pozostaw w historii do weryfikacji użytkownika.", false),
+            RiskLevel.Moderate => new(ResponseAction.NotifyForReview, "response.notify-review",
+                "Zalecany alert i sprawdzenie zdarzenia przez użytkownika.", false),
+            RiskLevel.High => new(ResponseAction.UrgentReview, "response.high-review",
+                "Zalecany pilny alert i sprawdzenie szczegółów; proces lub ruch nie zostały zablokowane.", false),
+            RiskLevel.Critical => new(ResponseAction.UrgentReview, "response.critical-review",
+                "Zalecany natychmiastowy alert i ręczna ocena dostępnych działań; automatyczna blokada nie została wykonana.", false),
+            _ => throw new ArgumentOutOfRangeException(nameof(risk))
+        };
+    }
+
     // Only evidence identifiers with a defined meaning contribute to scores for
     // system-monitor events. Unknown identifiers remain visible in the event but
     // cannot silently inflate its risk.
