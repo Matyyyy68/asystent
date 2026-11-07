@@ -43,6 +43,33 @@ function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSec
   throw "Service '$Name' did not reach $Expected; current state: $actual"
 }
 
+function Read-ServiceStatus {
+  $statusPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'SentinelAI.Service.Status.v1',
+    [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None,
+    [Security.Principal.TokenImpersonationLevel]::Impersonation)
+  $statusReader = $null
+  $statusWriter = $null
+  try {
+    $statusPipe.Connect(1500)
+    $statusReader = [IO.StreamReader]::new($statusPipe, [Text.UTF8Encoding]::new($false), $false, 1024, $true)
+    $statusWriter = [IO.StreamWriter]::new($statusPipe, [Text.UTF8Encoding]::new($false), 1024, $true)
+    $statusWriter.AutoFlush = $true
+    $requestId = 'engine-recovery-' + [Guid]::NewGuid().ToString('N')
+    $statusWriter.WriteLine(('{"id":"' + $requestId + '","version":1,"method":"status"}'))
+    $line = $statusReader.ReadLine()
+    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
+    $response = $line | ConvertFrom-Json
+    if ($response.id -ne $requestId -or $response.ok -ne $true -or $response.result.state -ne 'running' -or
+        [string]::IsNullOrWhiteSpace($response.result.lastCollectionAtUtc)) { return $null }
+    return $response.result
+  } catch { return $null }
+  finally {
+    if ($null -ne $statusReader) { $statusReader.Dispose() }
+    if ($null -ne $statusWriter) { $statusWriter.Dispose() }
+    $statusPipe.Dispose()
+  }
+}
+
 try {
   if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
     throw "Refusing to replace an existing Windows service named '$serviceName'."
@@ -207,6 +234,43 @@ try {
     if ($null -ne $forwardedWriter) { $forwardedWriter.Dispose() }
     $forwardedPipe.Dispose()
   }
+
+  $serviceBeforeCrash = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+  $serviceProcessId = [int]$serviceBeforeCrash.ProcessId
+  $engineProcess = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
+    Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
+  if ($serviceBeforeCrash.State -ne 'Running' -or $serviceProcessId -le 0 -or $null -eq $engineProcess -or [int]$engineProcess.ProcessId -le 0) {
+    throw 'Could not identify the running isolated service and Engine processes for the Engine recovery test.'
+  }
+  $engineProcessId = [int]$engineProcess.ProcessId
+  $engineStartsBeforeFailure = [regex]::Matches($log, 'ENGINE_STARTED under service account').Count
+  $collectionBeforeEngineFailure = [DateTimeOffset]::Parse($statusResponse.result.lastCollectionAtUtc).ToUniversalTime()
+  & taskkill.exe /PID $engineProcessId /T /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not terminate the isolated Engine process for its recovery test (exit $LASTEXITCODE)." }
+
+  $engineRecoveryDeadline = [DateTimeOffset]::UtcNow.AddSeconds(45)
+  $engineRecoveryVerified = $false
+  do {
+    $log = if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }
+    $currentService = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+    $currentEngine = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
+      Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
+    if ([regex]::Matches($log, 'ENGINE_STARTED under service account').Count -gt $engineStartsBeforeFailure -and
+        $currentService.State -eq 'Running' -and [int]$currentService.ProcessId -eq $serviceProcessId -and
+        $null -ne $currentEngine -and [int]$currentEngine.ProcessId -ne $engineProcessId) {
+      $currentStatus = Read-ServiceStatus
+      if ($null -ne $currentStatus -and
+          [DateTimeOffset]::Parse($currentStatus.lastCollectionAtUtc).ToUniversalTime() -gt $collectionBeforeEngineFailure) {
+        $engineRecoveryVerified = $true
+        break
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  } while ([DateTimeOffset]::UtcNow -lt $engineRecoveryDeadline)
+  if (-not $engineRecoveryVerified) {
+    throw "Service did not restart Engine process $engineProcessId and report a fresh collection while retaining service PID $serviceProcessId."
+  }
+  Write-Host "PASS: Service restarted Engine process $engineProcessId while retaining service PID $serviceProcessId and reported a fresh collection."
 
   $serviceBeforeCrash = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
   $crashedProcessId = [int]$serviceBeforeCrash.ProcessId
