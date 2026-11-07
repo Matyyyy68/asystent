@@ -26,7 +26,7 @@ public sealed class ServiceEventNotificationPolicyTests
     {
         var level = Enum.Parse<RiskLevel>(risk);
         var action = Sentinel.Core.Analysis.RiskEngine.DecideResponse(level).Action;
-        var recommendsNotification = action is Sentinel.Core.Analysis.ResponseAction.NotifyForReview or Sentinel.Core.Analysis.ResponseAction.UrgentReview;
+        var recommendsNotification = action is Sentinel.Core.Analysis.RiskEngine.ResponseAction.NotifyForReview or Sentinel.Core.Analysis.RiskEngine.ResponseAction.UrgentReview;
 
         Assert.Equal(expected, recommendsNotification);
         Assert.Equal(recommendsNotification, ServiceEventNotificationPolicy.ShouldNotify(risk));
