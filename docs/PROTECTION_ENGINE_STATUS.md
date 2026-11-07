@@ -5,12 +5,12 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Dowody wykonania
 
-Najnowszy pełny Windows CI dla commita [`1988ad5`](https://github.com/Matyyyy68/asystent/commit/1988ad512d148818c9f0a8d58c079d353d5dbce0) zakończył się sukcesem w [run 42412202567](https://github.com/Matyyyy68/asystent/actions/runs/42412202567): .NET 565/565, audyt NuGet, benchmark silnika, test SCM/LocalService/ACL, Downloads redirection i 120-sekundowy soak, autostart, Chrome/Edge, headless install/update/rollback/uninstall, widoczny install/repair/uninstall oraz Enterprise API i HTTP smoke. Instalator w ścieżce instalacji weryfikuje teraz zapisane reguły odzyskiwania SCM. CI działał na izolowanym runnerze GitHub; nie wykonano celowego crash-testu usługi ani pełnego restartu na czystym fizycznym komputerze.
+Najnowszy pełny Windows CI dla commita [`6669812`](https://github.com/Matyyyy68/asystent/commit/66698128a6cf0ebc7472d192eaa4732e0ec9c726) zakończył się sukcesem w [run 42413895883](https://github.com/Matyyyy68/asystent/actions/runs/42413895883): .NET 565/565 i wszystkie 23 kroki workflow przeszły. Oprócz testów SCM/LocalService/ACL, benchmarku, Downloads soak, Chrome/Edge, instalacji headless i widocznego kreatora CI celowo zakończył proces tymczasowej usługi Windows, potwierdził restart przez SCM z PID 3188 do 5496 i świeży cykl Engine. Ustawienia produkcyjne instalatora są oddzielnie odczytywane i walidowane. Próba dotyczy izolowanego runnera; fizyczny restart na czystym komputerze nie był testowany.
 
 ## Zaimplementowane i zweryfikowane
 
 - Silnik działa niezależnie od okna aplikacji jako usługa SCM; monitoruje stan kolekcji i podejmuje ograniczone próby restartu.
-- Po instalacji kreator sprawdza w Windows SCM, czy zapisano reset licznika 24 h, dwa ponowne uruchomienia z opóźnieniem 60 s i flagę odzyskiwania przy niecrashowym zatrzymaniu. Headless i widoczny test instalatora przeszły w runie 42412202567; test nie wymusza awarii usługi.
+- Po instalacji kreator sprawdza w Windows SCM reset licznika 24 h, dwa ponowne uruchomienia z opóźnieniem 60 s i flagę odzyskiwania przy niecrashowym zatrzymaniu. Windows CI 42412202567 i 42413895883 przeszły instalację headless i GUI. Izolowany test SCM zakończył proces usługi i potwierdził automatyczny restart oraz świeży collect Engine; harmonogram testowy ma krótki delay, produkcyjny pozostaje 60 s.
 - Zdarzenia procesów pochodzą z WMI, gdy dostępne; snapshot PID stanowi jawny fallback.
 - Kolekcja obejmuje wybrane zdarzenia procesu, Downloads, obserwacje TCP/UDP/DNS oraz wybrane ustawienia trwałości i zabezpieczeń systemu.
 - Zdarzenia są normalizowane i korelowane w ograniczonym zakresie przez PID, hash, identyfikatory i okna czasu; historia jest lokalna.
