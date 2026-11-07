@@ -127,6 +127,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             CREATE INDEX IF NOT EXISTS ix_domain_correlation_last_seen ON domain_correlation(last_seen_ticks);
             CREATE TABLE IF NOT EXISTS dns_operational_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), last_record_id INTEGER NULL CHECK(last_record_id IS NULL OR last_record_id>=0));
             INSERT OR IGNORE INTO dns_operational_monitor_metadata(id,last_record_id) VALUES(1,NULL);
+            CREATE TABLE IF NOT EXISTS windows_defender_operational_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), last_record_id INTEGER NULL CHECK(last_record_id IS NULL OR last_record_id>=0));
+            INSERT OR IGNORE INTO windows_defender_operational_monitor_metadata(id,last_record_id) VALUES(1,NULL);
             INSERT OR IGNORE INTO installation_profile(id,json) VALUES(1,$profile);
             COMMIT;
             """, ct, ("$profile", JsonSerializer.Serialize(initialProfile ?? new InstalledProductProfile())));
@@ -588,6 +590,25 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var connection = await Open(cancellationToken);
         using var command = connection.CreateCommand();
         command.CommandText = "INSERT INTO dns_operational_monitor_metadata(id,last_record_id) VALUES(1,$recordId) ON CONFLICT(id) DO UPDATE SET last_record_id=excluded.last_record_id";
+        command.Parameters.AddWithValue("$recordId", recordId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<long?> GetWindowsDefenderOperationalRecordCursorAsync(CancellationToken cancellationToken = default)
+    {
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT last_record_id FROM windows_defender_operational_monitor_metadata WHERE id=1";
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    public async Task SetWindowsDefenderOperationalRecordCursorAsync(long recordId, CancellationToken cancellationToken = default)
+    {
+        if (recordId < 0) throw new ArgumentOutOfRangeException(nameof(recordId));
+        await using var connection = await Open(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO windows_defender_operational_monitor_metadata(id,last_record_id) VALUES(1,$recordId) ON CONFLICT(id) DO UPDATE SET last_record_id=excluded.last_record_id";
         command.Parameters.AddWithValue("$recordId", recordId);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
