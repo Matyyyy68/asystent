@@ -38,6 +38,28 @@ public sealed class StoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.ReadAfterAsync(0, 33));
     }
 
+    [Fact] public async Task DownloadMonitorPersistsCentralResponseDecisionWithDetection()
+    {
+        var store = await Store();
+        var path = Path.Combine(dir, "Downloads", "synthetic.exe");
+        var file = new DownloadFileFingerprint(path, 128, DateTimeOffset.UtcNow.UtcTicks);
+        var detected = Event() with
+        {
+            Risk = RiskLevel.High,
+            Category = "Synthetic download detection",
+            Recommendation = "Review the file",
+            EventId = Guid.NewGuid(),
+            Source = "downloads-test"
+        };
+
+        await store.CommitDownloadedFileMonitorResultAsync(file, detected);
+
+        var saved = Assert.Single(await store.ReadAsync());
+        Assert.Contains("response.high-review", saved.Recommendation);
+        Assert.Contains("proces lub ruch nie zostały zablokowane", saved.Recommendation);
+        Assert.Equal(file, Assert.Single((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Values));
+    }
+
     [Fact] public async Task ForwardedEventImportIsBoundedAndIdempotentByEventId()
     {
         var store = await Store();
