@@ -10,6 +10,6 @@ public static class ServiceEventNotificationPolicy
         if (!Enum.TryParse<RiskLevel>(risk, ignoreCase: false, out var level) || !Enum.IsDefined(level))
             return false;
 
-        return RiskEngine.DecideResponse(level).Action is ResponseAction.NotifyForReview or ResponseAction.UrgentReview;
+        return RiskEngine.DecideResponse(level).Action is RiskEngine.ResponseAction.NotifyForReview or RiskEngine.ResponseAction.UrgentReview;
     }
 }
