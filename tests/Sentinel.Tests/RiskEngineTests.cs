@@ -91,4 +91,27 @@ public sealed class RiskEngineTests
         Assert.Equal(0, result.Score);
         Assert.Equal(RiskLevel.Information, result.Level);
     }
+
+    [Theory]
+    [InlineData(RiskLevel.Information, RiskEngine.ResponseAction.RecordOnly, "response.record-only")]
+    [InlineData(RiskLevel.Low, RiskEngine.ResponseAction.ReviewInHistory, "response.review-in-history")]
+    [InlineData(RiskLevel.Moderate, RiskEngine.ResponseAction.NotifyForReview, "response.notify-review")]
+    [InlineData(RiskLevel.High, RiskEngine.ResponseAction.UrgentReview, "response.high-review")]
+    [InlineData(RiskLevel.Critical, RiskEngine.ResponseAction.UrgentReview, "response.critical-review")]
+    public void ResponseDecisionIsProportionateAndNeverClaimsAutomaticProtection(
+        RiskLevel risk, RiskEngine.ResponseAction expectedAction, string expectedCode)
+    {
+        var decision = RiskEngine.DecideResponse(risk);
+
+        Assert.Equal(expectedAction, decision.Action);
+        Assert.Equal(expectedCode, decision.Code);
+        Assert.False(decision.AutomaticProtectionPerformed);
+        Assert.False(string.IsNullOrWhiteSpace(decision.Guidance));
+    }
+
+    [Fact]
+    public void ResponseDecisionRejectsUnknownRiskLevel()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => RiskEngine.DecideResponse((RiskLevel)999));
+    }
 }
