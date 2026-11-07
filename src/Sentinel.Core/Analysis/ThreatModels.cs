@@ -6,7 +6,7 @@ public sealed record ThreatIndicator(string Id, string Description, int Weight, 
     IReadOnlyList<KnowledgeCitation>? KnowledgeCitations = null);
 public sealed record ThreatAssessment(ThreatCategory Category, RiskLevel Risk,
     IReadOnlyList<ThreatIndicator> Indicators, IReadOnlyList<string> Uncertainties,
-    IReadOnlyList<string> Recommendations, string Explanation);
+    IReadOnlyList<string> Recommendations, string Explanation, int RiskScore = 0);
 public static class AnalysisLimitationCodes
 {
     public const string BrowserRedirectChainUnverified = "analysis.redirect-chain-unverified";

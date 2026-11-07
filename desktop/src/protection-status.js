@@ -1,4 +1,4 @@
-const unavailable = /niedostępny|niedostępna|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione|jeszcze nie wykonano/i;
+const unavailable = /niedostępn(?:y|a|e)|nie można|nie mogę|nie może|nie mógł|nie mogła|wyłączon(?:y|a|e)|wstrzyman(?:y|a|e)|nie działa|błąd|limit|nie zostało uruchomione|jeszcze nie wykonano/i;
 
 export function getProtectionStatus(status, firstRun, firstAssessment, machineService) {
   if (!status) return { title: 'Ochrona niedostępna', description: 'Silnik nie odpowiada. Nie można potwierdzić działania monitorowania.' };
@@ -10,9 +10,14 @@ export function getProtectionStatus(status, firstRun, firstAssessment, machineSe
     return { title: 'Ochrona wstrzymana', description: 'Monitorowanie jest wstrzymane. Nie można potwierdzić bieżącej ochrony.' };
   if (machineService !== undefined && machineService?.available !== true)
     return { title: 'Ochrona ograniczona', description: 'Nie mogę potwierdzić działania chronionej usługi systemowej. Monitorowanie w tej sesji może działać, ale nie potwierdzono ochrony w tle.' };
+  const engineStatus = status.protectionStatus;
+  if (engineStatus && ['INITIALIZING', 'LIMITED_PROTECTION', 'ATTENTION_REQUIRED', 'DISABLED'].includes(engineStatus.state) &&
+      typeof engineStatus.title === 'string' && typeof engineStatus.description === 'string')
+    return { title: engineStatus.title, description: engineStatus.description };
 
   const monitors = [
     ['Procesy', status.processes, true],
+    ['Zdarzenia startu procesów', status.processEvents, true],
     ['Pobrane pliki', status.downloadedFiles, status.settings?.monitorDownloadedFiles],
     ['Zmiany autostartu', status.persistence, status.settings?.monitorPersistenceChanges],
     ['Połączenia sieciowe', status.tcpConnections, status.settings?.monitorNetworkConnections]

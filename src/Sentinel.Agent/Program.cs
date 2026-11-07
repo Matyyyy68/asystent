@@ -412,7 +412,7 @@ internal static class Program
                     _ = serviceEventNotificationCursor.TryResetToLatest(batch.LatestEventId);
                 else if (notifyForNewEvents)
                 {
-                    foreach (var eventId in batch.Events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
+                    foreach (var eventId in batch.Events.Where(item => item.Status == "New" && ServiceEventNotificationPolicy.ShouldNotify(item.Risk)).Select(item => item.Id).Distinct())
                     {
                         if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
                         NotifyOnce("service-event-" + eventId, "Sentinel AI — nowe zdarzenie",
@@ -470,7 +470,8 @@ internal static class Program
                         item.TryGetProperty("processId", out var pid) && pid.TryGetInt32(out var processId) ? processId : null,
                         item.TryGetProperty("processName", out var process) && process.ValueKind == JsonValueKind.String ? process.GetString() : null,
                         item.TryGetProperty("correlationId", out var correlation) && correlation.ValueKind == JsonValueKind.String && correlation.TryGetGuid(out var correlationId) ? correlationId : null,
-                        ReadStringArray(item, "evidenceCodes", 32), ReadStringArray(item, "analysisLimitations", 16)));
+                        ReadStringArray(item, "evidenceCodes", 32), ReadStringArray(item, "analysisLimitations", 16),
+                        item.TryGetProperty("riskScore", out var riskScore) && riskScore.TryGetInt32(out var scoreValue) ? scoreValue : null));
                 }
                 if (batch.Count == 0) return;
                 var acknowledged = await SystemServiceEventsClient.ForwardEventsAsync(batch, shutdown.Token);

@@ -20,16 +20,22 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private readonly Func<PersistenceBaseSnapshotCapture> capture;
     private readonly Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks;
     private readonly Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices;
+    private readonly Func<IReadOnlyCollection<string>> startupWatcherRoots;
+    private readonly List<FileSystemWatcher> startupWatchers = [];
     private readonly TimeSpan minimumInterval;
     private long? lastAttemptTimestamp;
     private bool? wasEnabled;
+    private int startupChangePending;
+    private int startupWatcherNeedsReset;
+    private bool startupWatchersInitialized;
+    private string startupWatcherStatus = "zdarzeniowe powiadomienia folderów Startup nie zostały uruchomione";
 
     public string State { get; private set; } = "Monitor zmian autostartu jest wyłączony.";
     public int LastSuspiciousChanges { get; private set; }
 
     public WindowsPersistenceSnapshotMonitor(TimeSpan? minimumInterval = null)
         : this(CaptureSupportedPlatform, WindowsScheduledTaskSnapshotReader.CaptureAsync,
-            _ => Task.FromResult(CaptureServiceRegistry()), minimumInterval) { }
+            _ => Task.FromResult(CaptureServiceRegistry()), minimumInterval, CaptureStartupWatcherRoots) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<IReadOnlyDictionary<string, PersistenceSnapshotEntry>> capture,
@@ -53,17 +59,19 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
         TimeSpan? minimumInterval = null)
         : this(() => new PersistenceBaseSnapshotCapture(true, capture(), true, true, "dostępne"),
-            captureScheduledTasks, captureServices, minimumInterval) { }
+            captureScheduledTasks, captureServices, minimumInterval, null) { }
 
     public WindowsPersistenceSnapshotMonitor(
         Func<PersistenceBaseSnapshotCapture> capture,
         Func<CancellationToken, Task<ScheduledTaskSnapshotCapture>> captureScheduledTasks,
         Func<CancellationToken, Task<PersistenceRegistrySnapshotCapture>> captureServices,
-        TimeSpan? minimumInterval = null)
+        TimeSpan? minimumInterval = null,
+        Func<IReadOnlyCollection<string>>? startupWatcherRoots = null)
     {
         this.capture = capture ?? throw new ArgumentNullException(nameof(capture));
         this.captureScheduledTasks = captureScheduledTasks ?? throw new ArgumentNullException(nameof(captureScheduledTasks));
         this.captureServices = captureServices ?? throw new ArgumentNullException(nameof(captureServices));
+        this.startupWatcherRoots = startupWatcherRoots ?? (() => Array.Empty<string>());
         this.minimumInterval = minimumInterval ?? TimeSpan.FromSeconds(30);
         if (this.minimumInterval < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minimumInterval));
     }
@@ -74,6 +82,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         LastSuspiciousChanges = 0;
         if (!enabled || paused)
         {
+            StopStartupWatchers();
             if (wasEnabled is null or true)
             {
                 try { await store.ResetWindowsPersistenceMonitorSnapshotAsync(cancellationToken); }
@@ -96,7 +105,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             return 0;
         }
 
-        if (wasEnabled == true && lastAttemptTimestamp is { } previous && Stopwatch.GetElapsedTime(previous) < minimumInterval) return 0;
+        EnsureStartupWatchers();
+        var startupChangeObserved = Interlocked.Exchange(ref startupChangePending, 0) != 0;
+        if (wasEnabled == true && !startupChangeObserved && lastAttemptTimestamp is { } previous && Stopwatch.GetElapsedTime(previous) < minimumInterval) return 0;
         wasEnabled = true;
         lastAttemptTimestamp = Stopwatch.GetTimestamp();
 
@@ -315,7 +326,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 State = "Nie można ustawić lokalnego baseline'u autostartu: " + exception.GetType().Name;
                 return 0;
             }
-            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
+            State = $"Monitor zmian autostartu działa; ustawiono baseline {snapshot.Count} wpisów. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {startupWatcherStatus}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
             return 0;
         }
         var baseline = stored.Entries.ToDictionary(pair => pair.Key,
@@ -333,6 +344,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             var isStartupApproved = source.Contains(".startup.approved.", StringComparison.Ordinal);
             var sourceName = source switch
             {
+                "security.file.hosts" => "plik hosts Windows",
+                "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
                 "registry.user.run" => "HKCU Run",
                 "registry.user.runonce" => "HKCU RunOnce",
                 "registry.machine64.run" => "HKLM Run (64-bit)",
@@ -366,6 +379,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             };
             var sourceSubject = source switch
             {
+                "security.file.hosts" => "plik hosts Windows",
+                "security.registry.defender.exclusion" => "wykluczenie Microsoft Defender",
                 "scheduled.task" => "zaplanowane zadanie Windows",
                 "registry.service" => "usługę Windows",
                 "registry.driver" => "sterownik Windows",
@@ -375,7 +390,9 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 _ when isStartupApproved => "stan zatwierdzenia wpisu autostartu Windows",
                 _ => "wpis autostartu"
             };
-            var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
+            var eventApplication = isWinlogon ? "Logowanie Windows · " + sourceName : source == "security.file.hosts"
+                ? "Konfiguracja sieci Windows · " + sourceName : source == "security.registry.defender.exclusion"
+                ? "Konfiguracja Microsoft Defender · " + sourceName : source is "scheduled.task" or "registry.service" or "registry.driver"
                 or "registry.machine64.ifeo" or "registry.machine32.ifeo"
                 or "registry.machine64.silent.exit" or "registry.machine32.silent.exit"
                 or "registry.machine64.shell.delay" or "registry.machine32.shell.delay"
@@ -383,6 +400,8 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
             if (isStartupApproved) eventApplication = "Autostart Windows · StartupApproved";
             var recommendation = source switch
             {
+                "security.file.hosts" => "Sprawdź zmianę lokalnego mapowania nazw hostów. Sentinel zapisuje wyłącznie skrót pliku.",
+                "security.registry.defender.exclusion" => "Sprawdź wykluczenia Microsoft Defender w Zabezpieczeniach Windows. Sentinel nie zapisuje nazw ani ścieżek wykluczeń i nie zmienia ustawień ochrony.",
                 "scheduled.task" => "Sprawdź wpis w Harmonogramie zadań Windows. Sentinel nie uruchamia ani nie usuwa zadań.",
                 "registry.service" or "registry.driver" => "Sprawdź konfigurację usługi lub sterownika w Windows. Sentinel nie zmienia konfiguracji ani nie zatrzymuje komponentów.",
                 "registry.machine64.ifeo" or "registry.machine32.ifeo" => "Sprawdź konfigurację IFEO Debugger dla aplikacji w rejestrze Windows. Sentinel nie zmienia wpisu ani nie uruchamia debuggera.",
@@ -425,13 +444,18 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                 "scheduled.task" => "scheduled-task",
                 "registry.service" => "service",
                 "registry.driver" => "driver",
+                "security.file.hosts" => "hosts",
+                "security.registry.defender.exclusion" => "defender-exclusion",
                 _ => "unknown"
             };
             var evidence = new List<string> { "persistence." + evidenceScope + "." + change.Kind.ToString().ToLowerInvariant() };
             if (suspicious) evidence.Add("persistence.target.user-writable-location");
-            var item = new SecurityEvent(0, now, suspicious ? RiskLevel.Low : RiskLevel.Information,
+            var assessment = RiskEngine.EvaluateEvidenceCodes(evidence);
+            var item = new SecurityEvent(0, now, assessment.Level,
                 isWinlogon ? "Zmiana konfiguracji logowania Windows" : source switch
                 {
+                    "security.file.hosts" => "Zmiana pliku hosts Windows",
+                    "security.registry.defender.exclusion" => "Zmiana wykluczeń Microsoft Defender",
                     "scheduled.task" => "Zmiana zaplanowanego zadania Windows",
                     "registry.service" => "Zmiana usługi Windows",
                     "registry.driver" => "Zmiana sterownika Windows",
@@ -441,12 +465,16 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
                     _ when isStartupApproved => "Zmiana statusu aplikacji startowej Windows",
                     _ => "Zmiana autostartu Windows"
                 }, eventApplication,
-                isWinlogon
+                source == "security.file.hosts"
+                    ? $"Wykryto, że {verb} plik hosts Windows. Treść pliku nie jest zapisywana."
+                    : source == "security.registry.defender.exclusion"
+                    ? $"Wykryto, że {verb} wykluczenie Microsoft Defender. Nazwa i wartość wykluczenia nie są zapisywane."
+                    : isWinlogon
                     ? $"Wykryto zmianę konfiguracji logowania Windows ({verb}). Surowa nazwa wartości i polecenie nie są zapisywane."
                     : $"Wykryto, że {verb} {sourceSubject}. Surowa nazwa, polecenie i ścieżka nie są zapisywane.",
                 recommendation,
                 EventStatus.New, EventId: Guid.NewGuid(), Source: "windows-persistence-snapshot",
-                RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence);
+                RuleVersion: ThreatAnalysisEngine.RulesVersion, EvidenceCodes: evidence, RiskScore: assessment.Score);
             try { await store.CommitWindowsPersistenceChangeAsync(change.Key, change.Current is null ? null : current[change.Key], item, cancellationToken); }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -468,9 +496,88 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
 
         var pending = GetChanges(baseline, snapshot).Count;
         State = pending > 0
-            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd()
-            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
+            ? $"Monitor zmian autostartu działa; zapisano {recorded} zmian, {pending} czeka na kolejną próbkę z powodu limitu. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {startupWatcherStatus}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd()
+            : $"Monitor zmian autostartu działa; {snapshot.Count} wpisów użytkownika i systemu, zapisano {recorded} zmian. Scheduled Tasks: {scheduledTaskStatus}. Usługi/sterowniki: {serviceStatus}. IFEO: {string.Join(", ", ifeoStatuses)}. {startupWatcherStatus}. {baseCapture.Status}{baseSourceFailureStatus}".TrimEnd();
         return recorded;
+    }
+
+    private void EnsureStartupWatchers()
+    {
+        if (Interlocked.Exchange(ref startupWatcherNeedsReset, 0) != 0)
+        {
+            foreach (var existing in startupWatchers) existing.Dispose();
+            startupWatchers.Clear();
+            startupWatchersInitialized = false;
+        }
+        if (startupWatchersInitialized) return;
+        startupWatchersInitialized = true;
+        var created = 0;
+        try
+        {
+            foreach (var root in startupWatcherRoots().Where(path => !string.IsNullOrWhiteSpace(path))
+                         .Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Take(2))
+            {
+                if (!Directory.Exists(root)) continue;
+                var attributes = File.GetAttributes(root);
+                if ((attributes & FileAttributes.Directory) == 0 || (attributes & FileAttributes.ReparsePoint) != 0) continue;
+                var watcher = new FileSystemWatcher(root)
+                {
+                    IncludeSubdirectories = false,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    InternalBufferSize = 4096
+                };
+                watcher.Created += OnStartupFileChanged;
+                watcher.Changed += OnStartupFileChanged;
+                watcher.Deleted += OnStartupFileChanged;
+                watcher.Renamed += OnStartupFileRenamed;
+                watcher.Error += OnStartupWatcherError;
+                watcher.EnableRaisingEvents = true;
+                startupWatchers.Add(watcher);
+                created++;
+            }
+            startupWatcherStatus = created == 0
+                ? "FileSystemWatcher folderów Startup niedostępny; zmiany są sprawdzane snapshotem okresowym"
+                : $"FileSystemWatcher aktywny dla {created} folderów Startup; snapshot potwierdza wykryte zmiany";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException)
+        {
+            foreach (var watcher in startupWatchers) watcher.Dispose();
+            startupWatchers.Clear();
+            startupWatcherStatus = "FileSystemWatcher folderów Startup niedostępny (" + exception.GetType().Name + "); używany jest snapshot okresowy";
+        }
+    }
+
+    private void StopStartupWatchers()
+    {
+        foreach (var watcher in startupWatchers) watcher.Dispose();
+        startupWatchers.Clear();
+        startupWatchersInitialized = false;
+        Interlocked.Exchange(ref startupChangePending, 0);
+        Interlocked.Exchange(ref startupWatcherNeedsReset, 0);
+        startupWatcherStatus = "zdarzeniowe powiadomienia folderów Startup są wstrzymane";
+    }
+
+    private void OnStartupFileChanged(object sender, FileSystemEventArgs args)
+        => Interlocked.Exchange(ref startupChangePending, 1);
+
+    private void OnStartupFileRenamed(object sender, RenamedEventArgs args)
+        => Interlocked.Exchange(ref startupChangePending, 1);
+
+    private void OnStartupWatcherError(object sender, ErrorEventArgs args)
+    {
+        Interlocked.Exchange(ref startupChangePending, 1);
+        Interlocked.Exchange(ref startupWatcherNeedsReset, 1);
+        startupWatcherStatus = "błąd FileSystemWatcher folderów Startup; ponawiane jest utworzenie obserwatorów";
+    }
+
+    private static IReadOnlyCollection<string> CaptureStartupWatcherRoots()
+    {
+        var roots = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup)
+        };
+        return roots.Where(path => !string.IsNullOrWhiteSpace(path)).ToArray();
     }
 
     private static IReadOnlyList<PersistenceChange> GetChanges(
@@ -498,6 +605,7 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
     private static bool IsSupportedBaseSource(string source) => source is
         "registry.user.run" or "registry.user.runonce" or "registry.user.runonceex" or "registry.user.policy.run" or
         "registry.user.winlogon" or "registry.user.startup.approved" or "startup.user" or "startup.common" or
+        "security.file.hosts" or "security.registry.defender.exclusion" or
         "registry.machine64.run" or "registry.machine64.runonce" or "registry.machine64.runonceex" or
         "registry.machine64.policy.run" or "registry.machine64.winlogon" or "registry.machine64.appinit" or
         "registry.machine64.startup.approved" or "registry.machine64.silent.exit" or "registry.machine64.shell.delay" or
@@ -560,7 +668,89 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         }
         CaptureSource("startup.user", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "startup.user", entries), entries, unavailableSources);
         CaptureSource("startup.common", () => CaptureStartupFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "startup.common", entries), entries, unavailableSources);
+        CaptureSource("security.file.hosts", () => CaptureSecurityConfigurationFile(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "etc", "hosts"), entries), entries, unavailableSources);
+        var defenderView = Environment.Is64BitOperatingSystem ? RegistryView.Registry64 : RegistryView.Default;
+        CaptureSource("security.registry.defender.exclusion", () => CaptureDefenderExclusions(defenderView, entries), entries, unavailableSources);
         return new(true, entries, ifeoMachine64Available, ifeoMachine32Available, string.Join(", ", unavailable), unavailableSources);
+    }
+
+    private const string DefenderExclusionSource = "security.registry.defender.exclusion";
+    private const string DefenderExclusionRegistryPath = "SOFTWARE\\Microsoft\\Windows Defender\\Exclusions";
+
+    [SupportedOSPlatform("windows")]
+    private static void CaptureDefenderExclusions(RegistryView view, IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+        using var exclusions = baseKey.OpenSubKey(DefenderExclusionRegistryPath, writable: false);
+        if (exclusions is null) return;
+        var inspected = 0;
+        foreach (var category in new[] { "Paths", "Processes", "Extensions" })
+        {
+            using var values = exclusions.OpenSubKey(category, writable: false);
+            if (values is null) continue;
+            foreach (var name in values.GetValueNames().OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrEmpty(name)) continue;
+                if (++inspected > MaximumEntries) throw new InvalidDataException("Liczba wykluczeń Defendera przekracza limit snapshotu.");
+                var value = values.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                var valueKind = values.GetValueKind(name);
+                var snapshot = CreateDefenderExclusionSnapshotEntry(category, name, valueKind.ToString(), value);
+                if (!entries.ContainsKey(snapshot.Key) && entries.Count >= MaximumEntries)
+                    throw new InvalidDataException("Łączna liczba źródeł autostartu i zabezpieczeń przekracza limit snapshotu.");
+                entries[snapshot.Key] = snapshot.Entry;
+            }
+        }
+    }
+
+    internal static (string Key, PersistenceSnapshotEntry Entry) CreateDefenderExclusionSnapshotEntry(
+        string category, string name, string kind, object? value)
+    {
+        if (category is not ("Paths" or "Processes" or "Extensions") || string.IsNullOrWhiteSpace(name) || name.Length > 4096)
+            throw new ArgumentException("Nieprawidłowy wpis wykluczeń Defendera.");
+        var data = value switch
+        {
+            null => string.Empty,
+            string text => text,
+            string[] values => string.Join("\0", values),
+            byte[] bytes => Convert.ToHexString(bytes),
+            int number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            long number => number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty
+        };
+        if (data.Length > 16384) throw new InvalidDataException("Wartość wykluczenia Defendera przekracza limit snapshotu.");
+        var canonical = category.ToUpperInvariant() + "\0" + name.ToUpperInvariant() + "\0" + kind + "\0" + data;
+        var key = CreateKey(DefenderExclusionSource, category + "\0" + name);
+        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        return (key, new PersistenceSnapshotEntry(DefenderExclusionSource, fingerprint, false));
+    }
+
+    private static void CaptureSecurityConfigurationFile(string path, IDictionary<string, PersistenceSnapshotEntry> entries)
+    {
+        var fingerprint = ComputeSecurityConfigurationFingerprint(path);
+        if (fingerprint is not null)
+            entries[CreateKey("security.file.hosts", "system-hosts")] = new("security.file.hosts", fingerprint, false);
+    }
+
+    internal static string? ComputeSecurityConfigurationFingerprint(string path)
+    {
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(path); }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+        if ((attributes & FileAttributes.Directory) != 0 || (attributes & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("Security configuration file is not a regular file.");
+
+        var before = new FileInfo(path);
+        const long maximumBytes = 4 * 1024 * 1024;
+        if (!before.Exists || before.Length > maximumBytes) throw new IOException("Security configuration file exceeds its size limit.");
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length > maximumBytes) throw new IOException("Security configuration file exceeds its size limit.");
+        var fingerprint = Convert.ToHexString(SHA256.HashData(stream));
+        var after = new FileInfo(path);
+        if (!after.Exists || after.Length != before.Length || after.LastWriteTimeUtc != before.LastWriteTimeUtc)
+            throw new IOException("Security configuration file changed during hashing.");
+        return fingerprint;
     }
 
     private static void CaptureSource(string source, Action capture, IDictionary<string, PersistenceSnapshotEntry> entries,
@@ -945,9 +1135,14 @@ public sealed class WindowsPersistenceSnapshotMonitor : IDisposable
         return source + ":" + stable;
     }
 
-    public void Dispose() { lastAttemptTimestamp = null; }
+    public void Dispose()
+    {
+        StopStartupWatchers();
+        lastAttemptTimestamp = null;
+    }
 
     private enum PersistenceChangeKind { Added, Changed, Removed }
     private sealed record PersistenceChange(string Key, PersistenceChangeKind Kind,
         PersistenceSnapshotEntry? Previous, PersistenceSnapshotEntry? Current);
 }
+

@@ -52,7 +52,15 @@ jobs:
         run: ./scripts/audit-nuget.ps1
       - name: Build and test application
         shell: pwsh
+        env:
+          SENTINEL_TEST_REQUIRE_WMI: '1'
         run: ./scripts/build-user.ps1 -Installer -AllowDownloads
+      - name: Measure Engine idle and controlled TCP burst workload
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          node scripts/benchmark-engine.cjs --duration=30 --interval-ms=1000 --tcp-monitor --tcp-connections=32
+          if ($LASTEXITCODE) { throw 'Engine resource and TCP burst benchmark failed' }
       - name: Verify illustration library and its use in the app, installer and website
         run: node scripts/test-illustrations.mjs
       - name: Verify SCM service startup, identity, data ACL, and first collection
