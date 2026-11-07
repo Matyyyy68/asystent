@@ -1530,5 +1530,30 @@ public sealed class StoreTests : IDisposable
         var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(MinimumIntervalSeconds:seconds)));
     }
     public void Dispose() { if(Directory.Exists(dir)) Directory.Delete(dir,true); }
+    [Fact]
+    public async Task ProcessImageInspectionRecomputesRiskAndResponseFromAuthenticodeEvidence()
+    {
+        var store = await Store();
+        var eventId = Guid.NewGuid();
+        await store.AddLocalOnlyAsync(Event() with { EventId = eventId, Source = "process-wmi", ProcessId = 123,
+            ProcessName = "test-process", ProcessImagePath = Path.Combine(dir, "test-process.exe"),
+            ProcessImageSignatureStatus = "Pending", Risk = RiskLevel.Information, RiskScore = 0,
+            EvidenceCodes = ["process.snapshot.new-pid"] });
+
+        await store.UpdateProcessImageInspectionAsync(eventId, null, "NotSigned", null);
+        var unsigned = Assert.Single(await store.ReadAsync());
+        Assert.Equal(RiskLevel.Information, unsigned.Risk);
+        Assert.Equal(0, unsigned.RiskScore);
+        Assert.Contains("(response.record-only)", unsigned.Recommendation);
+
+        await store.UpdateProcessImageInspectionAsync(eventId, null, "HashMismatch", null);
+        var mismatched = Assert.Single(await store.ReadAsync());
+        Assert.Equal(RiskLevel.Moderate, mismatched.Risk);
+        Assert.Equal(44, mismatched.RiskScore);
+        Assert.Contains("process.image.authenticode.hashmismatch", mismatched.EvidenceCodes!);
+        Assert.Contains("(response.notify-review)", mismatched.Recommendation);
+        Assert.DoesNotContain("(response.record-only)", mismatched.Recommendation);
+    }
+
 }
 

@@ -82,6 +82,18 @@ public sealed class RiskEngineTests
         Assert.Equal(RiskLevel.Information, result.Level);
     }
 
+    [Theory]
+    [InlineData("process.image.authenticode.not-signed", 0, RiskLevel.Information)]
+    [InlineData("process.image.authenticode.nottrusted", 30, RiskLevel.Low)]
+    [InlineData("process.image.authenticode.hashmismatch", 44, RiskLevel.Moderate)]
+    public void SignatureEvidenceIsProportionateAndDoesNotTreatUnsignedAsMalware(string evidenceCode, int score, RiskLevel level)
+    {
+        var result = RiskEngine.EvaluateEvidenceCodes([evidenceCode]);
+
+        Assert.Equal(score, result.Score);
+        Assert.Equal(level, result.Level);
+    }
+
     [Fact]
     public void UnverifiedLocalHashFeedDoesNotProduceNumericRisk()
     {

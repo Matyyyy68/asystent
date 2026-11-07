@@ -53,17 +53,22 @@ public static class RiskEngine
     public static SecurityEvent ApplyResponseDecision(SecurityEvent item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        var decision = DecideResponse(item.Risk);
-        var marker = $"({decision.Code})";
-        if ((item.Recommendation ?? string.Empty).Contains(marker, StringComparison.Ordinal))
-            return item;
+        return item with { Recommendation = ApplyResponseDecision(item.Risk, item.Recommendation) };
+    }
 
-        var suffix = $" Zalecenie Sentinel {marker}: {decision.Guidance}";
+    public static string ApplyResponseDecision(RiskLevel risk, string? recommendation)
+    {
+        var decision = DecideResponse(risk);
+        const string generatedSuffixStart = " Zalecenie Sentinel (response.";
+        var baseRecommendation = recommendation ?? string.Empty;
+        var previousSuffix = baseRecommendation.IndexOf(generatedSuffixStart, StringComparison.Ordinal);
+        if (previousSuffix >= 0) baseRecommendation = baseRecommendation[..previousSuffix].TrimEnd();
+
+        var suffix = $" Zalecenie Sentinel ({decision.Code}): {decision.Guidance}";
         const int maximumRecommendationCharacters = 1000;
-        var recommendation = item.Recommendation ?? string.Empty;
-        if (recommendation.Length + suffix.Length > maximumRecommendationCharacters)
-            recommendation = recommendation[..Math.Max(0, maximumRecommendationCharacters - suffix.Length)].TrimEnd();
-        return item with { Recommendation = recommendation + suffix };
+        if (baseRecommendation.Length + suffix.Length > maximumRecommendationCharacters)
+            baseRecommendation = baseRecommendation[..Math.Max(0, maximumRecommendationCharacters - suffix.Length)].TrimEnd();
+        return baseRecommendation + suffix;
     }
 
     // Only evidence identifiers with a defined meaning contribute to scores for
@@ -76,6 +81,8 @@ public static class RiskEngine
             ["reputation.ip-feed.match"] = (4, ThreatCategory.SuspiciousNavigation),
             ["reputation.cert.current-feed-match"] = (4, ThreatCategory.SuspiciousNavigation),
             ["file.sha256.matches-local-list"] = (3, ThreatCategory.UnsafeExecution),
+            ["process.image.authenticode.hashmismatch"] = (4, ThreatCategory.UnsafeExecution),
+            ["process.image.authenticode.nottrusted"] = (2, ThreatCategory.UnsafeExecution),
             ["persistence.target.user-writable-location"] = (2, ThreatCategory.UnsafeExecution),
             ["correlation.process-network.office-spawned-script-host"] = (3, ThreatCategory.UnsafeExecution)
         };

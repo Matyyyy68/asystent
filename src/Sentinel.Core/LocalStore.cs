@@ -1702,27 +1702,33 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             throw new ArgumentException("Nieprawidłowy SHA-256 pliku procesu.");
         await using var c = await Open(cancellationToken); using var transaction = c.BeginTransaction();
         using var read = c.CreateCommand(); read.Transaction = transaction;
-        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source IN ('process-snapshot','process-wmi')";
+        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp,recommendation FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source IN ('process-snapshot','process-wmi')";
         read.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
-        long rowId; IReadOnlyList<string> evidence; Guid? processCorrelationId; DateTimeOffset processTimestamp;
+        long rowId; IReadOnlyList<string> evidence; Guid? processCorrelationId; DateTimeOffset processTimestamp; string recommendation;
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
         {
             if (!await reader.ReadAsync(cancellationToken)) { await transaction.RollbackAsync(cancellationToken); return; }
             rowId = reader.GetInt64(0); evidence = ParseEvidenceCodes(reader.GetString(1));
             processCorrelationId = reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2));
-            processTimestamp = DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture);
+            processTimestamp = DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture); recommendation = reader.GetString(4);
         }
         var codes = evidence.ToList();
         void AddCode(string code) { if (codes.Count < 32 && !codes.Contains(code, StringComparer.Ordinal)) codes.Add(code); }
         if (sha256 is not null) AddCode("process.image.sha256.available");
         if (signatureStatus is "Valid" or "NotSigned" or "HashMismatch" or "NotTrusted") AddCode("process.image.authenticode." + signatureStatus.ToLowerInvariant());
         if (localHashMatch == true) AddCode("process.image.local-hash-match");
+        var riskAssessment = RiskEngine.EvaluateEvidenceCodes(codes);
+        recommendation = RiskEngine.ApplyResponseDecision(riskAssessment.Level, recommendation);
         using var update = c.CreateCommand(); update.Transaction = transaction;
-        update.CommandText = "UPDATE events SET process_image_sha256=$sha256,process_image_signature_status=$signatureStatus,process_image_local_hash_match=$localHashMatch,evidence_codes=$evidence WHERE id=$id";
+        update.CommandText = "UPDATE events SET process_image_sha256=$sha256,process_image_signature_status=$signatureStatus,process_image_local_hash_match=$localHashMatch,evidence_codes=$evidence,risk=$risk,risk_score=$riskScore,recommendation=$recommendation WHERE id=$id";
         update.Parameters.AddWithValue("$sha256", (object?)sha256?.ToUpperInvariant() ?? DBNull.Value);
         update.Parameters.AddWithValue("$signatureStatus", signatureStatus);
         update.Parameters.AddWithValue("$localHashMatch", (object?)(localHashMatch is { } match ? (match ? 1 : 0) : null) ?? DBNull.Value);
-        update.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(codes)); update.Parameters.AddWithValue("$id", rowId);
+        update.Parameters.AddWithValue("$evidence", JsonSerializer.Serialize(codes));
+        update.Parameters.AddWithValue("$risk", (int)riskAssessment.Level);
+        update.Parameters.AddWithValue("$riskScore", riskAssessment.Score);
+        update.Parameters.AddWithValue("$recommendation", recommendation);
+        update.Parameters.AddWithValue("$id", rowId);
         await update.ExecuteNonQueryAsync(cancellationToken);
         using var updateObservation = c.CreateCommand(); updateObservation.Transaction = transaction;
         updateObservation.CommandText = "UPDATE event_observations SET evidence_codes=$evidence WHERE event_id=$eventId";
