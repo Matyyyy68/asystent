@@ -92,6 +92,31 @@ public sealed class RiskEngineTests
         Assert.Equal(RiskLevel.Information, result.Level);
     }
 
+    [Fact]
+    public void RejectsUnboundedEvidenceCodeInput()
+    {
+        var codes = Enumerable.Repeat("unknown.signal", 1025);
+
+        Assert.Throws<ArgumentException>(() => RiskEngine.EvaluateEvidenceCodes(codes));
+    }
+
+    [Fact]
+    public void RejectsTooManyDistinctIndicators()
+    {
+        var indicators = Enumerable.Range(0, 257).Select(index => Indicator("signal-" + index, 1));
+
+        Assert.Throws<ArgumentException>(() => RiskEngine.Evaluate(indicators));
+    }
+
+    [Fact]
+    public void RejectsUnboundedRawIndicatorInputEvenWhenDuplicated()
+    {
+        var indicator = Indicator("signal", 1);
+        var indicators = Enumerable.Repeat(indicator, 1025);
+
+        Assert.Throws<ArgumentException>(() => RiskEngine.Evaluate(indicators));
+    }
+
     [Theory]
     [InlineData(RiskLevel.Information, RiskEngine.ResponseAction.RecordOnly, "response.record-only")]
     [InlineData(RiskLevel.Low, RiskEngine.ResponseAction.ReviewInHistory, "response.review-in-history")]
