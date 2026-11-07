@@ -1555,5 +1555,21 @@ public sealed class StoreTests : IDisposable
         Assert.DoesNotContain("(response.record-only)", mismatched.Recommendation);
     }
 
+    [Fact]
+    public async Task DefenderOperationalCursorSurvivesStoreReopenAndRejectsNegativeValues()
+    {
+        var store = await Store();
+        Assert.Null(await store.GetWindowsDefenderOperationalRecordCursorAsync());
+
+        await store.SetWindowsDefenderOperationalRecordCursorAsync(37);
+        Assert.Equal(37, await store.GetWindowsDefenderOperationalRecordCursorAsync());
+
+        var reopened = new LocalStore(dir);
+        await reopened.InitializeAsync();
+        Assert.Equal(37, await reopened.GetWindowsDefenderOperationalRecordCursorAsync());
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            reopened.SetWindowsDefenderOperationalRecordCursorAsync(-1));
+    }
+
 }
 
