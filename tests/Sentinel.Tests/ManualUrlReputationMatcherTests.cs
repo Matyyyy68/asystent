@@ -78,7 +78,7 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
     }
 
     [Fact]
-    public void ExactLocalUrlMatchRaisesRiskAndReturnsOnlyPrivacySafeSignalMaterial()
+    public void ExactLocalUrlMatchDoesNotEscalateUnverifiedLocalFeedAndReturnsPrivacySafeSignalMaterial()
     {
         var now = DateTimeOffset.UtcNow;
         var domains = new DomainReputation(directory);
@@ -93,9 +93,9 @@ public sealed class ManualUrlReputationMatcherTests : IDisposable
         Assert.Equal("attacker.test", matchedHost);
         Assert.Equal(UrlReputation.CreateSignalHash(maliciousUrl), signalHash);
         Assert.Equal(maliciousUrl, matchedUrl);
-        Assert.Equal(RiskLevel.High, result.Risk);
-        Assert.Equal(result.Risk, RiskEngine.LevelForScore(result.RiskScore));
-        Assert.InRange(result.RiskScore, 60, 79);
+        Assert.Equal(RiskLevel.Information, result.Risk);
+        Assert.Equal(RiskLevel.Information, RiskEngine.LevelForScore(result.RiskScore));
+        Assert.Equal(0, result.RiskScore);
         Assert.Contains(result.Indicators, indicator => indicator.Id == "reputation.url-feed");
         Assert.DoesNotContain(maliciousUrl, result.Explanation, StringComparison.Ordinal);
         Assert.DoesNotContain("attacker.test", result.Explanation, StringComparison.Ordinal);

@@ -38,8 +38,15 @@ public static class ManualUrlReputationMatcher
             : new ThreatIndicator("reputation.url-feed", "Dokładny adres znajduje się na lokalnej liście URL użytkownika.", 10,
                 ThreatCategory.SuspiciousNavigation);
         var indicators = assessment.Indicators.Append(indicator).DistinctBy(item => item.Id, StringComparer.Ordinal).ToArray();
-        var assessed = RiskEngine.Evaluate(indicators);
-        var minimumScore = RiskEngine.MinimumScoreForLevel((RiskLevel)Math.Max((int)assessment.Risk, (int)RiskLevel.High));
+        // User-imported exact URL lists have no authenticated source or signature.
+        // Keep their match visible, but only the refreshed CERT feed is trusted
+        // to raise reputation severity independently.
+        var scoringIndicators = matchedCert
+            ? indicators
+            : indicators.Where(item => item.Id != "reputation.url-feed").ToArray();
+        var assessed = RiskEngine.Evaluate(scoringIndicators);
+        var minimumRisk = matchedCert ? RiskLevel.High : assessment.Risk;
+        var minimumScore = RiskEngine.MinimumScoreForLevel(minimumRisk);
         var score = Math.Max(assessed.Score, minimumScore);
         return assessment with
         {
