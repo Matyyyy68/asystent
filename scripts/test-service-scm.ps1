@@ -80,6 +80,9 @@ try {
   Invoke-Sc @('create', $serviceName, 'binPath=', $quotedBinPath, 'start=', 'demand', 'obj=', 'NT AUTHORITY\LocalService') | Out-Null
   $serviceCreated = $true
   $mayRemoveServiceDataRoot = $true
+  # Use short recovery delays only for this disposable CI service so the crash/restart test stays bounded.
+  Invoke-Sc @('failure', $serviceName, 'reset=', '86400', 'actions=', 'restart/1000/restart/1000/none/0') | Out-Null
+  Invoke-Sc @('failureflag', $serviceName, '1') | Out-Null
   Invoke-Sc @('start', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Running' 90 | Out-Null
 
@@ -205,9 +208,43 @@ try {
     $forwardedPipe.Dispose()
   }
 
+  $serviceBeforeCrash = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+  $crashedProcessId = [int]$serviceBeforeCrash.ProcessId
+  if ($serviceBeforeCrash.State -ne 'Running' -or $crashedProcessId -le 0) {
+    throw 'Could not identify the running isolated service process for the recovery test.'
+  }
+  $collectionsBeforeCrash = [regex]::Matches($log, 'CORE_FIRST_COLLECTION_COMPLETED').Count
+  & taskkill.exe /PID $crashedProcessId /T /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not terminate the isolated service process for its recovery test (exit $LASTEXITCODE)." }
+
+  $restartDeadline = [DateTimeOffset]::UtcNow.AddSeconds(45)
+  $restartedService = $null
+  do {
+    $candidate = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+    if ($candidate.State -eq 'Running' -and [int]$candidate.ProcessId -gt 0 -and [int]$candidate.ProcessId -ne $crashedProcessId) {
+      $restartedService = $candidate
+      break
+    }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTimeOffset]::UtcNow -lt $restartDeadline)
+  if ($null -eq $restartedService) {
+    throw "SCM did not restart the isolated service after process $crashedProcessId terminated."
+  }
+
+  $collectionDeadline = [DateTimeOffset]::UtcNow.AddSeconds(90)
+  do {
+    $log = if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }
+    if ([regex]::Matches($log, 'CORE_FIRST_COLLECTION_COMPLETED').Count -gt $collectionsBeforeCrash) { break }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTimeOffset]::UtcNow -lt $collectionDeadline)
+  if ([regex]::Matches($log, 'CORE_FIRST_COLLECTION_COMPLETED').Count -le $collectionsBeforeCrash) {
+    throw 'SCM restarted the service process, but it did not complete a fresh Engine collection.'
+  }
+  Write-Host "PASS: SCM automatically restarted process $crashedProcessId as PID $($restartedService.ProcessId), and the Engine completed a fresh collection."
+
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
-  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent Engine diagnostics, Agent event read and Agent-to-Service persisted event forwarding.'
+  Write-Host 'PASS: SCM start/stop/recovery, LocalService identity, protected ProgramData DACL, first and post-recovery Engine collection, authenticated status and event pipes, Agent Engine diagnostics, Agent event read and Agent-to-Service persisted event forwarding.'
 }
 finally {
   if ($serviceCreated) {
