@@ -64,8 +64,9 @@ public static class ProtectionHealthEvaluator
             ? new("LIMITED_PROTECTION", "Ochrona ograniczona",
                 "Nie działa lub nie jest włączone: " + string.Join(", ", monitorLimitations) + ". Pozostałe źródła mogą nadal działać.", checkedAt, limitations)
             : new("LIMITED_PROTECTION", "Monitorowanie działa · zakres ograniczony",
-                "Dostępne źródła monitorowania działają. Sentinel nie blokuje procesów ani ruchu i nie zastępuje Microsoft Defender.",
-                checkedAt, ["no-process-or-network-blocking", "snapshot-and-feed-limitations"]);
+                "Dostępne źródła działają, ale monitoring plików obejmuje tylko Pobrane, procesy używają WMI z fallbackiem snapshotów, sieć jest obserwowana migawkami, DNS pochodzi z cache, a Sentinel nie blokuje procesów ani ruchu. Microsoft Defender pozostaje aktywnym składnikiem ochrony.",
+                checkedAt, ["downloads-only-file-monitoring", "wmi-not-kernel-etw", "snapshot-network-monitoring",
+                    "dns-cache-not-query-stream", "no-wfp-telemetry-or-blocking", "snapshot-and-feed-limitations"]);
 
         void Check(string key, string label, bool enabled)
         {
