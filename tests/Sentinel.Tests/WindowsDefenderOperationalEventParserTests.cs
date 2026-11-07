@@ -1,3 +1,4 @@
+using Xunit;
 using Sentinel.Core.Analysis;
 
 namespace Sentinel.Tests;
