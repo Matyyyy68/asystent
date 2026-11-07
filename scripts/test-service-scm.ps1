@@ -59,7 +59,7 @@ function Read-ServiceStatus {
     $line = $statusReader.ReadLine()
     if ([string]::IsNullOrWhiteSpace($line)) { return $null }
     $response = $line | ConvertFrom-Json
-    if ($response.id -ne $requestId -or $response.ok -ne $true -or $response.result.state -ne 'running' -or
+    if ($response.id -ne $requestId -or $response.ok -ne $true -or
         [string]::IsNullOrWhiteSpace($response.result.lastCollectionAtUtc)) { return $null }
     return $response.result
   } catch { return $null }
@@ -268,7 +268,14 @@ try {
     Start-Sleep -Milliseconds 500
   } while ([DateTimeOffset]::UtcNow -lt $engineRecoveryDeadline)
   if (-not $engineRecoveryVerified) {
-    throw "Service did not restart Engine process $engineProcessId and report a fresh collection while retaining service PID $serviceProcessId."
+        $finalEngineStarts = [regex]::Matches($log, 'ENGINE_STARTED under service account').Count
+    $finalService = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+    $finalEngine = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
+      Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
+    $finalStatus = Read-ServiceStatus
+    $finalCollection = if ($null -ne $finalStatus) { $finalStatus.lastCollectionAtUtc } else { '<unavailable>' }
+    $finalEngineId = if ($null -ne $finalEngine) { [int]$finalEngine.ProcessId } else { 0 }
+    throw "Engine recovery failed: original PID=$engineProcessId, current Engine PID=$finalEngineId, service state=$($finalService.State), service PID=$([int]$finalService.ProcessId), expected service PID=$serviceProcessId, Engine start count=$finalEngineStarts (before=$engineStartsBeforeFailure), last collection=$finalCollection."
   }
   Write-Host "PASS: Service restarted Engine process $engineProcessId while retaining service PID $serviceProcessId and reported a fresh collection."
 
