@@ -1,22 +1,26 @@
 # Changelog
 
-## Unreleased — diagnostyka awarii Engine (2026-11-05)
+## 0.15.40 — prerelease (2026-11-07)
+
+Wydanie testowe. Instalator nie jest podpisany certyfikatem Authenticode; Windows SmartScreen może wyświetlić ostrzeżenie.
+
+### diagnostyka awarii Engine (2026-11-05)
 - Agent przekazuje do głównego UI wyłącznie stan procesu Engine, kod wyjścia, informację o stderr i zsanityzowany typ wyjątku; treść stderr, komunikaty wyjątków i ścieżki pozostają ukryte. Dodano test regresyjny filtrowania pól oraz izolowany Windows self-test pełnego named pipe; ten nowy test czeka na CI.
 - Agent i Service zapisują kody wyjścia procesów Engine. Nieobsłużone wyjątki Agenta są logowane bez treści, a UI zamyka się z kodem restartu watchdog zamiast wyświetlać surowy błąd.
 - Usunięto z menu zasobnika martwą, klikalną pozycję „Sentinel działa w tle”; stan ochrony ma osobną akcję.
 
-## Unreleased — prostsza historia zdarzeń (2026-11-04)
+### prostsza historia zdarzeń (2026-11-04)
 - Przegląd i historia domyślnie pomijają rutynowe wpisy `Information`; przełącznik pozwala pokazać je bez usuwania z historii ani eksportu.
 
-## Unreleased — automatyczne reguły reputacji (2026-11-04)
+### automatyczne reguły reputacji (2026-11-04)
 - Nowe profile domyślnie odświeżają feed domen CERT Polska co 24 godziny przez stały endpoint HTTPS. Zapytanie nie wysyła analizowanych adresów; zapisane ustawienia, w tym jawne wyłączenie, są zachowywane. Feed jest oznaczany jako wygasły po 48 godzinach, a błąd ponawia próbę nie wcześniej niż po 6 godzinach.
 
-## Unreleased — widoczność ochrony usługi systemowej (2026-11-04)
+### widoczność ochrony usługi systemowej (2026-11-04)
 - Główny status UI pokazuje „Ochrona ograniczona”, gdy usługa SCM lub jej świeży heartbeat nie są potwierdzone.
 - UI pokazuje do 12 najnowszych zdarzeń zapisanych przez usługę i kieruje zmianę statusu do właściwego silnika. Pipe ogranicza rozmiar i pola zdarzeń, weryfikuje SID użytkownika, a statusy można zmienić tylko na `Reviewed` albo `FalsePositive`.
 - JSON i CSV eksportują do 500 zachowanych zdarzeń Service z polem `origin`; eksport kontynuuje się lokalnie, gdy usługa jest niedostępna.
 - Historia grupuje wspólny `EventId` z obu baz w jednym rozwijanym widoku bez usuwania rekordów. To grupowanie dotyczy wyłącznie identycznych identyfikatorów; odrębne ID i osobne bazy nadal nie mają pełnej deduplikacji.
-## Unreleased — przebudowa doświadczenia produktu (2026-11-03)
+### przebudowa doświadczenia produktu (2026-11-03)
 - Instalator dodaje chronioną usługę Windows SCM działającą jako LocalService przez jawnie potwierdzany UAC; sprawdza hash payloadu, ACL, świeży pierwszy cykl, aktualizuje usługę i usuwa ją przy deinstalacji, zachowując lokalne dane. Windows CI `41731627812` ujawnił dodatkowy bit `Synchronize` w odczytanym ACE; walidator normalizuje tylko ten bit, nadal dokładnie porównując SID-y i pozostałe prawa. Pełny Windows CI `41734288659` potwierdził instalację, naprawę, aktualizację i deinstalację na izolowanym runnerze.
 - UI pobiera osobny heartbeat usługi przez wersjonowany named pipe i pokazuje go obok cyklu agenta użytkownika. Stan usługi nie jest mylony ze stanem wszystkich monitorów; nie ma jeszcze przekazywania zdarzeń Service/Agent ani wspólnej historii.
 - Pozycja „Sprawdź w Sentinel AI” obsługuje wiele zaznaczonych plików (do 15): Explorer przekazuje wywołania do jednej instancji aplikacji, która łączy je, sprawdza pliki kolejno i pokazuje jeden zbiorczy wynik. Puste, opcjopodobne i nadmiernie długie ścieżki są odrzucane; wpis instalatora używa modelu `Document` i jest usuwany tylko wtedy, gdy nadal należy do Sentinel.
