@@ -101,7 +101,12 @@ public sealed class ProtectionHealthEvaluatorTests
             HealthySources, "stan dobry", "stan dobry");
 
         Assert.Equal("LIMITED_PROTECTION", result.State);
-        Assert.Contains("no-process-or-network-blocking", result.Limitations);
+        Assert.Contains("downloads-only-file-monitoring", result.Limitations);
+        Assert.Contains("wmi-not-kernel-etw", result.Limitations);
+        Assert.Contains("snapshot-network-monitoring", result.Limitations);
+        Assert.Contains("dns-cache-not-query-stream", result.Limitations);
+        Assert.Contains("no-wfp-telemetry-or-blocking", result.Limitations);
+        Assert.Contains("nie blokuje procesów ani ruchu", result.Description);
     }
 
     [Theory]
