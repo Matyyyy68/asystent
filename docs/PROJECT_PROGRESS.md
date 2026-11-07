@@ -1,12 +1,14 @@
 # Postęp projektu Sentinel AI
 ## Inspektor sygnatur plików — obsługa granic strumienia (2026-11-07)
 
-Inspektor `DownloadedFileTypeInspector` nie tworzy już tablicy z ujemnym rozmiarem, gdy pozycja strumienia wskazuje koniec lub pozycję za końcem; obsługuje pusty plik i jawnie odrzuca brak nazwy. Dodano regresje dla PE ukrytego pod rozszerzeniem PDF, zgodnego PDF, nieznanego rozszerzenia, pustego strumienia, zachowania pozycji i null nazwy. Targeted testy przechodzą lokalnie 4/4 na bazowym checkoutcie z tym samym kodem; nowa zmiana w aktualnym PR oczekuje na pełny Windows CI.
+Inspektor `DownloadedFileTypeInspector` nie tworzy już tablicy z ujemnym rozmiarem, gdy pozycja strumienia wskazuje koniec lub pozycję za końcem; obsługuje pusty plik i jawnie odrzuca brak nazwy. Dodano regresje dla PE ukrytego pod rozszerzeniem PDF, zgodnego PDF, nieznanego rozszerzenia, pustego strumienia, zachowania pozycji i null nazwy. Targeted testy przechodzą lokalnie 4/4, a pełny Windows CI run 42412202567 potwierdził 565/565 testów dla aktualnej gałęzi.
 
 
 ## Stan celu — 2026-11-07
 
-Cały cel Protection Engine pozostaje **IN PROGRESS**. Najnowszy pełny Windows CI [42391201309](https://github.com/Matyyyy68/asystent/actions/runs/42391201309) dla commita [05afdfa](https://github.com/Matyyyy68/asystent/commit/05afdfa553a8e734afe9c0a539302105dddf7349) zakończył się PASS: .NET 547/547, pomiary wydajności, SCM/LocalService + ACL i pierwszy collect, Electron IPC, przekierowany Downloads, 120-sekundowy junction soak, autostart, Chrome/Edge E2E, instalacja/aktualizacja/rollback/odinstalacja, widoczny kreator oraz Enterprise API 23/23 + HTTP smoke. WMI odebrał wymagane zdarzenie startu bezpiecznego procesu testowego na izolowanym runnerze.
+Cały cel Protection Engine pozostaje **IN PROGRESS**. Najnowszy pełny Windows CI [42412202567](https://github.com/Matyyyy68/asystent/actions/runs/42412202567) dla commita [1988ad5](https://github.com/Matyyyy68/asystent/commit/1988ad512d148818c9f0a8d58c079d353d5dbce0) zakończył się PASS: .NET 565/565, audyt NuGet, benchmark, SCM/LocalService + ACL, Electron IPC, przekierowany Downloads i 120-sekundowy junction soak, autostart, Chrome/Edge E2E, headless install/update/rollback/uninstall, widoczny kreator install/repair/uninstall oraz Enterprise API i HTTP smoke. WMI odebrał wymagane zdarzenie startu procesu na izolowanym runnerze.
+
+**Weryfikacja odzyskiwania usługi Windows (2026-11-07):** instalator odczytuje konfigurację SCM po jej zapisie i potwierdza reset licznika awarii po 24 h, dwa ponowne uruchomienia usługi po 60 s oraz flagę odzyskiwania dla niecrashowego zakończenia. Kontrola jest wykonywana przed zgłoszeniem udanej instalacji; lokalny build instalatora: 0 ostrzeżeń i błędów, a run 42412202567 przeszedł ścieżki instalacji headless i GUI. Nie wymuszono crashu ani restartu systemu; test potwierdza konfigurację, nie fizyczne odtworzenie awarii.
 
 Naprawiono centralny zapis decyzji odpowiedzi: wspólny serializator SQLite stosuje ją do wszystkich nowych zdarzeń, również przy bezpośrednich ścieżkach monitorów. Regresja testuje zapis zdarzenia Downloads; wysokie zdarzenie TCP jest sprawdzane w E2E. Rekomendacja nie twierdzi, że proces albo ruch został zablokowany.
 
