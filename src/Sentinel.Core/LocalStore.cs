@@ -1042,6 +1042,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task CommitDownloadedFileMonitorResultAsync(DownloadFileFingerprint file, SecurityEvent? detectedEvent = null, CancellationToken ct = default)
     {
         ValidateDownloadedFile(file);
+        if (detectedEvent is not null) detectedEvent = RiskEngine.ApplyResponseDecision(detectedEvent);
         var metadata = detectedEvent is null ? default : ValidateEvent(detectedEvent);
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         if (detectedEvent is not null)
