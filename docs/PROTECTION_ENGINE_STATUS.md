@@ -5,11 +5,12 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Dowody wykonania
 
-Pełny Windows CI dla gałęzi zawierającej merge commit [19f90f1](https://github.com/Matyyyy68/asystent/commit/19f90f115da5d71f94fe8660370e5de9c937cd48) i raport [`ff742eb`](https://github.com/Matyyyy68/asystent/commit/ff742eb4dc9ac4c1d91f031f028741561f4d377c) zakończył się sukcesem w [run 42402176917](https://github.com/Matyyyy68/asystent/actions/runs/42402176917). Wynik obejmuje .NET 555/555, audyt NuGet, test wydajności, WMI, usługę SCM pod LocalService i ACL, Electron, przekierowany Known Folder Downloads wraz z 120-sekundowym soak, autostart, Chrome/Edge, instalację headless i widoczny cykl instalatora, oraz Enterprise API 23/23 i HTTP smoke. To test izolowanego runnera GitHub; nie jest dowodem działania na czystym, fizycznym komputerze.
+Najnowszy pełny Windows CI dla commita [`1988ad5`](https://github.com/Matyyyy68/asystent/commit/1988ad512d148818c9f0a8d58c079d353d5dbce0) zakończył się sukcesem w [run 42412202567](https://github.com/Matyyyy68/asystent/actions/runs/42412202567): .NET 565/565, audyt NuGet, benchmark silnika, test SCM/LocalService/ACL, Downloads redirection i 120-sekundowy soak, autostart, Chrome/Edge, headless install/update/rollback/uninstall, widoczny install/repair/uninstall oraz Enterprise API i HTTP smoke. Instalator w ścieżce instalacji weryfikuje teraz zapisane reguły odzyskiwania SCM. CI działał na izolowanym runnerze GitHub; nie wykonano celowego crash-testu usługi ani pełnego restartu na czystym fizycznym komputerze.
 
 ## Zaimplementowane i zweryfikowane
 
 - Silnik działa niezależnie od okna aplikacji jako usługa SCM; monitoruje stan kolekcji i podejmuje ograniczone próby restartu.
+- Po instalacji kreator sprawdza w Windows SCM, czy zapisano reset licznika 24 h, dwa restart-y z opóźnieniem 60 s i flagę odzyskiwania przy niecrashowym zatrzymaniu. Headless i widoczny test instalatora przeszły w runie 42412202567; test nie wymusza awarii usługi.
 - Zdarzenia procesów pochodzą z WMI, gdy dostępne; snapshot PID stanowi jawny fallback.
 - Kolekcja obejmuje wybrane zdarzenia procesu, Downloads, obserwacje TCP/UDP/DNS oraz wybrane ustawienia trwałości i zabezpieczeń systemu.
 - Zdarzenia są normalizowane i korelowane w ograniczonym zakresie przez PID, hash, identyfikatory i okna czasu; historia jest lokalna.
@@ -18,7 +19,7 @@ Pełny Windows CI dla gałęzi zawierającej merge commit [19f90f1](https://gith
 - UI może odczytać stan usługi i przeglądać jej historię; pipe stosuje ACL i ograniczenia protokołu.
 - Kwarantanna wymaga jawnego działania użytkownika. Rekomendacje nie twierdzą, że ruch lub proces został zablokowany.
 - RiskEngine odrzuca ponad 1024 surowe wejścia albo ponad 256 unikalnych wskaźników; regresje limitów przeszły w pełnym .NET CI. Limity nie są miarą wydajności urządzeń.
-- Główny status ochrony uwzględnia teraz świeżość podstawowego CERT Polska domain feedu: brak lub przeterminowana baza obniża status do `LIMITED_PROTECTION`. Regresje dla brakującego, nieaktualnego i aktualnego feedu dodano; weryfikacja CI tej zmiany oczekuje.
+- Główny status ochrony uwzględnia świeżość podstawowego CERT Polska domain feedu: brak lub przeterminowana baza obniża status do `LIMITED_PROTECTION`. Regresje dla brakującego, nieaktualnego i aktualnego feedu przechodzą w pełnym .NET CI 565/565.
 
 ## Częściowe / brakujące
 
