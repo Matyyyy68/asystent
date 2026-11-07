@@ -5,7 +5,7 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Dowody wykonania
 
-Najnowszy pełny Windows CI dla commita [`6669812`](https://github.com/Matyyyy68/asystent/commit/66698128a6cf0ebc7472d192eaa4732e0ec9c726) zakończył się sukcesem w [run 42413895883](https://github.com/Matyyyy68/asystent/actions/runs/42413895883): .NET 565/565 i wszystkie 23 kroki workflow przeszły. Oprócz testów SCM/LocalService/ACL, benchmarku, Downloads soak, Chrome/Edge, instalacji headless i widocznego kreatora CI celowo zakończył proces tymczasowej usługi Windows, potwierdził restart przez SCM z PID 3188 do 5496 i świeży cykl Engine. Ustawienia produkcyjne instalatora są oddzielnie odczytywane i walidowane. Próba dotyczy izolowanego runnera; fizyczny restart na czystym komputerze nie był testowany.
+Najnowszy pełny Windows CI dla commita [`a4f1b6e`](https://github.com/Matyyyy68/asystent/commit/a4f1b6e8420e0748d9fda2658688f7edd5212dcf) zakończył się sukcesem w [run 42418086870](https://github.com/Matyyyy68/asystent/actions/runs/42418086870): .NET 565/565, Enterprise API 23/23 i wszystkie 23 kroki workflow przeszły. Izolowany test zakończył potomny `Sentinel.Engine.exe`; potwierdził nowy PID Engine, zachowanie PID-u usługi 3208 i świeżą kolekcję. Następnie zakończył proces usługi (PID 3208), potwierdził restart SCM jako PID 9360 i kolejną świeżą kolekcję. Przeszły także benchmark, testy Downloads, Electron, Chrome/Edge oraz instalator headless i widoczny kreator. Ustawienia produkcyjne odzyskiwania są oddzielnie odczytywane i walidowane. Próba dotyczy izolowanego runnera; fizyczny restart na czystym komputerze nie był testowany.
 
 ## Zaimplementowane i zweryfikowane
 
