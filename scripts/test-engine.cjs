@@ -139,7 +139,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(importedUrlFeed.ok, true, importedUrlFeed.error); assert.equal(importedUrlFeed.result.urlCount, 1);
   const exactUrlAnalysis = await call('analyze', { text: '', url: exactFeedUrl });
   assert.equal(exactUrlAnalysis.ok, true, exactUrlAnalysis.error);
-  assert.equal(exactUrlAnalysis.result.risk, 'High');
+  assert.equal(exactUrlAnalysis.result.risk, 'Information');
+  assert.equal(exactUrlAnalysis.result.riskScore, 0, 'an unverified local URL list must not independently assign numeric risk');
   assert.ok(exactUrlAnalysis.result.indicators.some(indicator => indicator.id === 'reputation.url-feed'));
   const exactUrlHistory = (await call('history')).result;
   assert.equal(exactUrlHistory.length, 1);
