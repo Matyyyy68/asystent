@@ -10,7 +10,7 @@ Najnowszy pełny Windows CI dla commita [`1988ad5`](https://github.com/Matyyyy68
 ## Zaimplementowane i zweryfikowane
 
 - Silnik działa niezależnie od okna aplikacji jako usługa SCM; monitoruje stan kolekcji i podejmuje ograniczone próby restartu.
-- Po instalacji kreator sprawdza w Windows SCM, czy zapisano reset licznika 24 h, dwa restart-y z opóźnieniem 60 s i flagę odzyskiwania przy niecrashowym zatrzymaniu. Headless i widoczny test instalatora przeszły w runie 42412202567; test nie wymusza awarii usługi.
+- Po instalacji kreator sprawdza w Windows SCM, czy zapisano reset licznika 24 h, dwa ponowne uruchomienia z opóźnieniem 60 s i flagę odzyskiwania przy niecrashowym zatrzymaniu. Headless i widoczny test instalatora przeszły w runie 42412202567; test nie wymusza awarii usługi.
 - Zdarzenia procesów pochodzą z WMI, gdy dostępne; snapshot PID stanowi jawny fallback.
 - Kolekcja obejmuje wybrane zdarzenia procesu, Downloads, obserwacje TCP/UDP/DNS oraz wybrane ustawienia trwałości i zabezpieczeń systemu.
 - Zdarzenia są normalizowane i korelowane w ograniczonym zakresie przez PID, hash, identyfikatory i okna czasu; historia jest lokalna.
