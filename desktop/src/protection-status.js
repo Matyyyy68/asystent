@@ -36,6 +36,6 @@ export function getProtectionStatus(status, firstRun, firstAssessment, machineSe
     if (unknown.length)
       return { title: 'Stan Windows niepotwierdzony', description: `Nie można potwierdzić stanu: ${unknown.map(([name, value]) => `${name} — ${typeof value === 'string' ? value : 'brak danych'}`).join('; ')}. Monitory Sentinel mogą działać, ale ich stan nie potwierdza ochrony antywirusowej Windows.` };
   }
-  return { title: 'Monitorowanie działa', description: 'Dostępne źródła działają lokalnie. Sentinel nie blokuje ruchu ani nie zastępuje ochrony antywirusowej Windows.' };
+  return { title: 'Ochrona ograniczona', description: 'Dostępne źródła odpowiadają, ale centralny status silnika nie jest dostępny. Zakres obejmuje monitoring Pobranych plików, zdarzenia WMI i migawki sieci; Sentinel nie blokuje procesów ani ruchu i nie zastępuje Microsoft Defender.' };
 }
 
