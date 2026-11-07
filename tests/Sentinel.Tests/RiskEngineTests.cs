@@ -114,4 +114,31 @@ public sealed class RiskEngineTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => RiskEngine.DecideResponse((RiskLevel)999));
     }
+
+    [Fact]
+    public void ApplyingResponseDecisionIsIdempotentAndPreservesEventFields()
+    {
+        var item = new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.High,
+            "test", "fixture", "synthetic detection", "review details", EventStatus.New);
+        var planned = RiskEngine.ApplyResponseDecision(item);
+        var repeated = RiskEngine.ApplyResponseDecision(planned);
+
+        Assert.Equal(item with { Recommendation = planned.Recommendation }, planned);
+        Assert.Equal(planned.Recommendation, repeated.Recommendation);
+        Assert.Contains("(response.high-review)", planned.Recommendation);
+        Assert.Contains("nie zostały zablokowane", planned.Recommendation);
+        Assert.False(RiskEngine.DecideResponse(item.Risk).AutomaticProtectionPerformed);
+    }
+
+    [Fact]
+    public void ApplyingResponseDecisionKeepsRecommendationWithinPersistenceLimit()
+    {
+        var item = new SecurityEvent(0, DateTimeOffset.UtcNow, RiskLevel.Critical,
+            "test", "fixture", "synthetic detection", new string('x', 1200), EventStatus.New);
+
+        var planned = RiskEngine.ApplyResponseDecision(item);
+
+        Assert.True(planned.Recommendation.Length <= 1000);
+        Assert.Contains("(response.critical-review)", planned.Recommendation);
+    }
 }
