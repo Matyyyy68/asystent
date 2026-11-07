@@ -1042,7 +1042,6 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task CommitDownloadedFileMonitorResultAsync(DownloadFileFingerprint file, SecurityEvent? detectedEvent = null, CancellationToken ct = default)
     {
         ValidateDownloadedFile(file);
-        if (detectedEvent is not null) detectedEvent = RiskEngine.ApplyResponseDecision(detectedEvent);
         var metadata = detectedEvent is null ? default : ValidateEvent(detectedEvent);
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         if (detectedEvent is not null)
@@ -1265,7 +1264,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         CancellationToken cancellationToken, string? enterpriseCategoryOverride = null, string? enterpriseRuleCodeOverride = null,
         TimeSpan? sameSourceSignalWindow = null)
     {
-        item = RiskEngine.ApplyResponseDecision(item) with { ProcessedAt = item.ProcessedAt ?? DateTimeOffset.UtcNow };
+        item = item with { ProcessedAt = item.ProcessedAt ?? DateTimeOffset.UtcNow };
         var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(cancellationToken);
         using var transaction = c.BeginTransaction();
@@ -1498,7 +1497,8 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         command.Parameters.AddWithValue("$processedAt", (item.ProcessedAt ?? DateTimeOffset.UtcNow).ToUniversalTime().ToString("O"));
         command.Parameters.AddWithValue("$r", (int)item.Risk); command.Parameters.AddWithValue("$c", item.Category);
         command.Parameters.AddWithValue("$a", item.Application); command.Parameters.AddWithValue("$e", item.Explanation);
-        command.Parameters.AddWithValue("$n", item.Recommendation); command.Parameters.AddWithValue("$s", (int)item.Status);
+        var responseDecision = RiskEngine.ApplyResponseDecision(item);
+        command.Parameters.AddWithValue("$n", responseDecision.Recommendation); command.Parameters.AddWithValue("$s", (int)item.Status);
         command.Parameters.AddWithValue("$eventId", eventId.ToString("D")); command.Parameters.AddWithValue("$source", source);
         command.Parameters.AddWithValue("$ruleVersion", (object?)item.RuleVersion ?? DBNull.Value);
         command.Parameters.AddWithValue("$confidence", (object?)item.Confidence ?? DBNull.Value);
