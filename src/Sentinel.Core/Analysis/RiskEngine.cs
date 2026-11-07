@@ -6,6 +6,9 @@ namespace Sentinel.Core.Analysis;
 /// </summary>
 public static class RiskEngine
 {
+    private const int MaximumRawEvidenceItems = 1024;
+    private const int MaximumDistinctEvidenceIndicators = 256;
+
     public sealed record Result(int Score, RiskLevel Level);
 
     public enum ResponseAction
@@ -80,11 +83,16 @@ public static class RiskEngine
     public static Result EvaluateEvidenceCodes(IEnumerable<string> evidenceCodes)
     {
         ArgumentNullException.ThrowIfNull(evidenceCodes);
-        var allCodes = evidenceCodes.Where(code => code is not null).Distinct(StringComparer.Ordinal).ToArray();
-        var codes = allCodes
-            .Where(code => code is not null && EventEvidence.ContainsKey(code))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        var allCodeSet = new HashSet<string>(StringComparer.Ordinal);
+        var rawCodeCount = 0;
+        foreach (var code in evidenceCodes)
+        {
+            if (++rawCodeCount > MaximumRawEvidenceItems)
+                throw new ArgumentException($"Evidence exceeded the maximum of {MaximumRawEvidenceItems} items.", nameof(evidenceCodes));
+            if (code is not null) allCodeSet.Add(code);
+        }
+        var allCodes = allCodeSet.ToArray();
+        var codes = allCodes.Where(EventEvidence.ContainsKey).ToArray();
         // A local file hash list with unverified provenance is not sufficient
         // evidence to assign a numeric risk score.
         if (allCodes.Contains("file.local-list-source-unverified", StringComparer.Ordinal))
@@ -111,10 +119,19 @@ public static class RiskEngine
     public static Result Evaluate(IEnumerable<ThreatIndicator> indicators)
     {
         ArgumentNullException.ThrowIfNull(indicators);
-        var evidence = indicators
-            .Where(indicator => indicator is not null)
-            .DistinctBy(indicator => indicator.Id, StringComparer.Ordinal)
-            .ToArray();
+        var uniqueEvidence = new List<ThreatIndicator>(MaximumDistinctEvidenceIndicators);
+        var evidenceIds = new HashSet<string>(StringComparer.Ordinal);
+        var rawEvidenceCount = 0;
+        foreach (var indicator in indicators)
+        {
+            if (++rawEvidenceCount > MaximumRawEvidenceItems)
+                throw new ArgumentException($"Evidence exceeded the maximum of {MaximumRawEvidenceItems} items.", nameof(indicators));
+            if (indicator is null || string.IsNullOrWhiteSpace(indicator.Id) || !evidenceIds.Add(indicator.Id)) continue;
+            if (uniqueEvidence.Count == MaximumDistinctEvidenceIndicators)
+                throw new ArgumentException($"Evidence exceeded the maximum of {MaximumDistinctEvidenceIndicators} distinct indicators.", nameof(indicators));
+            uniqueEvidence.Add(indicator);
+        }
+        var evidence = uniqueEvidence.ToArray();
 
         if (evidence.Length == 0) return new(0, RiskLevel.Information);
 
