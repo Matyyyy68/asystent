@@ -75,6 +75,7 @@ var aiProvider = new OllamaLocalProvider(aiHttpClient);
 var orchestrator = new AnalysisOrchestrator(rules, aiProvider, knowledge);
 var deduplicator = new NotificationDeduplicator();
 var dnsOperationalLog = OperatingSystem.IsWindows() ? new WindowsDnsOperationalLogSource() : null;
+var defenderOperationalLog = OperatingSystem.IsWindows() ? new WindowsDefenderOperationalLogSource() : null;
 using var enterpriseHttpClient = CreateEnterpriseHttpClient();
 var enterpriseAgent = new EnterpriseAgentClient(enterpriseHttpClient);
 var enterpriseCredentialRotator = new EnterpriseCredentialRotator(enterpriseAgent, deviceCredentials);
@@ -211,6 +212,8 @@ DateTimeOffset? lastDnsAttempt = null;
 string dnsState = "Jeszcze nie wykonano odczytu cache DNS";
 DateTimeOffset? lastDnsOperationalAttempt = null;
 string dnsOperationalState = "Kanał DNS Operational nie został jeszcze sprawdzony";
+DateTimeOffset? lastDefenderOperationalAttempt = null;
+string defenderOperationalState = "Dziennik Microsoft Defender Operational nie został jeszcze sprawdzony";
 async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToken cancellationToken = default)
 {
     if (dnsOperationalLog is null) return [];
@@ -266,6 +269,85 @@ async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToke
     dnsOperationalState = $"Kanał DNS Operational działa; odczytano {records.Count} nowych zdarzeń, dopasowania: {matches.Count}";
     return matches;
 }
+async Task<int> ReadDefenderOperationalEventsAsync(CancellationToken cancellationToken = default)
+{
+    if (defenderOperationalLog is null) return 0;
+    if (!await defenderOperationalLog.IsEnabledAsync(cancellationToken))
+    {
+        defenderOperationalState = "Dziennik Microsoft Defender Operational jest wyłączony; nie zmieniono konfiguracji systemu";
+        return 0;
+    }
+    var cursor = await store.GetWindowsDefenderOperationalRecordCursorAsync(cancellationToken);
+    var latestRecordId = await defenderOperationalLog.ReadLatestRecordIdAsync(cancellationToken);
+    if (cursor is null)
+    {
+        await store.SetWindowsDefenderOperationalRecordCursorAsync(latestRecordId ?? 0, cancellationToken);
+        defenderOperationalState = "Dziennik Defender aktywny; ustawiono początkowy punkt odczytu";
+        return 0;
+    }
+    if (latestRecordId is null)
+    {
+        await store.SetWindowsDefenderOperationalRecordCursorAsync(0, cancellationToken);
+        defenderOperationalState = "Dziennik Defender pusty lub wyczyszczony; ustawiono nowy punkt odczytu";
+        return 0;
+    }
+
+    var logWasReset = latestRecordId.Value < cursor.Value;
+    cursor = WindowsDefenderOperationalEventParser.ResolveCursorAfterLogReset(cursor.Value, latestRecordId.Value);
+    var records = await defenderOperationalLog.ReadAfterAsync(cursor.Value, cancellationToken);
+    var stored = 0;
+    foreach (var record in records)
+    {
+        var (risk, score, category, explanation, recommendation, evidence) = DescribeDefenderEvent(record);
+        await store.AddLocalOnlyAsync(new SecurityEvent(0, record.Timestamp, risk, category,
+            "Microsoft Defender Antivirus", explanation, recommendation, EventStatus.New,
+            EventId: WindowsDefenderOperationalEventParser.CreateEventId(record),
+            Source: "windows-defender-operational", RuleVersion: ThreatAnalysisEngine.RulesVersion,
+            Confidence: 100, EvidenceCodes: [evidence], RiskScore: score));
+        stored++;
+    }
+    if (records.Count > 0)
+        await store.SetWindowsDefenderOperationalRecordCursorAsync(records[^1].RecordId, cancellationToken);
+    defenderOperationalState = $"Dziennik Defender działa; odczytano {records.Count} nowych zdarzeń" +
+        (logWasReset ? " po wykryciu resetu dziennika" : "");
+    return stored;
+}
+
+static (RiskLevel Risk, int Score, string Category, string Explanation, string Recommendation, string Evidence)
+    DescribeDefenderEvent(WindowsDefenderOperationalEvent item)
+{
+    if (item.EventId == 1116)
+    {
+        var (risk, score) = item.SeverityName?.ToLowerInvariant() switch
+        {
+            "severe" => (RiskLevel.Critical, 95), "high" => (RiskLevel.High, 80),
+            "moderate" => (RiskLevel.Moderate, 60), "low" => (RiskLevel.Low, 35),
+            _ => (RiskLevel.Moderate, 55)
+        };
+        var threat = item.ThreatName ?? "nazwa niedostępna";
+        return (risk, score, "Wykrycie Microsoft Defender",
+            $"Microsoft Defender zgłosił wykrycie: {threat} (poziom: {item.SeverityName ?? "nieznany"}). Ścieżka pliku i konto użytkownika nie są zapisywane.",
+            "Sprawdź stan ochrony i historię zagrożeń w aplikacji Zabezpieczenia Windows. Sentinel nie wykonuje działania na pliku.",
+            "windows.defender.detection");
+    }
+    if (item.EventId == 1117)
+        return (RiskLevel.Information, 15, "Działanie Microsoft Defender",
+            $"Microsoft Defender zgłosił podjęcie działania ({item.ActionName ?? "szczegóły niedostępne"}). Sentinel nie wykonuje ani nie potwierdza tej akcji.",
+            "Sprawdź wynik w historii ochrony Microsoft Defender.", "windows.defender.action-reported");
+    if (item.EventId is 1118 or 1119)
+        return (RiskLevel.High, 75, "Błąd działania Microsoft Defender",
+            $"Microsoft Defender zgłosił błąd podczas działania ({item.ActionStatus ?? "szczegóły niedostępne"}). Ścieżka pliku i konto użytkownika nie są zapisywane.",
+            "Sprawdź historię ochrony i stan Microsoft Defender w Zabezpieczeniach Windows.", "windows.defender.action-failed");
+    if (item.EventId == 5007)
+        return (RiskLevel.Information, 10, "Zmiana konfiguracji Microsoft Defender",
+            "Microsoft Defender zgłosił zmianę konfiguracji. Poprzednia i nowa wartość nie są zapisywane.",
+            "Jeśli zmiana jest nieoczekiwana, sprawdź historię ochrony i ustawienia Zabezpieczeń Windows.",
+            "windows.defender.configuration-changed");
+    return (RiskLevel.High, 75, "Błąd silnika Microsoft Defender",
+        "Microsoft Defender zgłosił błąd silnika ochrony.", "Sprawdź stan Microsoft Defender w Zabezpieczeniach Windows.",
+        "windows.defender.engine-failed");
+}
+
 Task<ConnectionSnapshot[]> ReadConnectionSnapshotAsync(CancellationToken cancellationToken)
 {
     cancellationToken.ThrowIfCancellationRequested();
@@ -358,7 +440,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                     }, windowsSecurityStatus.Antivirus, windowsSecurityStatus.Firewall);
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     protectionStatus,
-                    dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
+                    dns = dnsState, dnsOperational = dnsOperationalState, defenderOperational = defenderOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     lastCollectionAtUtc,
                     processes = processMonitor.State, processEvents = processTraceSource.State,
                     droppedProcessEvents = processTraceSource.DroppedEvents, tcpConnections = tcpConnectionMonitor.State,
@@ -462,10 +544,19 @@ while (await Console.In.ReadLineAsync() is { } line)
                     try { detections.AddRange(await ReadDnsOperationalEventsAsync()); }
                     catch (Exception ex) { dnsOperationalState = "Dziennik DNS Operational niedostępny: " + ex.GetType().Name; }
                 }
+                var defenderOperationalEvents = 0;
+                if (settings.Paused) defenderOperationalState = "Obserwacja wstrzymana";
+                else if (OperatingSystem.IsWindows() &&
+                    (lastDefenderOperationalAttempt is not { } previousDefenderAttempt || DateTimeOffset.UtcNow - previousDefenderAttempt >= TimeSpan.FromSeconds(settings.DnsPollIntervalSeconds)))
+                {
+                    lastDefenderOperationalAttempt = DateTimeOffset.UtcNow;
+                    try { defenderOperationalEvents = await ReadDefenderOperationalEventsAsync(); }
+                    catch (Exception ex) { defenderOperationalState = "Dziennik Microsoft Defender Operational niedostępny: " + ex.GetType().Name; }
+                }
                 var enterpriseSync = installationProfile.Variant == ProductVariant.EnterpriseClient
                     ? await SyncEnterpriseAsync(force: false) : null;
                 lastCollectionAtUtc = DateTimeOffset.UtcNow;
-                result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
+                result = new { detections = detections.Count + defenderOperationalEvents, defenderOperationalEvents, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState, defenderOperational = defenderOperationalState,
                     processChanges, processes = processMonitor.State, processEvents = processTraceSource.State,
                     droppedProcessEvents = processTraceSource.DroppedEvents, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
                     suspiciousProcessLaunches = processMonitor.LastSuspiciousLaunchMatches,
