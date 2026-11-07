@@ -1298,7 +1298,7 @@ public sealed class StoreTests : IDisposable
         Assert.Contains("\"'=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
         Assert.Contains("\"'-SUM(A1:A2)\"", csv);
         Assert.Contains("\"' \t=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
-        Assert.Contains("\"quoted, value\nand second line\"", csv);
+        Assert.Contains("\"quoted, value\nand second line Zalecenie Sentinel (response.record-only):", csv);
         Assert.Contains(correlationId.ToString("D"), csv);
         Assert.Contains("url.brand|text.credentials", csv);
     }
