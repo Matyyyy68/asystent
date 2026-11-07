@@ -10,10 +10,12 @@ public static class DownloadedFileTypeInspector
     public static async Task<DownloadedFileTypeResult> InspectAsync(Stream stream, string fileName, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(fileName);
         if (!stream.CanRead || !stream.CanSeek) throw new ArgumentException("Stream musi umożliwiać odczyt i przewijanie.", nameof(stream));
 
         var originalPosition = stream.Position;
-        var header = new byte[Math.Min(MaximumHeaderBytes, checked((int)Math.Min(stream.Length - originalPosition, MaximumHeaderBytes)))];
+        var remaining = stream.Length > originalPosition ? stream.Length - originalPosition : 0;
+        var header = new byte[checked((int)Math.Min(remaining, MaximumHeaderBytes))];
         try
         {
             var read = 0;

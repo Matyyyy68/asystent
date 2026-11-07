@@ -1,4 +1,8 @@
 # Postęp projektu Sentinel AI
+## Inspektor sygnatur plików — obsługa granic strumienia (2026-11-07)
+
+Inspektor `DownloadedFileTypeInspector` nie tworzy już tablicy z ujemnym rozmiarem, gdy pozycja strumienia wskazuje koniec lub pozycję za końcem; obsługuje pusty plik i jawnie odrzuca brak nazwy. Dodano regresje dla PE ukrytego pod rozszerzeniem PDF, zgodnego PDF, nieznanego rozszerzenia, pustego strumienia, zachowania pozycji i null nazwy. Targeted testy przechodzą lokalnie 4/4 na bazowym checkoutcie z tym samym kodem; nowa zmiana w aktualnym PR oczekuje na pełny Windows CI.
+
 
 ## Stan celu — 2026-11-07
 
