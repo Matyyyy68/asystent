@@ -60,16 +60,16 @@ public sealed class UrlRequestProcessor
         var domainMatch = analysis.Host is { } host && reputation?.Contains(host, observedAt) == true;
         var urlMatch = urlReputation?.Check(request.Url, observedAt);
         if (domainMatch)
-            result = result with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
+            result = result with { Risk = (RiskLevel)Math.Max((int)result.Risk, (int)RiskLevel.High), Category = ThreatCategory.SuspiciousNavigation,
                 Indicators = result.Indicators.Append(new ThreatIndicator("reputation.cert", "Domena znajduje się na aktualnej liście CERT Polska.", 10, ThreatCategory.SuspiciousNavigation)).ToArray() };
         else if (urlMatch?.Match == true)
-            result = result with { Risk = RiskLevel.High, Category = ThreatCategory.SuspiciousNavigation,
-                Indicators = result.Indicators.Append(new ThreatIndicator("reputation.url-feed", "Dokładny adres znajduje się na lokalnej liście URL użytkownika.", 10, ThreatCategory.SuspiciousNavigation)).ToArray() };
+            result = result with { Category = ThreatCategory.SuspiciousNavigation,
+                Indicators = result.Indicators.Append(new ThreatIndicator("reputation.url-feed", "Dokładny adres znajduje się na lokalnej liście URL użytkownika; źródło listy nie jest niezależnie zweryfikowane.", 10, ThreatCategory.SuspiciousNavigation)).ToArray() };
         var historyKey = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{analysis.Origin}|{string.Join(',', result.Indicators.Select(x => x.Id).Order(StringComparer.Ordinal))}")));
         var evidenceCodes = result.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).ToArray();
         var isCertSignal = evidenceCodes.Contains("reputation.cert", StringComparer.Ordinal);
         return new(request.Id, true, ThreatAnalysisEngine.RulesVersion, result.Risk.ToString(), result.Category.ToString(),
-            result.Risk >= RiskLevel.Moderate && result.Indicators.Count != 0,
+            (result.Risk >= RiskLevel.Moderate && result.Indicators.Count != 0) || urlMatch?.Match == true,
             result.Indicators.Select(i => new BrowserIndicator(i.Id, i.Description)).ToArray(),
             result.Uncertainties.FirstOrDefault() ?? "Wynik nie potwierdza bezpieczeństwa adresu.", historyKey, result.Explanation,
             analysis.RegistrableDomain ?? analysis.Host,
