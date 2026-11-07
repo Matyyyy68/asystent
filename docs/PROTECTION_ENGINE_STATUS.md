@@ -20,6 +20,7 @@ Najnowszy pełny Windows CI dla commita [`a4f1b6e`](https://github.com/Matyyyy68
 - Kwarantanna wymaga jawnego działania użytkownika. Rekomendacje nie twierdzą, że ruch lub proces został zablokowany.
 - RiskEngine odrzuca ponad 1024 surowe wejścia albo ponad 256 unikalnych wskaźników; regresje limitów przeszły w pełnym .NET CI. Limity nie są miarą wydajności urządzeń.
 - Główny status ochrony uwzględnia świeżość podstawowego CERT Polska domain feedu: brak lub przeterminowana baza obniża status do `LIMITED_PROTECTION`. Regresje dla brakującego, nieaktualnego i aktualnego feedu przechodzą w pełnym .NET CI 565/565.
+- Nawet gdy dostępne sensory działają, status pozostaje `LIMITED_PROTECTION` i jawnie wskazuje ograniczenia: Pobrane bez pełnego monitoringu systemu plików, WMI zamiast kernel ETW, migawki zamiast pełnego strumienia sieciowego, cache zamiast pełnego strumienia DNS i brak WFP/blokowania. Regresja komunikatu jest w PR; jej najnowszy Windows CI jest w toku.
 
 ## Częściowe / brakujące
 
