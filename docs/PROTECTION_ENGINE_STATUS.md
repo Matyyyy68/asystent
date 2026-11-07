@@ -5,7 +5,7 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Dowody wykonania
 
-Pełny Windows CI dla commita [5e6ff0d](https://github.com/Matyyyy68/asystent/commit/5e6ff0db03a97c98d14abe67674e45a7f7090003) zakończył się sukcesem w [run 42394781999](https://github.com/Matyyyy68/asystent/actions/runs/42394781999). Wynik obejmuje .NET 552/552, audyt NuGet, test wydajności, WMI, usługę SCM pod LocalService i ACL, Electron, przekierowany Known Folder Downloads wraz z 120-sekundowym soak, autostart, Chrome/Edge, instalację headless i widoczny cykl instalatora, oraz Enterprise API 23/23 i HTTP smoke. To test izolowanego runnera GitHub; nie jest dowodem działania na czystym, fizycznym komputerze.
+Pełny Windows CI dla merge commita [969f96e](https://github.com/Matyyyy68/asystent/commit/969f96e5eb7ae096742d46b159fd1fb22c0bf550), zawierającego aktualny `main` i zmiany PR, zakończył się sukcesem w [run 42397140505](https://github.com/Matyyyy68/asystent/actions/runs/42397140505). Wynik obejmuje .NET 552/552, audyt NuGet, test wydajności, WMI, usługę SCM pod LocalService i ACL, Electron, przekierowany Known Folder Downloads wraz z 120-sekundowym soak, autostart, Chrome/Edge, instalację headless i widoczny cykl instalatora, oraz Enterprise API 23/23 i HTTP smoke. To test izolowanego runnera GitHub; nie jest dowodem działania na czystym, fizycznym komputerze.
 
 ## Zaimplementowane i zweryfikowane
 
@@ -30,4 +30,4 @@ Pełny Windows CI dla commita [5e6ff0d](https://github.com/Matyyyy68/asystent/co
 
 ## Stan dostarczenia
 
-PR [#1](https://github.com/Matyyyy68/asystent/pull/1) pozostaje otwarty i niescalony. Bieżący `main` ma trzy commity spoza wspólnej historii PR, a GitHub raportuje stan merge jako konfliktowy; trzeba uzgodnić rozbieżność przed scaleniem.
+PR [#1](https://github.com/Matyyyy68/asystent/pull/1) pozostaje otwarty i niescalony. Trzy commity nowszego `main` zostały dołączone do gałęzi PR merge commitem `969f96e`; różnice release 0.15.40 zachowano w UI i lockfile. GitHub potwierdził `mergeable: true`, a pełny Windows CI dla połączonego stanu zakończył się PASS. Samo scalenie PR nadal nie nastąpiło.
