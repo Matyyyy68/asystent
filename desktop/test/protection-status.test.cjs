@@ -3,6 +3,7 @@ const test = require('node:test');
 
 async function getStatus(...args) {
   const { getProtectionStatus } = await import('../src/protection-status.js');
+  if (args[0] && !Object.hasOwn(args[0], 'processEvents')) args[0].processEvents = 'WMI process trace is receiving events';
   return getProtectionStatus(...args);
 }
 
@@ -11,6 +12,23 @@ test('shows unavailable and first-run states before claiming monitoring is activ
   assert.equal((await getStatus({ settings: { paused: false } }, true, 'running')).title, 'Sprawdzanie ochrony');
   assert.equal((await getStatus({ settings: { paused: false } }, true, 'failed')).title, 'Ochrona ograniczona');
   assert.equal((await getStatus({ settings: { paused: true } }, false, 'complete')).title, 'Ochrona wstrzymana');
+});
+
+test('prefers the engine-owned health assessment while preserving service failure override', async () => {
+  const status = {
+    settings: { paused: false },
+    protectionStatus: {
+      state: 'ATTENTION_REQUIRED',
+      title: 'Wymagana uwaga',
+      description: 'Silnik wykrył nieaktualny cykl monitorowania.'
+    }
+  };
+  assert.deepEqual(await getStatus(status, false, 'complete'), {
+    title: 'Wymagana uwaga',
+    description: 'Silnik wykrył nieaktualny cykl monitorowania.'
+  });
+  assert.match((await getStatus(status, false, 'complete', { available: false })).description,
+    /usługi systemowej/);
 });
 
 test('reports limited protection when a required local monitor is disabled or unavailable', async () => {
@@ -39,6 +57,20 @@ test('claims background monitoring only when all required sources report healthy
     tcpConnections: 'Ciągła migawka TCP/UDP działa; 4 połączenia.'
   };
   assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
+});
+
+test('reports limited protection when process event collection is unavailable despite snapshot fallback', async () => {
+  const status = {
+    settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },
+    processes: 'Snapshot procesów działa; 80 PID',
+    processEvents: 'Zdarzenia procesów WMI niedostępne (ManagementException); działa awaryjny snapshot PID.',
+    downloadedFiles: 'Monitoring Downloads działa; brak lokalnej listy hashy.',
+    persistence: 'Monitor zmian autostartu działa; baseline ustawiony.',
+    tcpConnections: 'Ciągła migawka TCP/UDP działa; 4 połączenia.'
+  };
+  const result = await getStatus(status, false, 'complete');
+  assert.equal(result.title, 'Ochrona ograniczona');
+  assert.match(result.description, /Zdarzenia startu procesów/);
 });
 
 test('does not report healthy protection when the required system service is unavailable', async () => {

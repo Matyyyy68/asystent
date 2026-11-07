@@ -38,16 +38,39 @@ public sealed class StoreTests : IDisposable
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => store.ReadAfterAsync(0, 33));
     }
 
+    [Fact] public async Task DownloadMonitorPersistsCentralResponseDecisionWithDetection()
+    {
+        var store = await Store();
+        var path = Path.Combine(dir, "Downloads", "synthetic.exe");
+        var file = new DownloadFileFingerprint(path, 128, DateTimeOffset.UtcNow.UtcTicks);
+        var detected = Event() with
+        {
+            Risk = RiskLevel.High,
+            Category = "Synthetic download detection",
+            Recommendation = "Review the file",
+            EventId = Guid.NewGuid(),
+            Source = "downloads-test"
+        };
+
+        await store.CommitDownloadedFileMonitorResultAsync(file, detected);
+
+        var saved = Assert.Single(await store.ReadAsync());
+        Assert.Contains("response.high-review", saved.Recommendation);
+        Assert.Contains("proces lub ruch nie zostały zablokowane", saved.Recommendation);
+        Assert.Equal(file, Assert.Single((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Values));
+    }
+
     [Fact] public async Task ForwardedEventImportIsBoundedAndIdempotentByEventId()
     {
         var store = await Store();
         var item = new ForwardedSecurityEvent(41, DateTimeOffset.UtcNow, RiskLevel.Moderate,
             "Synthetic", "Synthetic", "Test event", "Review", EventStatus.New, Guid.NewGuid(),
-            "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], []);
+            "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], [], RiskScore: 61);
 
         Assert.Equal(new long[] { 41 }, await store.ImportForwardedEventsAsync([item]));
         Assert.Equal(new long[] { 41 }, await store.ImportForwardedEventsAsync([item]));
         Assert.Equal(1, await store.CountEventsAsync());
+        Assert.Equal(61, Assert.Single(await store.ReadAsync()).RiskScore);
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync(Enumerable.Repeat(item, 9).ToArray()));
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([item with { SourceRowId = 0 }]));
     }
@@ -58,7 +81,7 @@ public sealed class StoreTests : IDisposable
         var first = new ForwardedSecurityEvent(41, DateTimeOffset.UtcNow, RiskLevel.Moderate,
             "Synthetic", "Synthetic", "Test event", "Review", EventStatus.New, Guid.NewGuid(),
             "agent-test", "test-v1", null, 1, null, null, Guid.NewGuid(), ["test.signal"], []);
-        var invalidSecond = first with { SourceRowId = 42, EventId = Guid.NewGuid(), Category = "" };
+        var invalidSecond = first with { SourceRowId = 42, EventId = Guid.NewGuid(), RiskScore = 101 };
 
         await Assert.ThrowsAsync<ArgumentException>(() => store.ImportForwardedEventsAsync([first, invalidSecond]));
 
@@ -120,7 +143,90 @@ public sealed class StoreTests : IDisposable
         Assert.Null(await store.GetDnsOperationalRecordCursorAsync());
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact] public async Task VersionThirtyNineDatabaseMigratesHashFeedRecheckCheckpointWithoutLosingDownloadsBaseline()
+    {
+        var store = await Store();
+        var file = new DownloadFileFingerprint(Path.Combine(dir, "Downloads", "sample.bin"), 17, 638900000000000000);
+        await store.InitializeDownloadedFileMonitorSnapshotAsync([file]);
+        await store.AddLocalOnlyAsync(Event() with { Category = "BeforeHashFeedCheckpointMigration" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE downloaded_file_monitor_metadata DROP COLUMN hash_feed_state_initialized; ALTER TABLE downloaded_file_monitor_metadata DROP COLUMN hash_feed_recheck_at; ALTER TABLE downloaded_file_monitor_metadata DROP COLUMN hash_feed_imported_at; PRAGMA user_version=39;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+
+        Assert.Equal("BeforeHashFeedCheckpointMigration", Assert.Single(await store.ReadAsync()).Category);
+        Assert.Equal(file, Assert.Single((await store.ReadDownloadedFileMonitorSnapshotAsync()).Files.Values));
+        var checkpoint = DateTimeOffset.UtcNow;
+        await store.BeginDownloadedFileHashFeedRecheckAsync(checkpoint);
+        Assert.Equal(checkpoint, (await store.ReadDownloadedFileMonitorSnapshotAsync()).HashFeedRecheckAtUtc);
+        await store.CompleteDownloadedFileHashFeedRecheckAsync(checkpoint);
+        var migrated = await store.ReadDownloadedFileMonitorSnapshotAsync();
+        Assert.True(migrated.HashFeedStateInitialized);
+        Assert.Equal(checkpoint, migrated.HashFeedImportedAtUtc);
+        Assert.Null(migrated.HashFeedRecheckAtUtc);
+    }
+
+    [Fact] public async Task VersionFortyOneMigrationAllowsSecurityFingerprintsAndPreservesExistingPersistenceRows()
+    {
+        var store = await Store();
+        var existingFingerprint = new string('A', 64);
+        var hostsFingerprint = new string('B', 64);
+        var defenderFingerprint = new string('C', 64);
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new("existing-run", "registry.user.run", existingFingerprint, false)
+        ]);
+
+        await using (var downgrade = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await downgrade.OpenAsync();
+            string schema;
+            using (var inspect = downgrade.CreateCommand())
+            {
+                inspect.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
+                schema = (string)(await inspect.ExecuteScalarAsync())!;
+            }
+            const string tableName = "windows_persistence_snapshot";
+            var tableNameIndex = schema.IndexOf(tableName, StringComparison.Ordinal);
+            Assert.True(tableNameIndex >= 0);
+            var version41Schema = (schema[..tableNameIndex] +
+                "windows_persistence_snapshot_v41" +
+                schema[(tableNameIndex + tableName.Length)..])
+                .Replace(",'security.file.hosts'", "", StringComparison.Ordinal)
+                .Replace(",'security.registry.defender.exclusion'", "", StringComparison.Ordinal);
+            using var create = downgrade.CreateCommand(); create.CommandText = version41Schema;
+            await create.ExecuteNonQueryAsync();
+            using var copy = downgrade.CreateCommand();
+            copy.CommandText = "INSERT INTO windows_persistence_snapshot_v41 SELECT * FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v41 RENAME TO windows_persistence_snapshot; PRAGMA user_version=41;";
+            await copy.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+
+        var migrated = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.True(migrated.Initialized);
+        Assert.Equal(existingFingerprint, Assert.Single(migrated.Entries.Values).Fingerprint);
+        await store.InitializeWindowsPersistenceMonitorSnapshotAsync([
+            new("existing-run", "registry.user.run", existingFingerprint, false),
+            new("security.file.hosts:system-hosts", "security.file.hosts", hostsFingerprint, false),
+            new("security.registry.defender.exclusion:" + new string('D', 64),
+                "security.registry.defender.exclusion", defenderFingerprint, false)
+        ]);
+        var expanded = await store.ReadWindowsPersistenceMonitorSnapshotAsync();
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "security.file.hosts" && entry.Fingerprint == hostsFingerprint);
+        Assert.Contains(expanded.Entries.Values, entry => entry.Source == "security.registry.defender.exclusion" && entry.Fingerprint == defenderFingerprint);
+
+        await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await verify.OpenAsync();
+        using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact] public async Task VersionThirtyFourDatabaseMigratesProcessBacklogWithoutLosingHistoryOrBaseline()
@@ -141,7 +247,41 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(0, (await store.ReadPendingProcessChangesAsync()).Count);
         await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
+    }
+
+    [Fact] public async Task ProcessBacklogAcceptsWmiExitEventsWithoutStartCorrelation()
+    {
+        var store = await Store();
+        var exitEvent = new ProcessChangeQueueItem(0, Guid.NewGuid(), DateTimeOffset.UtcNow,
+            "Proces zakończony", 89, "short-lived-process", null);
+
+        await store.CommitProcessMonitorChangesAsync([], [], [], backlogToAdd: [exitEvent]);
+        var queued = Assert.Single((await store.ReadPendingProcessChangesAsync()).Items);
+
+        Assert.Equal("Proces zakończony", queued.Action);
+        Assert.Equal(89, queued.ProcessId);
+        Assert.Null(queued.CorrelationId);
+    }
+
+    [Fact] public async Task RecentProcessStartCacheRebuildIgnoresPidWhoseLatestLifecycleEventIsStop()
+    {
+        var store = await Store();
+        var now = DateTimeOffset.UtcNow;
+        var firstCorrelation = Guid.NewGuid();
+        var restartedCorrelation = Guid.NewGuid();
+        SecurityEvent LifecycleEvent(DateTimeOffset at, string action, Guid? correlationId) =>
+            Event(at) with { Category = action, Source = "process-wmi", ProcessId = 808,
+                ProcessName = "worker", CorrelationId = correlationId };
+
+        await store.AddLocalOnlyAsync(LifecycleEvent(now.AddSeconds(-2), "Proces zaobserwowany", firstCorrelation));
+        Assert.Equal(firstCorrelation, Assert.Single(await store.ReadRecentProcessStartsAsync(now)).CorrelationId);
+
+        await store.AddLocalOnlyAsync(LifecycleEvent(now.AddSeconds(-1), "Proces zakończony", null));
+        Assert.Empty(await store.ReadRecentProcessStartsAsync(now));
+
+        await store.AddLocalOnlyAsync(LifecycleEvent(now, "Proces zaobserwowany", restartedCorrelation));
+        Assert.Equal(restartedCorrelation, Assert.Single(await store.ReadRecentProcessStartsAsync(now)).CorrelationId);
     }
 
     [Fact] public async Task VersionThirtyFiveMigrationAddsDurableDroppedChangeCounterWithoutLosingData()
@@ -165,7 +305,7 @@ public sealed class StoreTests : IDisposable
         Assert.Equal(0L, (await store.ReadProcessMonitorSnapshotAsync()).DroppedChanges);
         await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTwentyTwoMigrationAddsProcessingTimesWithoutInventingLegacyValuesAndPreservesNewValues()
     {
@@ -563,7 +703,7 @@ public sealed class StoreTests : IDisposable
         Assert.NotEqual(Guid.Empty, await store.GetDomainCorrelationIdAsync("example.test", DateTimeOffset.UtcNow));
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task StorageMetricsIncludeHistoryCountAndSQLiteFileSize()
     {
@@ -1048,6 +1188,45 @@ public sealed class StoreTests : IDisposable
     }
     [Fact] public async Task InvalidRetentionRejected() { var s = await Store(); await Assert.ThrowsAsync<ArgumentOutOfRangeException>(()=>s.SaveSettingsAsync(new(0))); }
     [Fact] public async Task BackupCanReopenAndExportIsValid() { var s = await Store(); await s.AddAsync(Event()); var export = Path.Combine(dir,"events.json"); await s.ExportAsync(export); Assert.Contains("Synthetic",await File.ReadAllTextAsync(export)); var backupDir = Path.Combine(dir,"backup"); Directory.CreateDirectory(backupDir); await s.BackupAsync(Path.Combine(backupDir,"sentinel.db")); var backup = new LocalStore(backupDir); await backup.InitializeAsync(); Assert.Single(await backup.ReadAsync()); }
+    [Fact] public async Task HeuristicRiskScoreSurvivesHistoryExportAndDatabaseBackup()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { RiskScore = 57 });
+
+        Assert.Equal(57, Assert.Single(await store.ReadAsync()).RiskScore);
+        Assert.Equal(57, Assert.Single(await store.ReadAfterAsync(0)).RiskScore);
+        var csvPath = Path.Combine(dir, "risk.csv");
+        await store.ExportCsvAsync(csvPath);
+        Assert.Contains("risk_score", await File.ReadAllTextAsync(csvPath));
+        Assert.Matches(@"(?m)(?:^|,)""?57""?(?:,|$)", await File.ReadAllTextAsync(csvPath));
+
+        var backupDir = Path.Combine(dir, "risk-backup"); Directory.CreateDirectory(backupDir);
+        await store.BackupAsync(Path.Combine(backupDir, "sentinel.db"));
+        var backup = new LocalStore(backupDir); await backup.InitializeAsync();
+        Assert.Equal(57, Assert.Single(await backup.ReadAsync()).RiskScore);
+    }
+    [Fact] public async Task Version40DatabaseAddsNullableRiskScoreWithoutLosingEvents()
+    {
+        var store = await Store();
+        await store.AddLocalOnlyAsync(Event() with { Category = "legacy" });
+        await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE events DROP COLUMN risk_score; PRAGMA user_version=40;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await store.InitializeAsync();
+
+        var legacy = Assert.Single(await store.ReadAsync());
+        Assert.Equal("legacy", legacy.Category);
+        Assert.Null(legacy.RiskScore);
+        await using var check = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
+        await check.OpenAsync();
+        using var version = check.CreateCommand(); version.CommandText = "PRAGMA user_version";
+        Assert.Equal(43L, Convert.ToInt64(await version.ExecuteScalarAsync()));
+    }
     [Fact] public async Task ProcessImageInspectionPersistsAndRestoresLocallyButNeverExportsPathOrHash()
     {
         var store = await Store();
@@ -1141,7 +1320,7 @@ public sealed class StoreTests : IDisposable
         Assert.Contains("\"'=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
         Assert.Contains("\"'-SUM(A1:A2)\"", csv);
         Assert.Contains("\"' \t=HYPERLINK(\"\"https://evil.test\"\")\"", csv);
-        Assert.Contains("\"quoted, value\nand second line\"", csv);
+        Assert.Contains("\"quoted, value\nand second line Zalecenie Sentinel (response.record-only):", csv);
         Assert.Contains(correlationId.ToString("D"), csv);
         Assert.Contains("url.brand|text.credentials", csv);
     }
@@ -1239,7 +1418,7 @@ public sealed class StoreTests : IDisposable
         await using (var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await c.OpenAsync(); using var command = c.CreateCommand();
-            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP INDEX IF EXISTS ix_process_start_recent_correlation_v2; DROP TABLE downloaded_file_snapshot; DROP TABLE downloaded_file_monitor_metadata; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=8;";
             await command.ExecuteNonQueryAsync();
         }
         await store.InitializeAsync();
@@ -1248,7 +1427,7 @@ public sealed class StoreTests : IDisposable
         Assert.False((await store.ReadDownloadedFileMonitorSnapshotAsync()).Initialized);
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task VersionTenHistoryMigratesCorrelationColumnWithoutLosingEvents()
     {
@@ -1257,7 +1436,7 @@ public sealed class StoreTests : IDisposable
         await using (var connection = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False"))
         {
             await connection.OpenAsync(); using var command = connection.CreateCommand();
-            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP INDEX IF EXISTS ix_process_start_recent_correlation_v2; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -1267,7 +1446,7 @@ public sealed class StoreTests : IDisposable
         Assert.Null(migrated.CorrelationId);
         await using var verify = new SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync(); using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
     [Fact] public async Task RestoreAcceptsVersionTenBackupWithoutCorrelationColumn()
     {
@@ -1278,7 +1457,7 @@ public sealed class StoreTests : IDisposable
         await using (var backup = new SqliteConnection($"Data Source={backupPath};Pooling=False"))
         {
             await backup.OpenAsync(); using var command = backup.CreateCommand();
-            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
+            command.CommandText = "DROP TRIGGER IF EXISTS trg_events_add_observation; DROP INDEX IF EXISTS ix_process_start_recent_correlation; DROP INDEX IF EXISTS ix_process_start_recent_correlation_v2; ALTER TABLE events DROP COLUMN correlation_id; DROP TRIGGER IF EXISTS trg_events_add_observation; ALTER TABLE events DROP COLUMN evidence_codes; PRAGMA user_version=10;";
             await command.ExecuteNonQueryAsync();
         }
 

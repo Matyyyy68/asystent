@@ -171,34 +171,57 @@ public sealed class TcpConnectionSnapshotMonitor
             .Concat(newUdpEndpoints.Select(item => (item.Key, item.Connection, IsUdp: true)))
             .OrderBy(item => item.Key, StringComparer.Ordinal).ToArray();
         var added = candidates.Take(MaximumEventsPerSample).ToArray();
+        var processCorrelationByConnection = added.Where(item => !item.IsUdp)
+            .ToDictionary(item => item.Key,
+                item => item.Connection.ProcessId >= 0
+                    ? wasRecentlyObservedStart(item.Connection.ProcessId, item.Connection.ProcessName, now)
+                    : null,
+                StringComparer.Ordinal);
+        var correlationsWithSuspiciousLaunch = await store.ReadCorrelationsWithProcessEvidenceAsync(
+            processCorrelationByConnection.Values.Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray(),
+            "process.behavior.office-spawned-script-host", cancellationToken);
         var events = added.Select(item =>
         {
             var connection = item.Connection;
             var ipReputationMatch = !item.IsUdp && connection.RemoteAddress is { } remoteAddress && SafeMatchesIpFeed(remoteAddress);
-            var correlationId = connection.ProcessId >= 0 ? wasRecentlyObservedStart(connection.ProcessId, connection.ProcessName, now) : null;
+            var correlationId = !item.IsUdp ? processCorrelationByConnection.GetValueOrDefault(item.Key) : null;
+            var correlatedSuspiciousLaunch = correlationId is { } processCorrelation && correlationsWithSuspiciousLaunch.Contains(processCorrelation);
             var processContext = !item.IsUdp && correlationId is not null
                 ? " W ostatnich 60 sekundach zapisano zdarzenie pojawienia się tego PID; to wyłącznie korelacja czasowa, nie ocena zagrożenia."
                 : "";
-            var category = item.IsUdp ? "Zaobserwowano endpoint UDP" : ipReputationMatch ? "Połączenie z adresem na lokalnej liście IP" : "Zaobserwowano połączenie TCP";
+            var category = item.IsUdp ? "Zaobserwowano endpoint UDP" : ipReputationMatch ? "Połączenie z adresem na lokalnej liście IP" :
+                correlatedSuspiciousLaunch ? "Ruch sieciowy procesu uruchomionego przez Office" : "Zaobserwowano połączenie TCP";
             var explanation = item.IsUdp
                 ? $"Nowa migawka endpointu UDP: {connection.LocalAddress}:{connection.LocalPort}, PID {connection.ProcessId}. Tabela Windows nie pokazuje adresu zdalnego ani nie potwierdza wysłania datagramu."
                 : ipReputationMatch
-                    ? $"Nowe połączenie TCP do {connection.RemoteAddress}:{connection.RemotePort} pasuje do lokalnie zaimportowanej listy adresów IP; proces: {connection.ProcessName ?? "unknown"} (PID {connection.ProcessId}).{processContext}"
+                    ? $"Nowe połączenie TCP do {connection.RemoteAddress}:{connection.RemotePort} pasuje do lokalnie zaimportowanej listy adresów IP; proces: {connection.ProcessName ?? "unknown"} (PID {connection.ProcessId}).{processContext}" +
+                        (correlatedSuspiciousLaunch ? " W tej samej korelacji zapisano także heurystykę Office → interpreter." : "")
+                    : correlatedSuspiciousLaunch
+                    ? $"Nowe połączenie TCP procesu {connection.ProcessName ?? "unknown"} (PID {connection.ProcessId}) jest powiązane czasowo ze startem tego PID oraz heurystyką Office → interpreter. To zestaw wskazówek do sprawdzenia, nie potwierdzenie malware.{processContext}"
                     : $"Nowa migawka TCP: {connection.LocalAddress}:{connection.LocalPort} → {connection.RemoteAddress}:{connection.RemotePort}, stan {connection.State}, PID {connection.ProcessId}.{processContext}";
             var recommendation = item.IsUdp
                 ? "To lokalny endpoint UDP, nie dowód ruchu ani werdykt zagrożenia. Zweryfikuj proces i jego przeznaczenie."
                 : ipReputationMatch
                     ? "Sprawdź źródło i datę importowanej listy oraz zweryfikuj proces. Sentinel nie blokuje ruchu, a dopasowanie zależy od jakości tej listy."
+                    : correlatedSuspiciousLaunch
+                    ? "Sprawdź powiązane uruchomienie procesu i cel połączenia. Sentinel nie blokuje ruchu; korelacja pozostaje heurystyczna."
                     : "To metadane połączenia, nie werdykt zagrożenia. Zweryfikuj proces i adres zdalny.";
-            return new SecurityEvent(0, now, ipReputationMatch ? RiskLevel.High : RiskLevel.Information, category, connection.ProcessName ?? "unknown",
+            var evidenceCodes = item.IsUdp ? new[] { "network.udp.local-endpoint-seen" } : ipReputationMatch
+                ? correlatedSuspiciousLaunch
+                    ? new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match", "reputation.local-ip-feed-source-unverified", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
+                    : new[] { "network.tcp.connection-snapshot", "reputation.ip-feed.match", "reputation.local-ip-feed-source-unverified" }
+                : correlatedSuspiciousLaunch
+                    ? new[] { "network.tcp.connection-snapshot", "correlation.process-network.office-spawned-script-host", "process.behavior.office-spawned-script-host" }
+                    : new[] { "network.tcp.connection-snapshot" };
+            var assessment = RiskEngine.EvaluateEvidenceCodes(evidenceCodes);
+            return new SecurityEvent(0, now, assessment.Level, category, connection.ProcessName ?? "unknown",
                 explanation, recommendation, EventStatus.New,
                 EventId: Guid.NewGuid(), Source: item.IsUdp ? "udp-endpoint-snapshot" : "tcp-connection-snapshot",
                 RuleVersion: ThreatAnalysisEngine.RulesVersion,
                 ProcessId: connection.ProcessId >= 0 ? connection.ProcessId : null, ProcessName: connection.ProcessName,
                 CorrelationId: correlationId,
-                EvidenceCodes: item.IsUdp ? ["network.udp.local-endpoint-seen"] : ipReputationMatch
-                    ? ["network.tcp.connection-snapshot", "reputation.ip-feed.match"]
-                    : ["network.tcp.connection-snapshot"]);
+                EvidenceCodes: evidenceCodes,
+                RiskScore: assessment.Score);
         }).ToArray();
 
         var tcpBaselineReset = previousTcpTruncated || tcpTruncated;
@@ -226,7 +249,8 @@ public sealed class TcpConnectionSnapshotMonitor
                 return 0;
             }
         }
-        LastIpReputationMatches = events.Count(item => item.Risk == RiskLevel.High && item.Source == "tcp-connection-snapshot");
+        LastIpReputationMatches = events.Count(item => item.Source == "tcp-connection-snapshot" &&
+            item.EvidenceCodes?.Contains("reputation.ip-feed.match", StringComparer.Ordinal) == true);
         knownConnections.ExceptWith(removedTcpKeys);
         knownConnections.UnionWith(addedTcpKeys);
         knownUdpEndpoints.ExceptWith(removedUdpKeys);

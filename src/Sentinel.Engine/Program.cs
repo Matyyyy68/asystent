@@ -60,6 +60,8 @@ var fileHashReputation = new FileHashReputation(directory);
 var ipReputation = new IpReputation(directory);
 await using var processImageInspectionQueue = new ProcessImageInspectionQueue(store, fileHashReputation, ReadAuthenticodeSignatureAsync);
 var processMonitor = new ProcessSnapshotMonitor(ProcessImageInspectionQueue.ResolveExecutablePath, processImageInspectionQueue.TryEnqueue);
+using var processTraceSource = new WindowsProcessTraceSource();
+processTraceSource.Start();
 using var persistenceMonitor = new WindowsPersistenceSnapshotMonitor();
 foreach (var pendingInspection in await store.ReadPendingProcessImageInspectionsAsync())
     if (!processImageInspectionQueue.TryEnqueue(pendingInspection.EventId, pendingInspection.Path))
@@ -84,17 +86,8 @@ var enterpriseAnalysisMode = "local";
 var enterpriseContextSharingAllowed = false;
 ThreatAssessment CombineEnterpriseAssessments(ThreatAssessment local, ThreatAssessment remote)
 {
-    var category = (int)remote.Risk > (int)local.Risk ? remote.Category : local.Category;
-    var indicators = local.Indicators.Concat(remote.Indicators)
-        .DistinctBy(indicator => (indicator.Id, indicator.Category)).Take(128).ToArray();
-    var uncertainties = local.Uncertainties.Concat(remote.Uncertainties)
-        .Append("Kontekst został wysłany do serwera Enterprise po jednorazowym potwierdzeniu; API nie zapisuje surowej treści.")
-        .Distinct(StringComparer.Ordinal).Take(64).ToArray();
-    var recommendations = local.Recommendations.Concat(remote.Recommendations)
-        .Distinct(StringComparer.Ordinal).Take(32).ToArray();
-    return new ThreatAssessment(category, (int)remote.Risk > (int)local.Risk ? remote.Risk : local.Risk,
-        indicators, uncertainties, recommendations,
-        $"Ocena lokalna: {local.Explanation}\n\nOcena Enterprise: {remote.Explanation}");
+    return EnterpriseAssessmentCombiner.Combine(local, remote,
+        "Kontekst został wysłany do serwera Enterprise po jednorazowym potwierdzeniu; API nie zapisuje surowej treści.");
 }
 HttpClient CreateEnterpriseHttpClient()
 {
@@ -255,12 +248,15 @@ async Task<IReadOnlyList<string>> ReadDnsOperationalEventsAsync(CancellationToke
         var correlationDomain = domainNames.RegistrableDomain(record.QueryName) ?? record.QueryName;
         var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, observedAt, ct: cancellationToken);
         var eventId = WindowsDnsOperationalEventParser.CreateEventId(record);
-        var recorded = await RecordDetectionAsync(new SecurityEvent(0, observedAt, RiskLevel.High,
+        var evidenceCodes = new[] { "dns.windows-operational-query", "reputation.cert.current-feed-match" };
+        var assessment = RiskEngine.EvaluateEvidenceCodes(evidenceCodes);
+        var recorded = await RecordDetectionAsync(new SecurityEvent(0, observedAt, assessment.Level,
             "Domena na liście CERT Polska", "Windows DNS Client Operational", "Zaobserwowano zapytanie o domenę z aktualnej listy: " + record.QueryName,
             "Ostrzeżenie, bez blokowania. Zdarzenie nie wskazuje procesu; odpowiedź DNS nie jest przechowywana.", EventStatus.New,
             EventId: eventId, Source: "dns-operational", RuleVersion: ThreatAnalysisEngine.RulesVersion,
             CorrelationId: correlationId,
-            EvidenceCodes: ["dns.windows-operational-query", "reputation.cert.current-feed-match"],
+            EvidenceCodes: evidenceCodes,
+            RiskScore: assessment.Score,
             SignalHash: LocalStore.CreateHostSignalHash(record.QueryName)), "url", "reputation.cert", TimeSpan.FromMinutes(10));
         // Keep source observations in history even when another DNS source already consumed the notification window.
         if (recorded && deduplicator.TryMark(record.QueryName, observedAt)) matches.Add(record.QueryName);
@@ -343,14 +339,28 @@ while (await Console.In.ReadLineAsync() is { } line)
             case "status":
                 windowsDefenderStatusReader.RefreshIfDue();
                 var installedApplicationInventory = await GetInstalledApplicationInventoryAsync();
+                var statusCheckedAtUtc = DateTimeOffset.UtcNow;
+                var windowsSecurityStatus = WindowsSecurityCenterReader.Read();
+                var protectionStatus = ProtectionHealthEvaluator.Evaluate(settings, lastCollectionAtUtc, statusCheckedAtUtc,
+                    new Dictionary<string, string?>
+                    {
+                        ["processes"] = processMonitor.State,
+                        ["processEvents"] = processTraceSource.State,
+                        ["downloadedFiles"] = downloadedFileMonitor.State,
+                        ["persistence"] = persistenceMonitor.State,
+                        ["tcpConnections"] = tcpConnectionMonitor.State,
+                        ["dns"] = dnsState
+                    }, windowsSecurityStatus.Antivirus, windowsSecurityStatus.Firewall);
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
+                    protectionStatus,
                     dns = dnsState, dnsOperational = dnsOperationalState, lastDnsReadUtc = lastDnsRead, lastDnsErrorUtc = lastDnsError,
                     lastCollectionAtUtc,
-                    processes = processMonitor.State, tcpConnections = tcpConnectionMonitor.State,
+                    processes = processMonitor.State, processEvents = processTraceSource.State,
+                    droppedProcessEvents = processTraceSource.DroppedEvents, tcpConnections = tcpConnectionMonitor.State,
                     persistence = persistenceMonitor.State,
                     enterprise = await EnterpriseStatusAsync(),
                     malwareBazaar = new { configured = await IsMalwareBazaarConfiguredAsync() },
-                    windowsSecurityCenter = WindowsSecurityCenterReader.Read(),
+                    windowsSecurityCenter = windowsSecurityStatus,
                     windowsDefender = windowsDefenderStatusReader.Snapshot,
                     installedApplications = new { count = installedApplicationInventory.Applications.Count,
                         complete = installedApplicationInventory.Complete, scannedAtUtc = installedApplicationInventory.ScannedAtUtc,
@@ -385,7 +395,9 @@ while (await Console.In.ReadLineAsync() is { } line)
                 certFeedRefreshScheduler.Evaluate(settings.AutoUpdateCertFeed, reputation.Status(DateTimeOffset.UtcNow),
                     DateTimeOffset.UtcNow, reputation.UpdateAsync, reputation.SaveAutoRefreshCheckpoint);
                 var detections = new List<string>();
-                var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications);
+                var processTraceEvents = processTraceSource.Drain();
+                var processChanges = await processMonitor.CollectAsync(store, settings.Paused, settings.ExcludedApplications,
+                    traceEvents: processTraceEvents);
                 var tcpChanges = await tcpConnectionMonitor.CollectAsync(store, settings.MonitorNetworkConnections, settings.Paused,
                     settings.ExcludedApplications);
                 var downloadedFileMatches = await downloadedFileMonitor.CollectAsync(store, fileHashReputation);
@@ -418,12 +430,15 @@ while (await Console.In.ReadLineAsync() is { } line)
                                 var dnsObservedAt = DateTimeOffset.UtcNow;
                                 var correlationDomain = domainNames.RegistrableDomain(name) ?? DomainNames.Ascii(name);
                                 var correlationId = await store.GetDomainCorrelationIdAsync(correlationDomain, dnsObservedAt);
-                                var recorded = await RecordDetectionAsync(new SecurityEvent(0, dnsObservedAt, RiskLevel.High,
+                                var evidenceCodes = new[] { "dns.windows-cache-entry", "reputation.cert.current-feed-match" };
+                                var dnsAssessment = RiskEngine.EvaluateEvidenceCodes(evidenceCodes);
+                                var recorded = await RecordDetectionAsync(new SecurityEvent(0, dnsObservedAt, dnsAssessment.Level,
                                     "Domena na liście CERT Polska", "Cache DNS Windows", "Zaobserwowano domenę z aktualnej listy: " + name,
                                     "Ostrzeżenie, bez blokowania. Cache nie wskazuje procesu ani czasu nawigacji.", EventStatus.New,
                                     EventId: Guid.NewGuid(), Source: "dns-cache", RuleVersion: ThreatAnalysisEngine.RulesVersion,
                                     CorrelationId: correlationId,
-                                    EvidenceCodes: ["dns.windows-cache-entry", "reputation.cert.current-feed-match"],
+                                    EvidenceCodes: evidenceCodes,
+                                    RiskScore: dnsAssessment.Score,
                                     SignalHash: LocalStore.CreateHostSignalHash(name)), "url", "reputation.cert", TimeSpan.FromMinutes(10));
                                 // The shared in-memory limiter controls notifications, not which sources are persisted.
                                 if (recorded && deduplicator.TryMark(name, dnsObservedAt)) detections.Add(name!);
@@ -446,7 +461,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                     ? await SyncEnterpriseAsync(force: false) : null;
                 lastCollectionAtUtc = DateTimeOffset.UtcNow;
                 result = new { detections = detections.Count, notifications = settings.Notifications, dns = dnsState, dnsOperational = dnsOperationalState,
-                    processChanges, processes = processMonitor.State, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
+                    processChanges, processes = processMonitor.State, processEvents = processTraceSource.State,
+                    droppedProcessEvents = processTraceSource.DroppedEvents, tcpChanges, tcpConnections = tcpConnectionMonitor.State,
                     suspiciousProcessLaunches = processMonitor.LastSuspiciousLaunchMatches,
                     tcpIpReputationMatches = tcpConnectionMonitor.LastIpReputationMatches,
                     processImageReputationMatches = processImageInspectionQueue.TakeLocalReputationMatches(),
@@ -754,6 +770,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                         CorrelationId: correlationId,
                         EvidenceCodes: assessment.Indicators.Select(indicator => indicator.Id).Distinct(StringComparer.Ordinal).Take(32).ToArray(),
                         AnalysisLimitations: AnalysisLimitationCodes.FromUncertainties(assessment.Uncertainties),
+                        RiskScore: assessment.RiskScore,
                         SignalHash: assessment.Indicators.Any(indicator => indicator.Id == "reputation.cert")
                             ? LocalStore.CreateHostSignalHash(reputationMatchHost ?? urlAnalysis?.Host)
                             : assessment.Indicators.Any(indicator => indicator.Id == "reputation.url-feed")

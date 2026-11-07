@@ -101,7 +101,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await using var c = await Open(ct);
         using var version = c.CreateCommand(); version.CommandText = "PRAGMA user_version";
         var v = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-        if (v > 38) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
+        if (v > 43) throw new InvalidDataException("Nowsza wersja bazy wymaga nowszej aplikacji.");
         await Execute(c, """
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS settings(id INTEGER PRIMARY KEY CHECK(id=1), json TEXT NOT NULL);
@@ -121,7 +121,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             CREATE TABLE IF NOT EXISTS process_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)));
             INSERT OR IGNORE INTO process_monitor_metadata(id,initialized) VALUES(1,0);
             CREATE TABLE IF NOT EXISTS downloaded_file_snapshot(path TEXT PRIMARY KEY COLLATE NOCASE, length INTEGER NOT NULL CHECK(length>=0), last_write_ticks INTEGER NOT NULL CHECK(last_write_ticks>=0));
-            CREATE TABLE IF NOT EXISTS downloaded_file_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)));
+            CREATE TABLE IF NOT EXISTS downloaded_file_monitor_metadata(id INTEGER PRIMARY KEY CHECK(id=1), initialized INTEGER NOT NULL CHECK(initialized IN (0,1)), hash_feed_imported_at TEXT NULL, hash_feed_recheck_at TEXT NULL, hash_feed_state_initialized INTEGER NOT NULL DEFAULT 0 CHECK(hash_feed_state_initialized IN (0,1)));
             INSERT OR IGNORE INTO downloaded_file_monitor_metadata(id,initialized) VALUES(1,0);
             CREATE TABLE IF NOT EXISTS domain_correlation(domain_key TEXT PRIMARY KEY CHECK(length(domain_key)=64), correlation_id TEXT NOT NULL CHECK(length(correlation_id)=36), last_seen_ticks INTEGER NOT NULL CHECK(last_seen_ticks>=0));
             CREATE INDEX IF NOT EXISTS ix_domain_correlation_last_seen ON domain_correlation(last_seen_ticks);
@@ -430,11 +430,103 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             }
             catch { await Execute(c, "ROLLBACK;", ct); throw; }
         }
+        if (v < 39)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await Execute(c, "CREATE TABLE process_change_backlog_v39(queue_id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE CHECK(length(event_id)=36), observed_at TEXT NOT NULL, action TEXT NOT NULL CHECK(action IN ('Proces zaobserwowany','Proces zakończony','Proces zniknął z migawki')), process_id INTEGER NOT NULL CHECK(process_id BETWEEN 0 AND 2147483647), process_name TEXT NOT NULL CHECK(length(process_name) BETWEEN 1 AND 260), correlation_id TEXT NULL CHECK(correlation_id IS NULL OR length(correlation_id)=36)); INSERT INTO process_change_backlog_v39(queue_id,event_id,observed_at,action,process_id,process_name,correlation_id) SELECT queue_id,event_id,observed_at,action,process_id,process_name,correlation_id FROM process_change_backlog; DROP TABLE process_change_backlog; ALTER TABLE process_change_backlog_v39 RENAME TO process_change_backlog; PRAGMA user_version=39; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 40)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "downloaded_file_monitor_metadata", "hash_feed_imported_at", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "downloaded_file_monitor_metadata", "hash_feed_recheck_at", "TEXT NULL", ct);
+                await EnsureColumnAsync(c, "downloaded_file_monitor_metadata", "hash_feed_state_initialized", "INTEGER NOT NULL DEFAULT 0 CHECK(hash_feed_state_initialized IN (0,1))", ct);
+                await Execute(c, "PRAGMA user_version=40; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 41)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                await EnsureColumnAsync(c, "events", "risk_score", "INTEGER NULL CHECK(risk_score IS NULL OR risk_score BETWEEN 0 AND 100)", ct);
+                await Execute(c, "PRAGMA user_version=41; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 42)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                string? snapshotSchema;
+                using (var schema = c.CreateCommand())
+                {
+                    schema.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
+                    snapshotSchema = await schema.ExecuteScalarAsync(ct) as string;
+                }
+                const string tableName = "windows_persistence_snapshot";
+                var tableNameIndex = snapshotSchema?.IndexOf(tableName, StringComparison.Ordinal) ?? -1;
+                if (snapshotSchema is null || tableNameIndex < 0)
+                    throw new InvalidDataException("Nie można bezpiecznie zaktualizować ograniczenia źródeł monitorowania autostartu.");
+                var updatedSchema = snapshotSchema[..tableNameIndex] +
+                    "windows_persistence_snapshot_v42" +
+                    snapshotSchema[(tableNameIndex + tableName.Length)..];
+                if (!updatedSchema.Contains("'security.file.hosts'", StringComparison.Ordinal))
+                {
+                    const string existingSource = "'registry.driver'";
+                    if (!updatedSchema.Contains(existingSource, StringComparison.Ordinal))
+                        throw new InvalidDataException("Nie można bezpiecznie zaktualizować ograniczenia źródeł monitorowania autostartu.");
+                    updatedSchema = updatedSchema.Replace(existingSource, "'registry.driver','security.file.hosts'", StringComparison.Ordinal);
+                }
+                await Execute(c, updatedSchema, ct);
+                await Execute(c, "INSERT INTO windows_persistence_snapshot_v42(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v42 RENAME TO windows_persistence_snapshot; PRAGMA user_version=42; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
+        if (v < 43)
+        {
+            await Execute(c, "BEGIN IMMEDIATE;", ct);
+            try
+            {
+                string? snapshotSchema;
+                using (var schema = c.CreateCommand())
+                {
+                    schema.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='windows_persistence_snapshot'";
+                    snapshotSchema = await schema.ExecuteScalarAsync(ct) as string;
+                }
+                const string tableName = "windows_persistence_snapshot";
+                var tableNameIndex = snapshotSchema?.IndexOf(tableName, StringComparison.Ordinal) ?? -1;
+                if (snapshotSchema is null || tableNameIndex < 0)
+                    throw new InvalidDataException("Nie można bezpiecznie zaktualizować źródeł snapshotu zabezpieczeń Windows.");
+                var updatedSchema = snapshotSchema[..tableNameIndex] +
+                    "windows_persistence_snapshot_v43" +
+                    snapshotSchema[(tableNameIndex + tableName.Length)..];
+                if (!updatedSchema.Contains("'security.registry.defender.exclusion'", StringComparison.Ordinal))
+                {
+                    const string existingSource = "'security.file.hosts'";
+                    if (!updatedSchema.Contains(existingSource, StringComparison.Ordinal))
+                        throw new InvalidDataException("Nie można bezpiecznie zaktualizować źródeł snapshotu zabezpieczeń Windows.");
+                    updatedSchema = updatedSchema.Replace(existingSource,
+                        "'security.file.hosts','security.registry.defender.exclusion'", StringComparison.Ordinal);
+                }
+                await Execute(c, updatedSchema, ct);
+                await Execute(c, "INSERT INTO windows_persistence_snapshot_v43(entry_key,source,fingerprint,writable_location) SELECT entry_key,source,fingerprint,writable_location FROM windows_persistence_snapshot; DROP TABLE windows_persistence_snapshot; ALTER TABLE windows_persistence_snapshot_v43 RENAME TO windows_persistence_snapshot; PRAGMA user_version=43; COMMIT;", ct);
+            }
+            catch { await Execute(c, "ROLLBACK;", ct); throw; }
+        }
         await Execute(c, "CREATE INDEX IF NOT EXISTS ix_event_observations_source_time ON event_observations(source,observed_at,event_row_id)", ct);
         // Keep restart-time correlation lookup bounded on large retained event histories.
         if (await HasColumnAsync(c, "events", "process_id", ct) && await HasColumnAsync(c, "events", "process_name", ct) &&
             await HasColumnAsync(c, "events", "source", ct) && await HasColumnAsync(c, "events", "correlation_id", ct))
-            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source='process-snapshot' AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
+            await Execute(c, "CREATE INDEX IF NOT EXISTS ix_process_start_recent_correlation_v2 ON events(timestamp DESC,process_id,process_name,correlation_id) WHERE source IN ('process-snapshot','process-wmi') AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL", ct);
         // Prove the database can be closed and reopened before declaring readiness.
         await c.CloseAsync(); await c.OpenAsync(ct);
     }
@@ -672,7 +764,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (item, (eventId, source)) in validated)
         {
             using var command = c.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            command.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations,$riskScore)";
             AddEventParameters(command, item, eventId, source);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -723,7 +815,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var current = now.ToUniversalTime();
         var cutoff = current.AddSeconds(-60);
         await using var c = await Open(ct); using var command = c.CreateCommand();
-        command.CommandText = "SELECT process_id,process_name,timestamp,correlation_id FROM events WHERE source='process-snapshot' AND category='Proces zaobserwowany' AND process_id IS NOT NULL AND process_name IS NOT NULL AND correlation_id IS NOT NULL AND timestamp >= $cutoff AND timestamp <= $now ORDER BY timestamp DESC LIMIT 10000";
+        command.CommandText = "WITH recent_lifecycle AS (SELECT process_id,process_name,timestamp,correlation_id,category,ROW_NUMBER() OVER (PARTITION BY process_id ORDER BY timestamp DESC,id DESC) AS sequence FROM events WHERE source IN ('process-snapshot','process-wmi') AND category IN ('Proces zaobserwowany','Proces zakończony','Proces zniknął z migawki') AND process_id IS NOT NULL AND process_name IS NOT NULL AND timestamp >= $cutoff AND timestamp <= $now) SELECT process_id,process_name,timestamp,correlation_id FROM recent_lifecycle WHERE sequence=1 AND category='Proces zaobserwowany' AND correlation_id IS NOT NULL ORDER BY timestamp DESC LIMIT 10000";
         command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$now", current.ToString("O", CultureInfo.InvariantCulture));
         var results = new List<(int ProcessId, string ProcessName, DateTimeOffset Timestamp, Guid CorrelationId)>();
@@ -732,6 +824,31 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (Guid.TryParse(reader.GetString(3), out var correlationId))
                 results.Add((reader.GetInt32(0), reader.GetString(1), DateTimeOffset.Parse(reader.GetString(2), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind), correlationId));
         return results;
+    }
+    public async Task<IReadOnlySet<Guid>> ReadCorrelationsWithProcessEvidenceAsync(
+        IReadOnlyCollection<Guid> correlationIds, string evidenceCode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(correlationIds);
+        if (string.IsNullOrWhiteSpace(evidenceCode) || evidenceCode.Length > 100 || evidenceCode.Any(char.IsControl))
+            throw new ArgumentException("Nieprawidłowy kod dowodu korelacji.", nameof(evidenceCode));
+        var ids = correlationIds.Where(id => id != Guid.Empty).Distinct().Take(100).ToArray();
+        if (ids.Length == 0) return new HashSet<Guid>();
+
+        await using var c = await Open(ct);
+        using var command = c.CreateCommand();
+        var parameters = ids.Select((id, index) =>
+        {
+            var name = "$correlation" + index.ToString(CultureInfo.InvariantCulture);
+            command.Parameters.AddWithValue(name, id.ToString("D"));
+            return name;
+        });
+        command.Parameters.AddWithValue("$evidence", evidenceCode);
+        command.CommandText = $"SELECT DISTINCT correlation_id FROM events WHERE correlation_id IN ({string.Join(',', parameters)}) AND source IN ('process-wmi','process-snapshot') AND instr(evidence_codes,$evidence)>0";
+        var matches = new HashSet<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            if (Guid.TryParse(reader.GetString(0), out var correlationId)) matches.Add(correlationId);
+        return matches;
     }
     public async Task<ProcessChangeQueueSnapshot> ReadPendingProcessChangesAsync(int maximumItems = 20_000,
         CancellationToken ct = default)
@@ -752,7 +869,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             var processId = reader.GetInt32(4);
             var processName = reader.GetString(5);
             Guid? correlationId = reader.IsDBNull(6) ? null : Guid.Parse(reader.GetString(6));
-            if (eventId == Guid.Empty || action is not ("Proces zaobserwowany" or "Proces zniknął z migawki") || processId < 0 ||
+            if (eventId == Guid.Empty || !IsValidProcessChangeAction(action) || processId < 0 ||
                 processName.Length is < 1 or > 260 || processName.Any(char.IsControl) ||
                 (action == "Proces zaobserwowany" && !correlationId.HasValue))
                 throw new InvalidDataException("Nieprawidłowa zmiana oczekująca w kolejce monitora procesów.");
@@ -774,7 +891,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (backlogToAdd.Count > 20_000 || backlogToRemove.Count > 20_000 || backlogToAdd.Select(item => item.EventId).Distinct().Count() != backlogToAdd.Count)
             throw new ArgumentOutOfRangeException(nameof(backlogToAdd), "Przekroczono limit kolejki zmian procesów.");
         foreach (var item in backlogToAdd)
-            if (item.EventId == Guid.Empty || item.Action is not ("Proces zaobserwowany" or "Proces zniknął z migawki") ||
+            if (item.EventId == Guid.Empty || !IsValidProcessChangeAction(item.Action) ||
                 item.ProcessId < 0 || string.IsNullOrWhiteSpace(item.ProcessName) || item.ProcessName.Length > 260 || item.ProcessName.Any(char.IsControl) ||
                 (item.Action == "Proces zaobserwowany" && !item.CorrelationId.HasValue))
                 throw new ArgumentException("Nieprawidłowa zmiana oczekująca monitora procesów.", nameof(backlogToAdd));
@@ -816,7 +933,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (item, (eventId, source)) in validated)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations,$riskScore)";
             AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
         }
         foreach (var processId in removedProcessIds)
@@ -840,11 +957,26 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         }
         await transaction.CommitAsync(ct);
     }
+
+    private static bool IsValidProcessChangeAction(string action) =>
+        action is "Proces zaobserwowany" or "Proces zakończony" or "Proces zniknął z migawki";
     public async Task<DownloadMonitorSnapshot> ReadDownloadedFileMonitorSnapshotAsync(CancellationToken ct = default)
     {
         await using var c = await Open(ct);
-        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized FROM downloaded_file_monitor_metadata WHERE id=1";
-        var initialized = Convert.ToInt32(await metadata.ExecuteScalarAsync(ct) ?? 0, CultureInfo.InvariantCulture) == 1;
+        using var metadata = c.CreateCommand(); metadata.CommandText = "SELECT initialized,hash_feed_imported_at,hash_feed_recheck_at,hash_feed_state_initialized FROM downloaded_file_monitor_metadata WHERE id=1";
+        await using var metadataReader = await metadata.ExecuteReaderAsync(ct);
+        var initialized = false;
+        DateTimeOffset? hashFeedImportedAt = null;
+        DateTimeOffset? hashFeedRecheckAt = null;
+        var hashFeedStateInitialized = false;
+        if (await metadataReader.ReadAsync(ct))
+        {
+            initialized = metadataReader.GetInt32(0) == 1;
+            if (!metadataReader.IsDBNull(1)) hashFeedImportedAt = DateTimeOffset.Parse(metadataReader.GetString(1), CultureInfo.InvariantCulture);
+            if (!metadataReader.IsDBNull(2)) hashFeedRecheckAt = DateTimeOffset.Parse(metadataReader.GetString(2), CultureInfo.InvariantCulture);
+            hashFeedStateInitialized = metadataReader.GetInt32(3) == 1;
+        }
+        await metadataReader.DisposeAsync();
         using var query = c.CreateCommand(); query.CommandText = "SELECT path,length,last_write_ticks FROM downloaded_file_snapshot ORDER BY path LIMIT 100000";
         using var reader = await query.ExecuteReaderAsync(ct); var files = new Dictionary<string, DownloadFileFingerprint>(StringComparer.OrdinalIgnoreCase);
         while (await reader.ReadAsync(ct))
@@ -853,7 +985,25 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (path.Length is 0 or > 32767 || length < 0 || ticks < 0) throw new InvalidDataException("Nieprawidłowy baseline monitoringu Downloads.");
             files[path] = new(path, length, ticks);
         }
-        return new(initialized, files);
+        return new(initialized, files, hashFeedImportedAt, hashFeedRecheckAt, hashFeedStateInitialized);
+    }
+    public async Task BeginDownloadedFileHashFeedRecheckAsync(DateTimeOffset importedAtUtc, CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        await Execute(c, "UPDATE downloaded_file_monitor_metadata SET hash_feed_recheck_at=$importedAt WHERE id=1",
+            ct, ("$importedAt", importedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
+    }
+    public async Task CompleteDownloadedFileHashFeedRecheckAsync(DateTimeOffset importedAtUtc, CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        await Execute(c, "UPDATE downloaded_file_monitor_metadata SET hash_feed_imported_at=$importedAt,hash_feed_recheck_at=NULL,hash_feed_state_initialized=1 WHERE id=1 AND hash_feed_recheck_at=$importedAt",
+            ct, ("$importedAt", importedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)));
+    }
+    public async Task InitializeDownloadedFileHashFeedStateAsync(DateTimeOffset? importedAtUtc, CancellationToken ct = default)
+    {
+        await using var c = await Open(ct);
+        await Execute(c, "UPDATE downloaded_file_monitor_metadata SET hash_feed_imported_at=$importedAt,hash_feed_state_initialized=1 WHERE id=1 AND hash_feed_state_initialized=0 AND hash_feed_recheck_at IS NULL",
+            ct, ("$importedAt", (object?)importedAtUtc?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) ?? DBNull.Value));
     }
     public async Task InitializeDownloadedFileMonitorSnapshotAsync(IReadOnlyCollection<DownloadFileFingerprint> files,
         int maximumFiles = 100_000, CancellationToken ct = default)
@@ -897,7 +1047,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (detectedEvent is not null)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            insert.CommandText = "INSERT OR IGNORE INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations,$riskScore)";
             AddEventParameters(insert, detectedEvent, metadata.EventId, metadata.Source); await insert.ExecuteNonQueryAsync(ct);
         }
         await UpsertDownloadedFileAsync(c, transaction, file, ct);
@@ -913,7 +1063,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     {
         await using var c = await Open(ct); using var transaction = c.BeginTransaction();
         using var command = c.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "DELETE FROM downloaded_file_snapshot; UPDATE downloaded_file_monitor_metadata SET initialized=0 WHERE id=1";
+        command.CommandText = "DELETE FROM downloaded_file_snapshot; UPDATE downloaded_file_monitor_metadata SET initialized=0,hash_feed_imported_at=NULL,hash_feed_recheck_at=NULL,hash_feed_state_initialized=0 WHERE id=1";
         await command.ExecuteNonQueryAsync(ct); await transaction.CommitAsync(ct);
     }
     public async Task<WindowsPersistenceMonitorSnapshot> ReadWindowsPersistenceMonitorSnapshotAsync(CancellationToken ct = default)
@@ -993,7 +1143,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         using (var insert = c.CreateCommand())
         {
             insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations,$riskScore)";
             AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
         }
         if (current is null)
@@ -1033,7 +1183,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 "startup.user" or "startup.common" or "scheduled.task" or "registry.service" or "registry.driver" or
                 "registry.user.startup.approved.run" or "registry.user.startup.approved.run32" or "registry.user.startup.approved.startupfolder" or
                 "registry.machine64.startup.approved.run" or "registry.machine64.startup.approved.run32" or "registry.machine64.startup.approved.startupfolder" or
-                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder") ||
+                "registry.machine32.startup.approved.run" or "registry.machine32.startup.approved.run32" or "registry.machine32.startup.approved.startupfolder" or "security.file.hosts" or "security.registry.defender.exclusion") ||
             entry.Fingerprint.Length != 64 || !entry.Fingerprint.All(Uri.IsHexDigit))
             throw new ArgumentException("Nieprawidłowy zredagowany wpis baseline'u autostartu.", nameof(entry));
     }
@@ -1086,7 +1236,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         foreach (var (item, (eventId, source)) in validated)
         {
             using var insert = c.CreateCommand(); insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations)";
+            insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations,$riskScore)";
             AddEventParameters(insert, item, eventId, source); await insert.ExecuteNonQueryAsync(ct);
         }
         foreach (var key in removedEndpointKeys)
@@ -1159,7 +1309,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                     else
                     {
                         using var insert = c.CreateCommand(); insert.Transaction = transaction;
-                        insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
+                        insert.CommandText = "INSERT INTO events(timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) VALUES($t,$r,$c,$a,$e,$n,$s,$eventId,$source,$ruleVersion,$confidence,$schemaVersion,$processId,$processName,$correlationId,$evidenceCodes,$signalHash,$processImagePath,$processImageSha256,$processImageSignatureStatus,$processImageLocalHashMatch,$processedAt,$analysisLimitations,$riskScore) ON CONFLICT(event_id) WHERE event_id IS NOT NULL DO NOTHING";
                         AddEventParameters(insert, item, eventId, source);
                         await insert.ExecuteNonQueryAsync(cancellationToken);
                         using var get = c.CreateCommand(); get.Transaction = transaction;
@@ -1292,7 +1442,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             if (string.IsNullOrWhiteSpace(text) || text.Length > 2000) throw new ArgumentException("Nieprawidłowe metadane zdarzenia.");
         var eventId = item.EventId ?? Guid.NewGuid();
         var source = string.IsNullOrWhiteSpace(item.Source) ? item.Application : item.Source;
-        if (eventId == Guid.Empty || source.Length > 100 || item.RuleVersion?.Length > 80 || item.Confidence is < 0 or > 100 || item.SchemaVersion != 1 ||
+        if (eventId == Guid.Empty || source.Length > 100 || item.RuleVersion?.Length > 80 || item.Confidence is < 0 or > 100 || item.RiskScore is < 0 or > 100 || item.SchemaVersion != 1 ||
             item.ProcessId < 0 || item.ProcessName?.Length > 260 || item.ProcessName?.Any(char.IsControl) == true || item.CorrelationId == Guid.Empty ||
             item.EvidenceCodes?.Count > 32 || item.EvidenceCodes?.Any(code => string.IsNullOrWhiteSpace(code) || code.Length > 64 ||
                 code.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-'))) == true ||
@@ -1347,10 +1497,12 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         command.Parameters.AddWithValue("$processedAt", (item.ProcessedAt ?? DateTimeOffset.UtcNow).ToUniversalTime().ToString("O"));
         command.Parameters.AddWithValue("$r", (int)item.Risk); command.Parameters.AddWithValue("$c", item.Category);
         command.Parameters.AddWithValue("$a", item.Application); command.Parameters.AddWithValue("$e", item.Explanation);
-        command.Parameters.AddWithValue("$n", item.Recommendation); command.Parameters.AddWithValue("$s", (int)item.Status);
+        var responseDecision = RiskEngine.ApplyResponseDecision(item);
+        command.Parameters.AddWithValue("$n", responseDecision.Recommendation); command.Parameters.AddWithValue("$s", (int)item.Status);
         command.Parameters.AddWithValue("$eventId", eventId.ToString("D")); command.Parameters.AddWithValue("$source", source);
         command.Parameters.AddWithValue("$ruleVersion", (object?)item.RuleVersion ?? DBNull.Value);
         command.Parameters.AddWithValue("$confidence", (object?)item.Confidence ?? DBNull.Value);
+        command.Parameters.AddWithValue("$riskScore", (object?)item.RiskScore ?? DBNull.Value);
         command.Parameters.AddWithValue("$schemaVersion", item.SchemaVersion);
         command.Parameters.AddWithValue("$processId", (object?)item.ProcessId ?? DBNull.Value);
         command.Parameters.AddWithValue("$processName", (object?)item.ProcessName ?? DBNull.Value);
@@ -1481,7 +1633,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<IReadOnlyList<SecurityEvent>> ReadAsync(CancellationToken cancellationToken = default)
     {
         await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations FROM events ORDER BY id DESC LIMIT 500";
+        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score FROM events ORDER BY id DESC LIMIT 500";
         using var r = await cmd.ExecuteReaderAsync(cancellationToken); var rows = new List<SecurityEvent>();
         while (await r.ReadAsync(cancellationToken)) rows.Add(new(r.GetInt64(0), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture),
             (RiskLevel)r.GetInt32(2), r.GetString(3), r.GetString(4), r.GetString(5), r.GetString(6), (EventStatus)r.GetInt32(7),
@@ -1489,7 +1641,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
             r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17),
             ProcessImagePath: r.IsDBNull(18) ? null : r.GetString(18), ProcessImageSha256: r.IsDBNull(19) ? null : r.GetString(19),
-            ProcessImageSignatureStatus: r.IsDBNull(20) ? null : r.GetString(20), ProcessImageLocalHashMatch: r.IsDBNull(21) ? null : r.GetInt32(21) != 0, ProcessedAt: r.IsDBNull(22) ? null : DateTimeOffset.Parse(r.GetString(22), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(23) ? null : ParseAnalysisLimitations(r.GetString(23))));
+            ProcessImageSignatureStatus: r.IsDBNull(20) ? null : r.GetString(20), ProcessImageLocalHashMatch: r.IsDBNull(21) ? null : r.GetInt32(21) != 0, ProcessedAt: r.IsDBNull(22) ? null : DateTimeOffset.Parse(r.GetString(22), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(23) ? null : ParseAnalysisLimitations(r.GetString(23)), RiskScore: r.IsDBNull(24) ? null : r.GetInt32(24)));
         await r.DisposeAsync();
         return await AttachObservationsAsync(c, rows, cancellationToken);
     }
@@ -1498,7 +1650,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         if (afterId < 0) throw new ArgumentOutOfRangeException(nameof(afterId));
         if (limit is < 1 or > 32) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var c = await Open(cancellationToken); using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,processed_at,analysis_limitations FROM events WHERE id>$afterId ORDER BY id LIMIT $limit";
+        cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,processed_at,analysis_limitations,risk_score FROM events WHERE id>$afterId ORDER BY id LIMIT $limit";
         cmd.Parameters.AddWithValue("$afterId", afterId); cmd.Parameters.AddWithValue("$limit", limit);
         using var r = await cmd.ExecuteReaderAsync(cancellationToken); var rows = new List<SecurityEvent>();
         while (await r.ReadAsync(cancellationToken)) rows.Add(new(r.GetInt64(0), DateTimeOffset.Parse(r.GetString(1), CultureInfo.InvariantCulture),
@@ -1508,7 +1660,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)),
             ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17),
             ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture),
-            AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19))));
+            AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19)), RiskScore: r.IsDBNull(20) ? null : r.GetInt32(20)));
         await r.DisposeAsync();
         return await AttachObservationsAsync(c, rows, cancellationToken);
     }
@@ -1550,7 +1702,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             throw new ArgumentException("Nieprawidłowy SHA-256 pliku procesu.");
         await using var c = await Open(cancellationToken); using var transaction = c.BeginTransaction();
         using var read = c.CreateCommand(); read.Transaction = transaction;
-        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source='process-snapshot'";
+        read.CommandText = "SELECT id,evidence_codes,correlation_id,timestamp FROM events WHERE event_id=$eventId AND process_image_path IS NOT NULL AND source IN ('process-snapshot','process-wmi')";
         read.Parameters.AddWithValue("$eventId", eventId.ToString("D"));
         long rowId; IReadOnlyList<string> evidence; Guid? processCorrelationId; DateTimeOffset processTimestamp;
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
@@ -1590,7 +1742,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var from = processTimestamp.ToUniversalTime().AddMinutes(-10).ToString("O", CultureInfo.InvariantCulture);
         var to = processTimestamp.ToUniversalTime().AddMinutes(10).ToString("O", CultureInfo.InvariantCulture);
         using var find = connection.CreateCommand(); find.Transaction = transaction;
-        find.CommandText = "SELECT id,event_id,evidence_codes,correlation_id FROM events WHERE source='downloads-local-hash' AND signal_hash=$hash AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
+        find.CommandText = "SELECT id,event_id,evidence_codes,correlation_id FROM events WHERE signal_hash=$hash AND (source='downloads-local-hash' OR source='downloads-executable-observed' OR (source='downloads-file-type' AND evidence_codes LIKE '%file.downloads.pe-observed%')) AND timestamp BETWEEN $from AND $to ORDER BY ABS(julianday(timestamp)-julianday($timestamp)) LIMIT 20";
         find.Parameters.AddWithValue("$hash", sha256); find.Parameters.AddWithValue("$from", from); find.Parameters.AddWithValue("$to", to);
         find.Parameters.AddWithValue("$timestamp", processTimestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
         var candidates = new List<(long RowId, Guid EventId, IReadOnlyList<string> Evidence, Guid? CorrelationId)>();
@@ -1651,7 +1803,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
     public async Task<IReadOnlyList<(Guid EventId, string Path)>> ReadPendingProcessImageInspectionsAsync(CancellationToken cancellationToken = default)
     {
         await using var c = await Open(cancellationToken); using var command = c.CreateCommand();
-        command.CommandText = "SELECT event_id,process_image_path FROM events WHERE source='process-snapshot' AND process_image_signature_status='Pending' AND event_id IS NOT NULL AND process_image_path IS NOT NULL ORDER BY id LIMIT 33";
+        command.CommandText = "SELECT event_id,process_image_path FROM events WHERE source IN ('process-snapshot','process-wmi') AND process_image_signature_status='Pending' AND event_id IS NOT NULL AND process_image_path IS NOT NULL ORDER BY id LIMIT 33";
         var pending = new List<(Guid EventId, string Path)>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -1691,23 +1843,23 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         var rows = await ReadAllEventsForExportAsync(ct);
         await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         await using var writer = new StreamWriter(file, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-        await writer.WriteLineAsync("id,timestamp_utc,processed_at_utc,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,analysis_limitations,observations,origin");
+        await writer.WriteLineAsync("id,timestamp_utc,processed_at_utc,risk,risk_score,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,analysis_limitations,observations,origin");
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
-            var values = new string?[] { row.Id.ToString(CultureInfo.InvariantCulture), row.Timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.ProcessedAt?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.Risk.ToString(), row.Category, row.Application, row.Explanation, row.Recommendation, row.Status.ToString(), row.EventId?.ToString("D"), row.Source, row.RuleVersion, row.Confidence?.ToString(CultureInfo.InvariantCulture), row.SchemaVersion.ToString(CultureInfo.InvariantCulture), row.ProcessId?.ToString(CultureInfo.InvariantCulture), row.ProcessName, row.CorrelationId?.ToString("D"), string.Join('|', row.EvidenceCodes ?? []), SerializeAnalysisLimitations(row.AnalysisLimitations), JsonSerializer.Serialize(row.Observations ?? []), "user-engine" };
+            var values = new string?[] { row.Id.ToString(CultureInfo.InvariantCulture), row.Timestamp.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.ProcessedAt?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), row.Risk.ToString(), row.RiskScore?.ToString(CultureInfo.InvariantCulture), row.Category, row.Application, row.Explanation, row.Recommendation, row.Status.ToString(), row.EventId?.ToString("D"), row.Source, row.RuleVersion, row.Confidence?.ToString(CultureInfo.InvariantCulture), row.SchemaVersion.ToString(CultureInfo.InvariantCulture), row.ProcessId?.ToString(CultureInfo.InvariantCulture), row.ProcessName, row.CorrelationId?.ToString("D"), string.Join('|', row.EvidenceCodes ?? []), SerializeAnalysisLimitations(row.AnalysisLimitations), JsonSerializer.Serialize(row.Observations ?? []), "user-engine" };
             await writer.WriteLineAsync(string.Join(',', values.Select(CsvField)));
         }
     }
     private async Task<List<SecurityEvent>> ReadAllEventsForExportAsync(CancellationToken ct)
     {
         // Export all retained rows, independent of the UI's 500-row limit.
-        await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,processed_at,analysis_limitations FROM events ORDER BY id";
+        await using var c = await Open(ct); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,processed_at,analysis_limitations,risk_score FROM events ORDER BY id";
         using var r = await cmd.ExecuteReaderAsync(ct); var rows = new List<SecurityEvent>();
         while (await r.ReadAsync(ct)) rows.Add(new(r.GetInt64(0),DateTimeOffset.Parse(r.GetString(1),CultureInfo.InvariantCulture),(RiskLevel)r.GetInt32(2),r.GetString(3),r.GetString(4),r.GetString(5),r.GetString(6),(EventStatus)r.GetInt32(7),
             r.IsDBNull(8) ? null : Guid.Parse(r.GetString(8)), r.IsDBNull(9) ? null : r.GetString(9),
             r.IsDBNull(10) ? null : r.GetString(10), r.IsDBNull(11) ? null : r.GetInt32(11), r.GetInt32(12),
-            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17), ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19))));
+            r.IsDBNull(13) ? null : r.GetInt32(13), r.IsDBNull(14) ? null : r.GetString(14), r.IsDBNull(15) ? null : Guid.Parse(r.GetString(15)), ParseEvidenceCodes(r.IsDBNull(16) ? null : r.GetString(16)), r.IsDBNull(17) ? null : r.GetString(17), ProcessedAt: r.IsDBNull(18) ? null : DateTimeOffset.Parse(r.GetString(18), CultureInfo.InvariantCulture), AnalysisLimitations: r.IsDBNull(19) ? null : ParseAnalysisLimitations(r.GetString(19)), RiskScore: r.IsDBNull(20) ? null : r.GetInt32(20)));
         await r.DisposeAsync();
         return await AttachObservationsAsync(c, rows, ct);
     }
@@ -1747,7 +1899,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         await target.OpenAsync(ct); source.BackupDatabase(target);
     }
 
-    /// <summary>Restores local events and settings from a verified v6-v38 backup, preserving installed identity and active monitor baselines.</summary>
+    /// <summary>Restores local events and settings from a verified v6-v39 backup, preserving installed identity and active monitor baselines.</summary>
     public async Task<int> RestoreAsync(string backupPath, CancellationToken ct = default)
     {
         var sourcePath = Path.GetFullPath(backupPath);
@@ -1765,7 +1917,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
                 throw new InvalidDataException("Kopia bazy nie przeszła kontroli integralności.");
             using var version = source.CreateCommand(); version.CommandText = "PRAGMA user_version";
             backupVersion = Convert.ToInt32(await version.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
-            if (backupVersion is < 6 or > 38)
+            if (backupVersion is < 6 or > 43)
                 throw new InvalidDataException("Kopia pochodzi z nieobsługiwanej wersji bazy.");
             using var required = source.CreateCommand();
             required.CommandText = backupVersion == 8
@@ -1821,7 +1973,9 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
             var queueRestore = backupVersion >= 10
                 ? "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent,source,rule_version,schema_version) SELECT event_id,occurred_at,category,risk_level,rule_code,sent,source,rule_version,schema_version FROM restore_source.enterprise_event_queue;"
                 : "INSERT INTO enterprise_event_queue(event_id,occurred_at,category,risk_level,rule_code,sent) SELECT event_id,occurred_at,category,risk_level,rule_code,sent FROM restore_source.enterprise_event_queue;";
-            var eventRestore = backupVersion >= 24
+            var eventRestore = backupVersion >= 41
+                ? "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations,risk_score FROM restore_source.events;"
+                : backupVersion >= 24
                 ? "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at,analysis_limitations FROM restore_source.events;"
                 : backupVersion >= 23
                 ? "INSERT INTO events(id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at) SELECT id,timestamp,risk,category,application,explanation,recommendation,status,event_id,source,rule_version,confidence,schema_version,process_id,process_name,correlation_id,evidence_codes,signal_hash,process_image_path,process_image_sha256,process_image_signature_status,process_image_local_hash_match,processed_at FROM restore_source.events;"

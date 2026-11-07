@@ -10,6 +10,7 @@ export interface HistoryEvent {
   source?: string | null;
   correlationId?: string | null;
   confidence?: number | null;
+  riskScore?: number | null;
   ruleVersion?: string | null;
   schemaVersion?: number;
   evidenceCodes?: string[];

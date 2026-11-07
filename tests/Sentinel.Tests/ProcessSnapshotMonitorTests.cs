@@ -56,6 +56,155 @@ public sealed class ProcessSnapshotMonitorTests : IDisposable
     }
 
     [Fact]
+    public async Task WmiProcessStartEventCapturesShortLivedProcessMissingFromSnapshot()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var observedAt = DateTimeOffset.UtcNow.AddMilliseconds(-250);
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string>());
+
+        var count = await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(observedAt, "Proces zaobserwowany", 808, "short-lived", 1)]);
+
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal(1, count);
+        Assert.Equal(808, item.ProcessId);
+        Assert.Equal("short-lived", item.ProcessName);
+        Assert.Equal(observedAt, item.Timestamp);
+        Assert.Contains("process.wmi.start-event", item.EvidenceCodes!);
+        Assert.Contains("process.image.path-unavailable", item.EvidenceCodes!);
+        Assert.Contains("process.parent-pid.wmi-observed", item.EvidenceCodes!);
+        Assert.Contains("Parent PID 1", item.Explanation);
+    }
+
+    [Fact]
+    public async Task WmiStopExpiresProcessCorrelationBeforePidCanBeReused()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string>());
+        var startedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(startedAt, "Proces zaobserwowany", 808, "worker", 1)]);
+        var firstCorrelation = monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow);
+        Assert.NotNull(firstCorrelation);
+
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zakończony", 808, "worker", 1)]);
+
+        Assert.Null(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
+    }
+
+
+    [Fact]
+    public async Task NewerStopForReusedPidExpiresOldImageAssociation()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string>());
+        var startedAt = DateTimeOffset.UtcNow.AddSeconds(-2);
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(startedAt, "Proces zaobserwowany", 808, "old-worker", 1)]);
+        Assert.NotNull(monitor.WasRecentlyObservedStart(808, "old-worker", DateTimeOffset.UtcNow));
+
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zakończony", 808, "new-worker", 1)]);
+
+        Assert.Null(monitor.WasRecentlyObservedStart(808, "old-worker", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task SnapshotRemovalExpiresProcessCorrelation()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var snapshot = new Dictionary<int, string>();
+        var monitor = new ProcessSnapshotMonitor(() => new(snapshot));
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+        snapshot[808] = "worker";
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+        Assert.NotNull(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
+
+        snapshot.Remove(808);
+        await monitor.CollectAsync(store, paused: false, excludedApplications: "");
+
+        Assert.Null(monitor.WasRecentlyObservedStart(808, "worker", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task WmiParentPidAppliesBehaviorRuleToShortLivedOfficeChild()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var observedAt = DateTimeOffset.UtcNow.AddMilliseconds(-250);
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string> { [1] = "winword" });
+
+        var count = await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(observedAt, "Proces zaobserwowany", 808, "powershell", 1)]);
+
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal(1, count);
+        Assert.Equal(RiskLevel.Moderate, item.Risk);
+        Assert.Equal("Nietypowe uruchomienie procesu", item.Category);
+        Assert.Contains("winword (PID 1) → powershell (PID 808)", item.Explanation);
+        Assert.Contains("process.parent-child.relationship-observed", item.EvidenceCodes!);
+        Assert.Contains("process.behavior.office-spawned-script-host", item.EvidenceCodes!);
+        Assert.Contains("process.wmi.start-event", item.EvidenceCodes!);
+    }
+
+    [Fact]
+    public async Task WmiStartUsesSameImageInspectionAndCorrelationPipelineAsSnapshotStart()
+    {
+        var store = new LocalStore(directory); await store.InitializeAsync();
+        var imagePath = Path.Combine(directory, "observed.exe");
+        var queued = new List<(Guid EventId, string Path)>();
+        var monitor = new ProcessSnapshotMonitor(() => new Dictionary<int, string> { [42] = "observed" },
+            (_, _) => imagePath, (eventId, path) => { queued.Add((eventId, path)); return true; }, null);
+
+        var count = await monitor.CollectAsync(store, paused: false, excludedApplications: "",
+            traceEvents: [new WindowsProcessTraceEvent(DateTimeOffset.UtcNow, "Proces zaobserwowany", 42, "observed", 1)]);
+
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal(1, count);
+        Assert.Equal("process-wmi", item.Source);
+        Assert.Equal(imagePath, item.ProcessImagePath);
+        Assert.Contains("process.wmi.start-event", item.EvidenceCodes!);
+        Assert.Equal((item.EventId!.Value, imagePath), Assert.Single(queued));
+        await store.UpdateProcessImageInspectionAsync(item.EventId.Value, new string('A', 64), "Valid", false);
+        var inspected = Assert.Single(await store.ReadAsync());
+        Assert.Equal(new string('A', 64), inspected.ProcessImageSha256);
+        Assert.Equal("Valid", inspected.ProcessImageSignatureStatus);
+        Assert.Contains("process.image.authenticode.valid", inspected.EvidenceCodes!);
+    }
+
+    [Fact]
+    public async Task WindowsWmiSourceObservesBenignChildOrReportsSnapshotFallback()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var source = new WindowsProcessTraceSource();
+        source.Start();
+        if (!source.State.StartsWith("Odbieranie zdarzeń", StringComparison.Ordinal))
+        {
+            Assert.Contains("awaryjny snapshot PID", source.State);
+            var requireWmi = string.Equals(Environment.GetEnvironmentVariable("SENTINEL_TEST_REQUIRE_WMI"), "1", StringComparison.Ordinal);
+            Assert.False(requireWmi, $"Windows CI requires a live WMI process-event subscription, but got: {source.State}");
+            return;
+        }
+
+        using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            ArgumentList = { "/d", "/c", "exit 0" }
+        })!;
+        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(5);
+        var observations = new List<WindowsProcessTraceEvent>();
+        while (DateTimeOffset.UtcNow < deadline && !observations.Any(item => item.Action == "Proces zaobserwowany" && item.ProcessId == child.Id))
+        {
+            observations.AddRange(source.Drain());
+            await Task.Delay(25);
+        }
+        Assert.Contains(observations, item => item.Action == "Proces zaobserwowany" && item.ProcessId == child.Id && item.ProcessName.Equals("cmd", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ProcessBaselineSurvivesRestartAndCapturesChangesSinceLastRun()
     {
         var store = new LocalStore(directory); await store.InitializeAsync();

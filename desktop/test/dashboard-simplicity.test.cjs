@@ -15,6 +15,8 @@ test('main dashboard keeps detailed monitor status collapsed by default', () => 
     'The main screen must retain the real protection status.');
   assert.match(overview, /Ostatni cykl monitorowania:.*lastCollectionAtUtc/,
     'The main screen must show the timestamp reported by the Engine, not a fabricated scan time.');
+  assert.match(overview, /Zdarzenia startu\/zakończenia WMI:.*processEvents.*droppedProcessEvents/,
+    'The detailed monitor view must expose WMI process-event availability and queue drops.');
 });
 
 test('settings describe enabled defaults for network, Downloads, and persistence monitoring', () => {
