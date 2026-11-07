@@ -1,7 +1,15 @@
+using Sentinel.Core.Analysis;
+
 namespace Sentinel.Core;
 
-/// <summary>Suppresses routine informational service events from user-facing notifications.</summary>
+/// <summary>Uses the central response decision to suppress history-only service events from notifications.</summary>
 public static class ServiceEventNotificationPolicy
 {
-    public static bool ShouldNotify(string? risk) => risk is "Low" or "Moderate" or "High" or "Critical";
+    public static bool ShouldNotify(string? risk)
+    {
+        if (!Enum.TryParse<RiskLevel>(risk, ignoreCase: false, out var level) || !Enum.IsDefined(level))
+            return false;
+
+        return RiskEngine.DecideResponse(level).Action is ResponseAction.NotifyForReview or ResponseAction.UrgentReview;
+    }
 }
