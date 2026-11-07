@@ -46,6 +46,23 @@ public static class RiskEngine
         };
     }
 
+    /// <summary>Attaches the deterministic response recommendation once before an event is persisted.</summary>
+    public static SecurityEvent ApplyResponseDecision(SecurityEvent item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        var decision = DecideResponse(item.Risk);
+        var marker = $"({decision.Code})";
+        if ((item.Recommendation ?? string.Empty).Contains(marker, StringComparison.Ordinal))
+            return item;
+
+        var suffix = $" Zalecenie Sentinel {marker}: {decision.Guidance}";
+        const int maximumRecommendationCharacters = 1000;
+        var recommendation = item.Recommendation ?? string.Empty;
+        if (recommendation.Length + suffix.Length > maximumRecommendationCharacters)
+            recommendation = recommendation[..Math.Max(0, maximumRecommendationCharacters - suffix.Length)].TrimEnd();
+        return item with { Recommendation = recommendation + suffix };
+    }
+
     // Only evidence identifiers with a defined meaning contribute to scores for
     // system-monitor events. Unknown identifiers remain visible in the event but
     // cannot silently inflate its risk.
