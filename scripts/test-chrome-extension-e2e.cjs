@@ -149,8 +149,8 @@ async function evaluatePage(page, expression) {
 }
 
 async function waitForNativeHostProbe(worker) {
-  const deadline = Date.now() + 5000;
-  let lastResult;
+  const deadline = Date.now() + 15_000;
+  const attempts = [];
   while (Date.now() < deadline) {
     const nativeProbe = await worker.command('Runtime.evaluate', {
       expression: `new Promise(resolve => {
@@ -165,11 +165,13 @@ async function waitForNativeHostProbe(worker) {
       awaitPromise: true,
       returnByValue: true
     });
-    lastResult = nativeProbe.result?.value;
-    if (lastResult?.reply?.available || !lastResult?.error?.includes('chrome is not defined')) return lastResult;
-    await new Promise(resolve => setTimeout(resolve, 200));
+    const result = nativeProbe.result?.value ?? { error: nativeProbe.exceptionDetails?.text ?? 'no-result' };
+    if (result?.reply?.available) return { ...result, attempts: attempts.length + 1 };
+    attempts.push(result);
+    if (result?.error && !result.error.includes('chrome is not defined')) return { ...result, attempts: attempts.length };
+    await new Promise(resolve => setTimeout(resolve, 250));
   }
-  return lastResult ?? { timeout: true };
+  return { error: 'Native Messaging host did not return an available status before the probe deadline.', attempts };
 }
 
 async function main() {
