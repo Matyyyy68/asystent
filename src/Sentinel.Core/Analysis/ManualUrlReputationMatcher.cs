@@ -45,7 +45,8 @@ public static class ManualUrlReputationMatcher
             ? indicators
             : indicators.Where(item => item.Id != "reputation.url-feed").ToArray();
         var assessed = RiskEngine.Evaluate(scoringIndicators);
-        var minimumRisk = matchedCert ? RiskLevel.High : assessment.Risk;
+        var minimumRisk = (RiskLevel)Math.Max((int)assessment.Risk,
+            matchedCert ? (int)RiskLevel.High : (int)RiskLevel.Information);
         var minimumScore = RiskEngine.MinimumScoreForLevel(minimumRisk);
         var score = Math.Max(assessed.Score, minimumScore);
         return assessment with
