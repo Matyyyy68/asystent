@@ -196,6 +196,14 @@ async Task<object> SyncEnterpriseAsync(bool force)
 }
 async Task<bool> RecordDetectionAsync(SecurityEvent item, string category, string ruleCode, TimeSpan? sameSourceSignalWindow = null)
 {
+    var response = RiskEngine.DecideResponse(item.Risk);
+    var suffix = $" Zalecenie Sentinel ({response.Code}): {response.Guidance}";
+    const int maximumRecommendationCharacters = 1000;
+    var recommendation = item.Recommendation ?? string.Empty;
+    if (recommendation.Length + suffix.Length > maximumRecommendationCharacters)
+        recommendation = recommendation[..Math.Max(0, maximumRecommendationCharacters - suffix.Length)].TrimEnd();
+    item = item with { Recommendation = recommendation + suffix };
+
     var record = sameSourceSignalWindow is { } window
         ? await store.AddWithEnterpriseMetadataDeduplicatedAsync(item, category, ruleCode, window)
         : (Duplicate: false, EnterpriseQueueFull: await store.AddWithEnterpriseMetadataAsync(item, category, ruleCode));
