@@ -5,7 +5,7 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Dowody wykonania
 
-Najnowszy pełny Windows CI dla commita [`a4f1b6e`](https://github.com/Matyyyy68/asystent/commit/a4f1b6e8420e0748d9fda2658688f7edd5212dcf) zakończył się sukcesem w [run 42418086870](https://github.com/Matyyyy68/asystent/actions/runs/42418086870): .NET 565/565, Enterprise API 23/23 i wszystkie 23 kroki workflow przeszły. Izolowany test zakończył potomny `Sentinel.Engine.exe`; potwierdził nowy PID Engine, zachowanie PID-u usługi 3208 i świeżą kolekcję. Następnie zakończył proces usługi (PID 3208), potwierdził restart SCM jako PID 9360 i kolejną świeżą kolekcję. Przeszły także benchmark, testy Downloads, Electron, Chrome/Edge oraz instalator headless i widoczny kreator. Ustawienia produkcyjne odzyskiwania są oddzielnie odczytywane i walidowane. Próba dotyczy izolowanego runnera; fizyczny restart na czystym komputerze nie był testowany.
+Najnowszy pełny Windows CI dla commita [`da8223e`](https://github.com/Matyyyy68/asystent/commit/da8223e54c77f44bfda0ab5ba37f5718d12761f5) zakończył się sukcesem w [run 42419784238](https://github.com/Matyyyy68/asystent/actions/runs/42419784238): .NET 565/565, Enterprise API 23/23 i wszystkie 23 kroki workflow przeszły. Izolowany test zakończył potomny `Sentinel.Engine.exe`; potwierdził nowy PID Engine, zachowanie PID-u usługi 5220 i świeżą kolekcję. Następnie zakończył proces usługi (PID 5220), potwierdził restart SCM jako PID 6716 i kolejną świeżą kolekcję. Przeszły także benchmark, testy Downloads, Electron, Chrome/Edge oraz instalator headless i widoczny kreator. Status ochrony jawnie raportujący zakres sensory przetestowano w tym samym Windows CI. Ustawienia produkcyjne odzyskiwania są oddzielnie odczytywane i walidowane. Próba dotyczy izolowanego runnera; fizyczny restart na czystym komputerze nie był testowany.
 
 ## Zaimplementowane i zweryfikowane
 
@@ -20,7 +20,7 @@ Najnowszy pełny Windows CI dla commita [`a4f1b6e`](https://github.com/Matyyyy68
 - Kwarantanna wymaga jawnego działania użytkownika. Rekomendacje nie twierdzą, że ruch lub proces został zablokowany.
 - RiskEngine odrzuca ponad 1024 surowe wejścia albo ponad 256 unikalnych wskaźników; regresje limitów przeszły w pełnym .NET CI. Limity nie są miarą wydajności urządzeń.
 - Główny status ochrony uwzględnia świeżość podstawowego CERT Polska domain feedu: brak lub przeterminowana baza obniża status do `LIMITED_PROTECTION`. Regresje dla brakującego, nieaktualnego i aktualnego feedu przechodzą w pełnym .NET CI 565/565.
-- Nawet gdy dostępne sensory działają, status pozostaje `LIMITED_PROTECTION` i jawnie wskazuje ograniczenia: Pobrane bez pełnego monitoringu systemu plików, WMI zamiast kernel ETW, migawki zamiast pełnego strumienia sieciowego, cache zamiast pełnego strumienia DNS i brak WFP/blokowania. Regresja komunikatu jest w PR; jej najnowszy Windows CI jest w toku.
+- Nawet gdy dostępne sensory działają, status pozostaje `LIMITED_PROTECTION` i jawnie wskazuje ograniczenia: Pobrane bez pełnego monitoringu systemu plików, WMI zamiast kernel ETW, migawki zamiast pełnego strumienia sieciowego, cache zamiast pełnego strumienia DNS i brak WFP/blokowania. Regresja komunikatu przeszła w Windows CI 42419784238.
 
 ## Częściowe / brakujące
 
