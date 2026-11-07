@@ -2,7 +2,7 @@
 
 ## Automated tests
 
-Run `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`. Latest verification: Windows CI run [42258456433](https://github.com/Matyyyy68/asystent/actions/runs/42258456433) for commit `827b013` passed the full .NET suite (514/514) and all workflow steps, including SCM/service, Electron, Downloads soak, browser extension, installer headless/GUI cycles, and Enterprise API (23/23). The test suite was not run locally in the isolated worktree because NuGet assets were absent; no packages were restored on the user's PC. CI installation tests run on an isolated hosted Windows runner, not the user's physical computer.
+Run `dotnet test tests/Sentinel.Tests/Sentinel.Tests.csproj`. Latest full Windows verification: run [42413895883](https://github.com/Matyyyy68/asystent/actions/runs/42413895883), commit [`6669812`](https://github.com/Matyyyy68/asystent/commit/66698128a6cf0ebc7472d192eaa4732e0ec9c726), passed .NET 565/565 and all 23 workflow steps. It includes installer headless and visible cycles and a disposable SCM service crash/restart test: CI terminated process 3188, observed SCM restart as PID 5496, and required a fresh Engine collection. This verifies configured recovery on the hosted Windows runner; it is not a physical clean-Windows install/reboot test.
 
 The suite exercises store migrations, bounded queues/snapshots, process parent rules, synthetic short-lived WMI input, WMI-to-image-inspection persistence, quarantine integrity, Downloads races, DNS parsing, reputation imports, service IPC and browser/UI behavior. A redaction regression verifies Defender-exclusion snapshots retain opaque identifiers and fingerprints only; live registry visibility still depends on Windows ACL and service context.
 
