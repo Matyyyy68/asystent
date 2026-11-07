@@ -57,13 +57,21 @@ jobs:
           $version = ([xml](Get-Content eng/ProductVersion.props)).Project.PropertyGroup.VersionPrefix
           $installer = "artifacts/desktop/Sentinel.AI.Setup.$version.exe"
           $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
-          @'
-          Poprawka kreatora instalacji: sprawdzanie lokalizacji i miejsca działa w tle, a powtórne kliknięcia nie uruchamiają równoległych etapów.
-
-          Przed publikacją assety przeszły self-test oraz izolowane testy instalacji, aktualizacji, weryfikacji, deinstalacji i widocznego kreatora na runnerze Windows.
-
-          Wydanie testowe. Instalator nie jest podpisany certyfikatem Authenticode.
-          '@ | Set-Content -LiteralPath $notes -Encoding utf8
+          # Release notes come from the matching "## <version>" section of CHANGELOG.md.
+          $section = [System.Collections.Generic.List[string]]::new()
+          $inSection = $false
+          foreach ($line in Get-Content -LiteralPath CHANGELOG.md -Encoding utf8) {
+            if ($line -match '^## ') {
+              if ($inSection) { break }
+              $inSection = $line -match "^## $([regex]::Escape($version))(\s|$)"
+              continue
+            }
+            if ($inSection) { $section.Add($line) }
+          }
+          if (-not $inSection -or -not ($section -join '').Trim()) { throw "CHANGELOG.md has no non-empty section for $version" }
+          $section.Add('')
+          $section.Add('Przed publikacją assety przeszły self-test oraz izolowane testy instalacji, aktualizacji, weryfikacji, deinstalacji i widocznego kreatora na runnerze Windows. Nie jest to test na fizycznie czystym komputerze.')
+          $section | Set-Content -LiteralPath $notes -Encoding utf8
           gh release create $env:GITHUB_REF_NAME $installer "$installer.sha256" --verify-tag --prerelease --title "Sentinel AI $version" --notes-file $notes
       - name: Deploy the website after the verified assets are public
         env:
