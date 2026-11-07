@@ -341,6 +341,10 @@ while (await Console.In.ReadLineAsync() is { } line)
                 var installedApplicationInventory = await GetInstalledApplicationInventoryAsync();
                 var statusCheckedAtUtc = DateTimeOffset.UtcNow;
                 var windowsSecurityStatus = WindowsSecurityCenterReader.Read();
+                var reputationStatus = reputation.Status(statusCheckedAtUtc);
+                var reputationHealthState = reputationStatus.Expired || reputationStatus.Count <= 0
+                    ? $"Baza reputacji domen nieaktualna ({reputationStatus.Count} wpisów)"
+                    : $"Baza reputacji domen aktualna ({reputationStatus.Count} wpisów)";
                 var protectionStatus = ProtectionHealthEvaluator.Evaluate(settings, lastCollectionAtUtc, statusCheckedAtUtc,
                     new Dictionary<string, string?>
                     {
@@ -349,7 +353,8 @@ while (await Console.In.ReadLineAsync() is { } line)
                         ["downloadedFiles"] = downloadedFileMonitor.State,
                         ["persistence"] = persistenceMonitor.State,
                         ["tcpConnections"] = tcpConnectionMonitor.State,
-                        ["dns"] = dnsState
+                        ["dns"] = dnsState,
+                        ["reputation"] = reputationHealthState
                     }, windowsSecurityStatus.Antivirus, windowsSecurityStatus.Firewall);
                 result = new { engine = "ready", rules = ThreatAnalysisEngine.RulesVersion, settings,
                     protectionStatus,
@@ -367,7 +372,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                         vulnerabilityAssessment = "Brak lokalnej bazy CVE; spis nie jest oceną podatności." },
                     runtime = ReadRuntimeMetrics(),
                     wfp = "Niewdrożone", ai = settings.UseLocalAI ? "Włączone przez użytkownika · Ollama loopback" : "Wyłączone",
-                    reputation = reputation.Status(DateTimeOffset.UtcNow), fileHashReputation = fileHashReputation.Status(),
+                    reputation = reputationStatus, fileHashReputation = fileHashReputation.Status(),
                     certFeedRefresh = certFeedRefreshScheduler.Status,
                     ipReputation = ipReputation.Status(), urlReputation = urlReputation.Status(DateTimeOffset.UtcNow),
                     downloadedFiles = downloadedFileMonitor.State,

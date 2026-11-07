@@ -13,7 +13,8 @@ public sealed class ProtectionHealthEvaluatorTests
         ["downloadedFiles"] = "Monitoring Downloads działa",
         ["persistence"] = "Monitor zmian autostartu działa",
         ["tcpConnections"] = "Ciągła migawka TCP/UDP działa",
-        ["dns"] = "Odczyt cache DNS działa"
+        ["dns"] = "Odczyt cache DNS działa",
+        ["reputation"] = "Baza reputacji domen aktualna (500000 wpisów)"
     };
 
     [Fact]
@@ -48,6 +49,35 @@ public sealed class ProtectionHealthEvaluatorTests
 
         Assert.Equal("LIMITED_PROTECTION", result.State);
         Assert.Contains("Zdarzenia startu procesów", result.Description);
+    }
+
+    [Fact]
+    public void ReportsExpiredOrMissingDomainReputationAsLimited()
+    {
+        var expiredSources = new Dictionary<string, string?>(HealthySources)
+        {
+            ["reputation"] = "Baza reputacji domen nieaktualna (0 wpisów)"
+        };
+        var expired = ProtectionHealthEvaluator.Evaluate(new AppSettings(), Now.AddSeconds(-5), Now,
+            expiredSources, "stan dobry", "stan dobry");
+        Assert.Equal("LIMITED_PROTECTION", expired.State);
+        Assert.Contains("Baza reputacji domen", expired.Description);
+
+        var missingSources = new Dictionary<string, string?>(HealthySources);
+        missingSources.Remove("reputation");
+        var missing = ProtectionHealthEvaluator.Evaluate(new AppSettings(), Now.AddSeconds(-5), Now,
+            missingSources, "stan dobry", "stan dobry");
+        Assert.Equal("LIMITED_PROTECTION", missing.State);
+        Assert.Contains("Baza reputacji domen", missing.Description);
+    }
+
+    [Fact]
+    public void FreshDomainReputationDoesNotAddAFeedLimitation()
+    {
+        var result = ProtectionHealthEvaluator.Evaluate(new AppSettings(), Now.AddSeconds(-5), Now,
+            HealthySources, "stan dobry", "stan dobry");
+
+        Assert.DoesNotContain("Baza reputacji domen", result.Limitations);
     }
 
     [Fact]

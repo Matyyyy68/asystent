@@ -11,7 +11,7 @@ public static class ProtectionHealthEvaluator
         "niedostęp", "nie działa", "wstrzyman", "błąd", "error", "unavailable", "not started",
         "nie można", "nie mógł", "nie może", "nie udało", "nie uda się", "nie wykonano",
         "nie ustawiono", "nie potwierdz", "przekracza limit", "osiągnięto limit", "kolejka jest pełna",
-        "niepełn", "pominięto", "po utracie", "wymaga windows", "stan nieznany"
+        "niepełn", "pominięto", "po utracie", "wymaga windows", "stan nieznany", "nieaktual"
     ];
     private static readonly IReadOnlyDictionary<string, string[]> HealthyPrefixes = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
@@ -20,7 +20,8 @@ public static class ProtectionHealthEvaluator
         ["downloadedFiles"] = ["Monitoring Downloads działa", "Monitoring Downloads wznowiono"],
         ["persistence"] = ["Monitor zmian autostartu działa"],
         ["tcpConnections"] = ["Ciągła migawka TCP/UDP działa"],
-        ["dns"] = ["Odczyt cache DNS działa"]
+        ["dns"] = ["Odczyt cache DNS działa"],
+        ["reputation"] = ["Baza reputacji domen aktualna"]
     };
 
     public static ProtectionHealthSnapshot Evaluate(AppSettings settings, DateTimeOffset? lastCollectionAtUtc,
@@ -45,6 +46,7 @@ public static class ProtectionHealthEvaluator
         Check("persistence", "Zmiany autostartu", settings.MonitorPersistenceChanges);
         Check("tcpConnections", "Połączenia sieciowe", settings.MonitorNetworkConnections);
         Check("dns", "Cache DNS", enabled: true);
+        Check("reputation", "Baza reputacji domen", enabled: true);
         CheckWindows("Antywirus Windows", antivirus);
         CheckWindows("Zapora Windows", firewall);
 

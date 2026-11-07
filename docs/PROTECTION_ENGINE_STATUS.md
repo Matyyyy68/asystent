@@ -18,6 +18,7 @@ Pełny Windows CI dla gałęzi zawierającej merge commit [19f90f1](https://gith
 - UI może odczytać stan usługi i przeglądać jej historię; pipe stosuje ACL i ograniczenia protokołu.
 - Kwarantanna wymaga jawnego działania użytkownika. Rekomendacje nie twierdzą, że ruch lub proces został zablokowany.
 - RiskEngine odrzuca ponad 1024 surowe wejścia albo ponad 256 unikalnych wskaźników; regresje limitów przeszły w pełnym .NET CI. Limity nie są miarą wydajności urządzeń.
+- Główny status ochrony uwzględnia teraz świeżość podstawowego CERT Polska domain feedu: brak lub przeterminowana baza obniża status do `LIMITED_PROTECTION`. Regresje dla brakującego, nieaktualnego i aktualnego feedu dodano; weryfikacja CI tej zmiany oczekuje.
 
 ## Częściowe / brakujące
 
