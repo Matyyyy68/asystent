@@ -1264,7 +1264,7 @@ public sealed class LocalStore : IEventRepository, ISettingsRepository
         CancellationToken cancellationToken, string? enterpriseCategoryOverride = null, string? enterpriseRuleCodeOverride = null,
         TimeSpan? sameSourceSignalWindow = null)
     {
-        item = item with { ProcessedAt = item.ProcessedAt ?? DateTimeOffset.UtcNow };
+        item = RiskEngine.ApplyResponseDecision(item) with { ProcessedAt = item.ProcessedAt ?? DateTimeOffset.UtcNow };
         var (eventId, source) = ValidateEvent(item);
         await using var c = await Open(cancellationToken);
         using var transaction = c.BeginTransaction();
