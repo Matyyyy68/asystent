@@ -478,7 +478,7 @@ while (await Console.In.ReadLineAsync() is { } line)
                         var defenderResult = await defenderOperationalCollector!.CollectAsync();
                         defenderOperationalState = defenderResult.Status;
                         defenderOperationalEvents = defenderResult.EventsRead;
-                        defenderOperationalAlertIds = defenderResult.AlertEventIds;
+                        defenderOperationalAlertIds = defenderResult.AlertEventIds.ToArray();
                     }
                     catch (Exception ex) { defenderOperationalState = "Dziennik Microsoft Defender Operational niedostępny: " + ex.GetType().Name; }
                 }
