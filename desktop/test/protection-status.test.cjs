@@ -3,6 +3,7 @@ const test = require('node:test');
 
 async function getStatus(...args) {
   const { getProtectionStatus } = await import('../src/protection-status.js');
+  if (args[0] && !Object.hasOwn(args[0], 'processEvents')) args[0].processEvents = 'WMI process trace is receiving events';
   return getProtectionStatus(...args);
 }
 
@@ -11,6 +12,23 @@ test('shows unavailable and first-run states before claiming monitoring is activ
   assert.equal((await getStatus({ settings: { paused: false } }, true, 'running')).title, 'Sprawdzanie ochrony');
   assert.equal((await getStatus({ settings: { paused: false } }, true, 'failed')).title, 'Ochrona ograniczona');
   assert.equal((await getStatus({ settings: { paused: true } }, false, 'complete')).title, 'Ochrona wstrzymana');
+});
+
+test('prefers the engine-owned health assessment while preserving service failure override', async () => {
+  const status = {
+    settings: { paused: false },
+    protectionStatus: {
+      state: 'ATTENTION_REQUIRED',
+      title: 'Wymagana uwaga',
+      description: 'Silnik wykrył nieaktualny cykl monitorowania.'
+    }
+  };
+  assert.deepEqual(await getStatus(status, false, 'complete'), {
+    title: 'Wymagana uwaga',
+    description: 'Silnik wykrył nieaktualny cykl monitorowania.'
+  });
+  assert.match((await getStatus(status, false, 'complete', { available: false })).description,
+    /usługi systemowej/);
 });
 
 test('reports limited protection when a required local monitor is disabled or unavailable', async () => {
@@ -30,7 +48,7 @@ test('reports limited protection when a required local monitor is disabled or un
   assert.match((await getStatus(status, false, 'complete')).description, /Połączenia sieciowe/);
 });
 
-test('claims background monitoring only when all required sources report healthy', async () => {
+test('keeps protection limited without the engine-owned health summary', async () => {
   const status = {
     settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },
     processes: 'Snapshot procesów działa; 80 PID',
@@ -38,7 +56,24 @@ test('claims background monitoring only when all required sources report healthy
     persistence: 'Monitor zmian autostartu działa; baseline ustawiony.',
     tcpConnections: 'Ciągła migawka TCP/UDP działa; 4 połączenia.'
   };
-  assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
+  const result = await getStatus(status, false, 'complete');
+  assert.equal(result.title, 'Ochrona ograniczona');
+  assert.match(result.description, /centralny status silnika nie jest dostępny/);
+  assert.match(result.description, /nie blokuje procesów ani ruchu/);
+});
+
+test('reports limited protection when process event collection is unavailable despite snapshot fallback', async () => {
+  const status = {
+    settings: { paused: false, monitorDownloadedFiles: true, monitorPersistenceChanges: true, monitorNetworkConnections: true },
+    processes: 'Snapshot procesów działa; 80 PID',
+    processEvents: 'Zdarzenia procesów WMI niedostępne (ManagementException); działa awaryjny snapshot PID.',
+    downloadedFiles: 'Monitoring Downloads działa; brak lokalnej listy hashy.',
+    persistence: 'Monitor zmian autostartu działa; baseline ustawiony.',
+    tcpConnections: 'Ciągła migawka TCP/UDP działa; 4 połączenia.'
+  };
+  const result = await getStatus(status, false, 'complete');
+  assert.equal(result.title, 'Ochrona ograniczona');
+  assert.match(result.description, /Zdarzenia startu procesów/);
 });
 
 test('does not report healthy protection when the required system service is unavailable', async () => {
@@ -51,7 +86,7 @@ test('does not report healthy protection when the required system service is una
   };
   assert.equal((await getStatus(status, false, 'complete', { available: false, reason: 'unavailable' })).title, 'Ochrona ograniczona');
   assert.match((await getStatus(status, false, 'complete', { available: false })).description, /usługi systemowej/);
-  assert.equal((await getStatus(status, false, 'complete', { available: true, lastCollectionAtUtc: new Date().toISOString() })).title, 'Monitorowanie działa');
+  assert.equal((await getStatus(status, false, 'complete', { available: true, lastCollectionAtUtc: new Date().toISOString() })).title, 'Ochrona ograniczona');
 });
 
 test('reports DNS cache failures and uncollected DNS state as limited protection', async () => {
@@ -71,7 +106,7 @@ test('reports DNS cache failures and uncollected DNS state as limited protection
   status.dns = 'Jeszcze nie wykonano odczytu cache DNS';
   assert.match((await getStatus(status, false, 'complete')).description, /Cache DNS/);
   status.dns = 'Odczyt cache DNS działa; bez DoH, pełnych URL i PID';
-  assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
+  assert.equal((await getStatus(status, false, 'complete')).title, 'Ochrona ograniczona');
 });
 
 test('reflects Windows Security Center attention and unknown health in the main status', async () => {
@@ -90,6 +125,6 @@ test('reflects Windows Security Center attention and unknown health in the main 
   status.windowsSecurityCenter.firewall = 'nieznany stan Windows Security Center';
   assert.equal((await getStatus(status, false, 'complete')).title, 'Stan Windows niepotwierdzony');
   status.windowsSecurityCenter.firewall = 'stan dobry według Windows Security Center';
-  assert.equal((await getStatus(status, false, 'complete')).title, 'Monitorowanie działa');
+  assert.equal((await getStatus(status, false, 'complete')).title, 'Ochrona ograniczona');
 });
 

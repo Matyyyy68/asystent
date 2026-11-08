@@ -303,6 +303,8 @@
 "NuGet","SQLitePCLRaw.core","2.1.13","expression:Apache-2.0","n/a","n/a","True"
 "NuGet","SQLitePCLRaw.lib.e_sqlite3","2.1.13","expression:Apache-2.0","n/a","n/a","True"
 "NuGet","SQLitePCLRaw.provider.e_sqlite3","2.1.13","expression:Apache-2.0","n/a","n/a","True"
+"NuGet","System.CodeDom","10.0.13","expression:MIT","n/a","n/a","True"
+"NuGet","System.Management","10.0.13","expression:MIT","n/a","n/a","True"
 "NuGet","System.ServiceProcess.ServiceController","10.0.13","expression:MIT","n/a","n/a","True"
 "NuGet","xunit","2.9.3","expression:Apache-2.0","n/a","n/a","True"
 "NuGet","xunit.abstractions","2.0.3","licenseUrl:https://raw.githubusercontent.com/xunit/xunit/master/license.txt","n/a","n/a","True"

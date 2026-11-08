@@ -25,6 +25,12 @@ internal static class MachineServiceInstaller
     private static string ServiceDataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Sentinel AI Service");
     private const uint ScManagerConnect = 0x0001;
     private const uint ServiceQueryConfig = 0x0001;
+    private const uint ServiceConfigFailureActions = 2;
+    private const uint ServiceConfigFailureActionsFlag = 4;
+    private const uint ScActionNone = 0;
+    private const uint ScActionRestart = 1;
+    private const uint ExpectedResetPeriodSeconds = 86400;
+    private const uint ExpectedRestartDelayMilliseconds = 60000;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeServiceConfig
@@ -40,6 +46,23 @@ internal static class MachineServiceInstaller
         public IntPtr DisplayName;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeServiceFailureActions
+    {
+        public uint ResetPeriodSeconds;
+        public IntPtr RebootMessage;
+        public IntPtr Command;
+        public uint ActionCount;
+        public IntPtr Actions;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeServiceAction
+    {
+        public uint Type;
+        public uint DelayMilliseconds;
+    }
+
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "OpenSCManagerW")]
     private static extern IntPtr OpenScManager(string? machineName, string? databaseName, uint desiredAccess);
 
@@ -49,6 +72,10 @@ internal static class MachineServiceInstaller
     [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "QueryServiceConfigW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool QueryServiceConfig(IntPtr service, IntPtr config, uint bufferSize, out uint bytesNeeded);
+
+    [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "QueryServiceConfig2W")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryServiceConfig2(IntPtr service, uint infoLevel, IntPtr buffer, uint bufferSize, out uint bytesNeeded);
 
     [DllImport("advapi32.dll", SetLastError = true, EntryPoint = "CloseServiceHandle")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -258,6 +285,8 @@ internal static class MachineServiceInstaller
             RunSc("failureflag", ServiceName, "1");
             stage = "verify_scm_service";
             EnsureOwnedService();
+            if (!HasExpectedRecoveryConfiguration())
+                throw new IOException("Windows nie zapisał wymaganej konfiguracji automatycznego odzyskiwania usługi Sentinel AI.");
             stage = "start_scm_service";
             RunSc("start", ServiceName);
             WaitForServiceState(4, TimeSpan.FromSeconds(60));
@@ -419,6 +448,66 @@ internal static class MachineServiceInstaller
     }
 
     private static (int ExitCode, string Output) QueryService() => RunScAllowError("query", ServiceName);
+
+    private static bool HasExpectedRecoveryConfiguration()
+    {
+        var manager = OpenScManager(null, null, ScManagerConnect);
+        if (manager == IntPtr.Zero) return false;
+        try
+        {
+            var service = OpenService(manager, ServiceName, ServiceQueryConfig);
+            if (service == IntPtr.Zero) return false;
+            try
+            {
+                if (!TryReadServiceConfig2(service, ServiceConfigFailureActions, out var actionsBuffer, out var actionsBytes)) return false;
+                try
+                {
+                    if (actionsBytes < Marshal.SizeOf<NativeServiceFailureActions>()) return false;
+                    var configuration = Marshal.PtrToStructure<NativeServiceFailureActions>(actionsBuffer);
+                    if (configuration.ResetPeriodSeconds != ExpectedResetPeriodSeconds || configuration.ActionCount != 3 || configuration.Actions == IntPtr.Zero) return false;
+                    var actionSize = Marshal.SizeOf<NativeServiceAction>();
+                    var expected = new (uint Type, uint Delay)[]
+                    {
+                        (ScActionRestart, ExpectedRestartDelayMilliseconds),
+                        (ScActionRestart, ExpectedRestartDelayMilliseconds),
+                        (ScActionNone, 0)
+                    };
+                    for (var index = 0; index < expected.Length; index++)
+                    {
+                        var action = Marshal.PtrToStructure<NativeServiceAction>(IntPtr.Add(configuration.Actions, checked(index * actionSize)));
+                        if (action.Type != expected[index].Type || action.DelayMilliseconds != expected[index].Delay) return false;
+                    }
+                }
+                finally { Marshal.FreeHGlobal(actionsBuffer); }
+
+                if (!TryReadServiceConfig2(service, ServiceConfigFailureActionsFlag, out var flagBuffer, out var flagBytes)) return false;
+                try
+                {
+                    return flagBytes >= sizeof(int) && Marshal.ReadInt32(flagBuffer) == 1;
+                }
+                finally { Marshal.FreeHGlobal(flagBuffer); }
+            }
+            finally { CloseServiceHandle(service); }
+        }
+        finally { CloseServiceHandle(manager); }
+    }
+
+    private static bool TryReadServiceConfig2(IntPtr service, uint infoLevel, out IntPtr buffer, out uint bytes)
+    {
+        buffer = IntPtr.Zero;
+        bytes = 0;
+        _ = QueryServiceConfig2(service, infoLevel, IntPtr.Zero, 0, out var needed);
+        if (Marshal.GetLastWin32Error() != 122 || needed == 0) return false;
+        var allocated = Marshal.AllocHGlobal(checked((int)needed));
+        if (!QueryServiceConfig2(service, infoLevel, allocated, needed, out var actual))
+        {
+            Marshal.FreeHGlobal(allocated);
+            return false;
+        }
+        buffer = allocated;
+        bytes = Math.Min(needed, actual == 0 ? needed : actual);
+        return true;
+    }
 
     private static void EnsureOwnedService()
     {

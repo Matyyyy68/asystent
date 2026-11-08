@@ -70,6 +70,25 @@ public sealed class AIProviderTests
     }
 
     [Fact]
+    public async Task ModelCannotRaiseRiskWithoutRuleEvidenceButCannotLowerRuleRiskEither()
+    {
+        const string response = """{"message":{"content":"{\"category\":\"CredentialPhishing\",\"risk\":\"Critical\",\"indicators\":[{\"description\":\"Model-only signal\",\"sourceReferences\":[]}],\"uncertainties\":[],\"recommendations\":[],\"explanation\":\"Model proposal\"}"}}""";
+        using var client = new HttpClient(new DelegateHandler(_ => Task.FromResult(Json(response))));
+        var orchestrator = new AnalysisOrchestrator(new ThreatAnalysisEngine(new UrlAnalyzer(new DomainNames())),
+            new OllamaLocalProvider(client), new TestKnowledgeProvider([]));
+
+        var noRuleEvidence = await orchestrator.AnalyzeAsync(new AnalysisContext("Synthetic", "Hello, this is a routine note.", DateTimeOffset.UtcNow),
+            true, "http://127.0.0.1:11434", "synthetic-model");
+        var ruleEvidence = await orchestrator.AnalyzeAsync(new AnalysisContext("Synthetic", "Pilnie: blokada konta. Zaloguj się.", DateTimeOffset.UtcNow),
+            true, "http://127.0.0.1:11434", "synthetic-model");
+
+        Assert.Equal(RiskLevel.Information, noRuleEvidence.Risk);
+        Assert.Equal(RiskLevel.Moderate, ruleEvidence.Risk);
+        Assert.Contains(noRuleEvidence.Indicators, item => item.Id.StartsWith("ai.context.", StringComparison.Ordinal) && item.Weight == 0);
+        Assert.Contains(ruleEvidence.Indicators, item => item.Id == "text.credentials");
+    }
+
+    [Fact]
     public async Task ProductionLocalAiTransportDoesNotFollowRedirectsToAnotherEndpoint()
     {
         using var redirectTarget = new TcpListener(IPAddress.Loopback, 0);
@@ -158,7 +177,8 @@ public sealed class AIProviderTests
         var result = await orchestrator.AnalyzeAsync(new AnalysisContext("Synthetic", "Review this payment transfer request.", DateTimeOffset.UtcNow),
             true, "http://127.0.0.1:11434", "synthetic-chat", "synthetic-embed");
 
-        Assert.Equal(RiskLevel.High, result.Risk);
+        Assert.Equal(RiskLevel.Information, result.Risk);
+        Assert.Contains(result.Uncertainties, item => item.Contains("nie podnosi samodzielnie", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(embeddingRequest);
         Assert.DoesNotContain("kb-secret-value", embeddingRequest, StringComparison.Ordinal);
         Assert.Contains("[dane poufne]", embeddingRequest, StringComparison.Ordinal);
@@ -366,7 +386,7 @@ public sealed class AIProviderTests
             var result = await service.AnalyzeAsync(new AnalysisContext("Synthetic", "Review this credential transfer request.", DateTimeOffset.UtcNow), true,
                 "http://127.0.0.1:11434", "synthetic-model");
 
-            Assert.Equal(RiskLevel.High, result.Risk);
+            Assert.Equal(RiskLevel.Information, result.Risk);
             Assert.NotNull(requestBody);
             using var sent = JsonDocument.Parse(requestBody);
             var userContent = sent.RootElement.GetProperty("messages")[1].GetProperty("content").GetString();

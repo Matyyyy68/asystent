@@ -204,6 +204,7 @@ internal static class Program
         private readonly System.Windows.Forms.Timer serviceEventCollector = new() { Interval = 30_000 };
         private readonly NotificationDeduplicator notificationDeduplicator = new(TimeSpan.FromMinutes(10), capacity: 8);
         private readonly NotificationDeduplicator serviceEventNotificationDeduplicator = new(TimeSpan.FromDays(7), capacity: 512);
+        private readonly NotificationDeduplicator defenderEventNotificationDeduplicator = new(TimeSpan.FromDays(7), capacity: 512);
         private readonly ServiceEventPollingGate serviceEventPollingGate = new();
         private readonly ServiceEventNotificationPreferences serviceEventNotificationPreferences = new(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sentinel AI", "State", "service-event-notifications.enabled"));
@@ -353,6 +354,17 @@ internal static class Program
                 var detections = result.TryGetProperty("detections", out var count) && count.TryGetInt32(out var total) ? total : 0;
                 if (notifications && detections > 0)
                     NotifyOnce("dns-reputation", "Sentinel AI — ostrzeżenie", "W cache DNS wykryto adres z lokalnie sprawdzanej listy reputacji. Ruch nie został zablokowany.", ToolTipIcon.Warning);
+                if (notifications && result.TryGetProperty("defenderOperationalAlertIds", out var defenderAlertIds) &&
+                    defenderAlertIds.ValueKind == JsonValueKind.Array && defenderAlertIds.GetArrayLength() <= 64)
+                {
+                    foreach (var element in defenderAlertIds.EnumerateArray())
+                    {
+                        if (element.ValueKind != JsonValueKind.String || !Guid.TryParse(element.GetString(), out var eventId) || eventId == Guid.Empty) continue;
+                        NotifyOnce("defender-event-" + eventId.ToString("N"), "Sentinel AI — alert Microsoft Defender",
+                            "Microsoft Defender zgłosił ważne zdarzenie. Sprawdź historię ochrony Windows i szczegóły w Sentinel AI; Sentinel nie usuwa ani nie blokuje pliku.",
+                            ToolTipIcon.Warning);
+                    }
+                }
                 var fileMatches = result.TryGetProperty("downloadedFileMatches", out var fileCount) && fileCount.TryGetInt32(out var matched) ? matched : 0;
                 if (notifications && fileMatches > 0)
                     NotifyOnce("file-reputation", "Sentinel AI — sprawdź plik", "SHA-256 nowego pliku dopasował się do lokalnej listy. Źródło listy nie jest niezależnie zweryfikowane.", ToolTipIcon.Warning, NotificationToneKind.Information);
@@ -412,11 +424,19 @@ internal static class Program
                     _ = serviceEventNotificationCursor.TryResetToLatest(batch.LatestEventId);
                 else if (notifyForNewEvents)
                 {
-                    foreach (var eventId in batch.Events.Where(item => item.Status == "New").Select(item => item.Id).Distinct())
+                    foreach (var item in batch.Events.Where(item => item.Status == "New" && ServiceEventNotificationPolicy.ShouldNotify(item.Risk)))
                     {
-                        if (!serviceEventNotificationDeduplicator.TryMark("service-event-" + eventId, DateTimeOffset.UtcNow)) continue;
-                        NotifyOnce("service-event-" + eventId, "Sentinel AI — nowe zdarzenie",
-                            "Usługa ochrony systemowej wykryła zdarzenie wymagające sprawdzenia. Otwórz Sentinel AI, aby zobaczyć szczegóły.",
+                        var defenderEventId = string.Equals(item.Source, "windows-defender-operational", StringComparison.Ordinal) ? item.EventId : null;
+                        var key = defenderEventId is { } stableId
+                            ? "defender-event-" + stableId.ToString("N")
+                            : "service-event-" + item.Id.ToString(CultureInfo.InvariantCulture);
+                        if (!serviceEventNotificationDeduplicator.TryMark(key, DateTimeOffset.UtcNow)) continue;
+                        var isDefender = defenderEventId.HasValue;
+                        NotifyOnce(key,
+                            isDefender ? "Sentinel AI — alert Microsoft Defender" : "Sentinel AI — nowe zdarzenie",
+                            isDefender
+                                ? "Microsoft Defender zgłosił ważne zdarzenie. Sprawdź historię ochrony Windows i szczegóły w Sentinel AI; Sentinel nie usuwa ani nie blokuje pliku."
+                                : "Usługa ochrony systemowej wykryła zdarzenie wymagające sprawdzenia. Otwórz Sentinel AI, aby zobaczyć szczegóły.",
                             ToolTipIcon.Warning);
                     }
                 }
@@ -470,7 +490,8 @@ internal static class Program
                         item.TryGetProperty("processId", out var pid) && pid.TryGetInt32(out var processId) ? processId : null,
                         item.TryGetProperty("processName", out var process) && process.ValueKind == JsonValueKind.String ? process.GetString() : null,
                         item.TryGetProperty("correlationId", out var correlation) && correlation.ValueKind == JsonValueKind.String && correlation.TryGetGuid(out var correlationId) ? correlationId : null,
-                        ReadStringArray(item, "evidenceCodes", 32), ReadStringArray(item, "analysisLimitations", 16)));
+                        ReadStringArray(item, "evidenceCodes", 32), ReadStringArray(item, "analysisLimitations", 16),
+                        item.TryGetProperty("riskScore", out var riskScore) && riskScore.TryGetInt32(out var scoreValue) ? scoreValue : null));
                 }
                 if (batch.Count == 0) return;
                 var acknowledged = await SystemServiceEventsClient.ForwardEventsAsync(batch, shutdown.Token);
@@ -512,7 +533,9 @@ internal static class Program
         private void NotifyOnce(string key, string title, string message, ToolTipIcon icon,
             NotificationToneKind tone = NotificationToneKind.Warning)
         {
-            if (!notificationDeduplicator.TryMark(key, DateTimeOffset.UtcNow)) return;
+            var deduplicator = key.StartsWith("defender-event-", StringComparison.Ordinal)
+                ? defenderEventNotificationDeduplicator : notificationDeduplicator;
+            if (!deduplicator.TryMark(key, DateTimeOffset.UtcNow)) return;
             alertUntil = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
             tray.Icon = SystemIcons.Warning;
             pendingNotifications.Add((key, title, message, icon, tone));
@@ -554,6 +577,7 @@ internal static class Program
             "persistence-writable-location" => "zmiana autostartu Windows",
             "windows-security-center-antivirus" => "stan antywirusa Windows",
             "windows-security-center-firewall" => "stan zapory Windows",
+            _ when key.StartsWith("defender-event-", StringComparison.Ordinal) => "alert Microsoft Defender",
             _ => "sygnał wymagający sprawdzenia"
         };
 

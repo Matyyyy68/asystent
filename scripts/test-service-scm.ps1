@@ -43,6 +43,33 @@ function Wait-ServiceState([string] $Name, [string] $Expected, [int] $TimeoutSec
   throw "Service '$Name' did not reach $Expected; current state: $actual"
 }
 
+function Read-ServiceStatus {
+  $statusPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'SentinelAI.Service.Status.v1',
+    [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None,
+    [Security.Principal.TokenImpersonationLevel]::Impersonation)
+  $statusReader = $null
+  $statusWriter = $null
+  try {
+    $statusPipe.Connect(1500)
+    $statusReader = [IO.StreamReader]::new($statusPipe, [Text.UTF8Encoding]::new($false), $false, 1024, $true)
+    $statusWriter = [IO.StreamWriter]::new($statusPipe, [Text.UTF8Encoding]::new($false), 1024, $true)
+    $statusWriter.AutoFlush = $true
+    $requestId = 'engine-recovery-' + [Guid]::NewGuid().ToString('N')
+    $statusWriter.WriteLine(('{"id":"' + $requestId + '","version":1,"method":"status"}'))
+    $line = $statusReader.ReadLine()
+    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
+    $response = $line | ConvertFrom-Json
+    if ($response.id -ne $requestId -or $response.ok -ne $true -or
+        [string]::IsNullOrWhiteSpace($response.result.lastCollectionAtUtc)) { return $null }
+    return $response.result
+  } catch { return $null }
+  finally {
+    if ($null -ne $statusReader) { $statusReader.Dispose() }
+    if ($null -ne $statusWriter) { $statusWriter.Dispose() }
+    $statusPipe.Dispose()
+  }
+}
+
 try {
   if (Get-Service -Name $serviceName -ErrorAction SilentlyContinue) {
     throw "Refusing to replace an existing Windows service named '$serviceName'."
@@ -80,6 +107,9 @@ try {
   Invoke-Sc @('create', $serviceName, 'binPath=', $quotedBinPath, 'start=', 'demand', 'obj=', 'NT AUTHORITY\LocalService') | Out-Null
   $serviceCreated = $true
   $mayRemoveServiceDataRoot = $true
+  # Use short recovery delays only for this disposable CI service so the crash/restart test stays bounded.
+  Invoke-Sc @('failure', $serviceName, 'reset=', '86400', 'actions=', 'restart/1000/restart/1000/none/0') | Out-Null
+  Invoke-Sc @('failureflag', $serviceName, '1') | Out-Null
   Invoke-Sc @('start', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Running' 90 | Out-Null
 
@@ -205,9 +235,86 @@ try {
     $forwardedPipe.Dispose()
   }
 
+  $serviceBeforeCrash = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+  $serviceProcessId = [int]$serviceBeforeCrash.ProcessId
+  $engineProcess = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
+    Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
+  if ($serviceBeforeCrash.State -ne 'Running' -or $serviceProcessId -le 0 -or $null -eq $engineProcess -or [int]$engineProcess.ProcessId -le 0) {
+    throw 'Could not identify the running isolated service and Engine processes for the Engine recovery test.'
+  }
+  $engineProcessId = [int]$engineProcess.ProcessId
+  $engineStartsBeforeFailure = [regex]::Matches($log, 'ENGINE_STARTED under service account').Count
+  $collectionBeforeEngineFailure = [DateTimeOffset]::Parse($statusResponse.result.lastCollectionAtUtc).ToUniversalTime()
+  & taskkill.exe /PID $engineProcessId /T /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not terminate the isolated Engine process for its recovery test (exit $LASTEXITCODE)." }
+
+  $engineRecoveryDeadline = [DateTimeOffset]::UtcNow.AddSeconds(45)
+  $engineRecoveryVerified = $false
+  do {
+    $log = if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }
+    $currentService = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+    $currentEngine = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
+      Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
+    if ($currentService.State -eq 'Running' -and [int]$currentService.ProcessId -eq $serviceProcessId -and
+        $null -ne $currentEngine -and [int]$currentEngine.ProcessId -ne $engineProcessId) {
+      $currentStatus = Read-ServiceStatus
+      if ($null -ne $currentStatus -and
+          [DateTimeOffset]::Parse($currentStatus.lastCollectionAtUtc).ToUniversalTime() -gt $collectionBeforeEngineFailure) {
+        $engineRecoveryVerified = $true
+        break
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  } while ([DateTimeOffset]::UtcNow -lt $engineRecoveryDeadline)
+  if (-not $engineRecoveryVerified) {
+        $finalEngineStarts = [regex]::Matches($log, 'ENGINE_STARTED under service account').Count
+    $finalService = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+    $finalEngine = Get-CimInstance Win32_Process -Filter "Name='Sentinel.Engine.exe'" |
+      Where-Object { [int]$_.ParentProcessId -eq $serviceProcessId } | Select-Object -First 1
+    $finalStatus = Read-ServiceStatus
+    $finalCollection = if ($null -ne $finalStatus) { $finalStatus.lastCollectionAtUtc } else { '<unavailable>' }
+    $finalEngineId = if ($null -ne $finalEngine) { [int]$finalEngine.ProcessId } else { 0 }
+    throw "Engine recovery failed: original PID=$engineProcessId, current Engine PID=$finalEngineId, service state=$($finalService.State), service PID=$([int]$finalService.ProcessId), expected service PID=$serviceProcessId, Engine start count=$finalEngineStarts (before=$engineStartsBeforeFailure), last collection=$finalCollection."
+  }
+  Write-Host "PASS: Service restarted Engine process $engineProcessId while retaining service PID $serviceProcessId and reported a fresh collection."
+
+  $serviceBeforeCrash = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+  $crashedProcessId = [int]$serviceBeforeCrash.ProcessId
+  if ($serviceBeforeCrash.State -ne 'Running' -or $crashedProcessId -le 0) {
+    throw 'Could not identify the running isolated service process for the recovery test.'
+  }
+  $collectionsBeforeCrash = [regex]::Matches($log, 'CORE_FIRST_COLLECTION_COMPLETED').Count
+  & taskkill.exe /PID $crashedProcessId /T /F | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not terminate the isolated service process for its recovery test (exit $LASTEXITCODE)." }
+
+  $restartDeadline = [DateTimeOffset]::UtcNow.AddSeconds(45)
+  $restartedService = $null
+  do {
+    $candidate = Get-CimInstance Win32_Service -Filter "Name='Sentinel AI Core'"
+    if ($candidate.State -eq 'Running' -and [int]$candidate.ProcessId -gt 0 -and [int]$candidate.ProcessId -ne $crashedProcessId) {
+      $restartedService = $candidate
+      break
+    }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTimeOffset]::UtcNow -lt $restartDeadline)
+  if ($null -eq $restartedService) {
+    throw "SCM did not restart the isolated service after process $crashedProcessId terminated."
+  }
+
+  $collectionDeadline = [DateTimeOffset]::UtcNow.AddSeconds(90)
+  do {
+    $log = if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '' }
+    if ([regex]::Matches($log, 'CORE_FIRST_COLLECTION_COMPLETED').Count -gt $collectionsBeforeCrash) { break }
+    Start-Sleep -Milliseconds 250
+  } while ([DateTimeOffset]::UtcNow -lt $collectionDeadline)
+  if ([regex]::Matches($log, 'CORE_FIRST_COLLECTION_COMPLETED').Count -le $collectionsBeforeCrash) {
+    throw 'SCM restarted the service process, but it did not complete a fresh Engine collection.'
+  }
+  Write-Host "PASS: SCM automatically restarted process $crashedProcessId as PID $($restartedService.ProcessId), and the Engine completed a fresh collection."
+
   Invoke-Sc @('stop', $serviceName) | Out-Null
   Wait-ServiceState $serviceName 'Stopped' 30 | Out-Null
-  Write-Host 'PASS: SCM start/stop, LocalService identity, protected ProgramData DACL, first Engine collection, authenticated status and event pipes, Agent Engine diagnostics, Agent event read and Agent-to-Service persisted event forwarding.'
+  Write-Host 'PASS: SCM start/stop/recovery, LocalService identity, protected ProgramData DACL, first and post-recovery Engine collection, authenticated status and event pipes, Agent Engine diagnostics, Agent event read and Agent-to-Service persisted event forwarding.'
 }
 finally {
   if ($serviceCreated) {

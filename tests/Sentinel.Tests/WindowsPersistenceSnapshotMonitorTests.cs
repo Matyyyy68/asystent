@@ -10,6 +10,67 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
     private readonly string root = Path.Combine(Path.GetTempPath(), "sentinel-persistence-monitor-" + Guid.NewGuid());
 
     [Fact]
+    public void DefenderExclusionSnapshotUsesOpaqueIdentifiersAndDetectsValueChanges()
+    {
+        const string privatePath = @"C:\Users\Mateusz\AppData\Local\Microsoft\Windows Defender\Exclusions\private";
+        var first = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
+            "Paths", privatePath, "DWord", 0);
+        var unchanged = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
+            "Paths", privatePath, "DWord", 0);
+        var changed = WindowsPersistenceSnapshotMonitor.CreateDefenderExclusionSnapshotEntry(
+            "Paths", privatePath, "DWord", 1);
+
+        Assert.Equal(first.Key, unchanged.Key);
+        Assert.Equal(first.Entry.Fingerprint, unchanged.Entry.Fingerprint);
+        Assert.Equal(first.Key, changed.Key);
+        Assert.NotEqual(first.Entry.Fingerprint, changed.Entry.Fingerprint);
+        Assert.Equal("security.registry.defender.exclusion", first.Entry.Source);
+        Assert.DoesNotContain("Mateusz", first.Key, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Mateusz", first.Entry.Fingerprint, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Windows Defender", first.Key, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SecurityConfigurationFingerprintHashesContentWithoutRetainingIt()
+    {
+        var path = Path.Combine(root, "hosts");
+        const string contents = "127.0.0.1 sensitive-test-host.example";
+        Assert.Null(WindowsPersistenceSnapshotMonitor.ComputeSecurityConfigurationFingerprint(path));
+
+        Directory.CreateDirectory(root);
+        File.WriteAllText(path, contents);
+        var fingerprint = WindowsPersistenceSnapshotMonitor.ComputeSecurityConfigurationFingerprint(path);
+
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(contents))), fingerprint);
+        Assert.DoesNotContain(contents, fingerprint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HostsFileChangeIsReportedAsInformationalAndWithoutContentsOrPath()
+    {
+        var store = await CreateStore();
+        var entryKey = "security.file.hosts:synthetic-system-hosts";
+        var snapshot = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal)
+        {
+            [entryKey] = Entry("security.file.hosts", "hosts-fingerprint-v1", false)
+        };
+        using var monitor = new WindowsPersistenceSnapshotMonitor(() => snapshot, TimeSpan.Zero);
+
+        Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+        snapshot[entryKey] = Entry("security.file.hosts", "hosts-fingerprint-v2", false);
+
+        Assert.Equal(1, await monitor.CollectAsync(store, enabled: true, paused: false));
+        var item = Assert.Single(await store.ReadAsync());
+        Assert.Equal("Zmiana pliku hosts Windows", item.Category);
+        Assert.Equal(RiskLevel.Information, item.Risk);
+        Assert.Contains("persistence.hosts.changed", item.EvidenceCodes!);
+        Assert.Contains("Treść pliku nie jest zapisywana", item.Explanation);
+        var serialized = System.Text.Json.JsonSerializer.Serialize(item);
+        Assert.DoesNotContain("synthetic-system-hosts", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("hosts-fingerprint", serialized, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task BaselineIsSilentAndLaterChangesAreLocalAndRedacted()
     {
         var store = await CreateStore();
@@ -41,6 +102,45 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         Assert.Contains("zapisano 1 zmian", monitor.State, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
         Assert.Equal(0, monitor.LastSuspiciousChanges);
+    }
+
+    [Fact]
+    public async Task StartupFolderWatcherExpeditesSnapshotConfirmation()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var store = await CreateStore();
+        var startup = Path.Combine(root, "startup-watch");
+        Directory.CreateDirectory(startup);
+        var entries = new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal);
+        var noTasks = new ScheduledTaskSnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var noServices = new PersistenceRegistrySnapshotCapture(false,
+            new Dictionary<string, PersistenceSnapshotEntry>(StringComparer.Ordinal), "test niedostępny");
+        var monitor = new WindowsPersistenceSnapshotMonitor(
+            () => new PersistenceBaseSnapshotCapture(true, entries, true, true, "test"),
+            _ => Task.FromResult(noTasks), _ => Task.FromResult(noServices),
+            TimeSpan.FromSeconds(30), () => [startup]);
+        using (monitor)
+        {
+            Assert.Equal(0, await monitor.CollectAsync(store, enabled: true, paused: false));
+            Assert.Contains("FileSystemWatcher aktywny", monitor.State, StringComparison.Ordinal);
+
+            await File.WriteAllTextAsync(Path.Combine(startup, "new-entry.lnk"), "synthetic startup entry");
+            entries["startup.user:test"] = Entry("startup.user", "synthetic startup entry", true);
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var captured = 0;
+            while (DateTime.UtcNow < deadline && captured == 0)
+            {
+                captured = await monitor.CollectAsync(store, enabled: true, paused: false);
+                if (captured == 0) await Task.Delay(50);
+            }
+
+            Assert.Equal(1, captured);
+            Assert.Single(await store.ReadAsync());
+            Assert.Contains("zapisano 1 zmian", monitor.State, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     [Fact]
@@ -961,7 +1061,7 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         await using var verify = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={store.DatabasePath};Pooling=False");
         await verify.OpenAsync();
         using var version = verify.CreateCommand(); version.CommandText = "PRAGMA user_version";
-        Assert.Equal(38L, (long)(await version.ExecuteScalarAsync())!);
+        Assert.Equal(43L, (long)(await version.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -1038,3 +1138,4 @@ public sealed class WindowsPersistenceSnapshotMonitorTests : IDisposable
         catch { }
     }
 }
+

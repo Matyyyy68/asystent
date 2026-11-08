@@ -139,7 +139,8 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   assert.equal(importedUrlFeed.ok, true, importedUrlFeed.error); assert.equal(importedUrlFeed.result.urlCount, 1);
   const exactUrlAnalysis = await call('analyze', { text: '', url: exactFeedUrl });
   assert.equal(exactUrlAnalysis.ok, true, exactUrlAnalysis.error);
-  assert.equal(exactUrlAnalysis.result.risk, 'High');
+  assert.equal(exactUrlAnalysis.result.risk, 'Information');
+  assert.equal(exactUrlAnalysis.result.riskScore, 0, 'an unverified local URL list must not independently assign numeric risk');
   assert.ok(exactUrlAnalysis.result.indicators.some(indicator => indicator.id === 'reputation.url-feed'));
   const exactUrlHistory = (await call('history')).result;
   assert.equal(exactUrlHistory.length, 1);
@@ -180,6 +181,16 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const matchingDownloadedEvent = downloadedHistory.find(event => (event.source === 'downloads-local-hash' || event.observations?.some(observation => observation.source === 'downloads-local-hash')) &&
     event.evidenceCodes?.includes('file.sha256.matches-local-list'));
   assert.ok(matchingDownloadedEvent, 'the matching Downloads signal must be eligible for an explicitly requested quarantine action');
+  const responseCodes = {
+    Information: 'response.record-only',
+    Low: 'response.review-in-history',
+    Moderate: 'response.notify-review',
+    High: 'response.high-review',
+    Critical: 'response.critical-review'
+  };
+  assert.ok(responseCodes[matchingDownloadedEvent.risk], 'the detected risk must map to a supported response action');
+  assert.ok(matchingDownloadedEvent.recommendation.includes(responseCodes[matchingDownloadedEvent.risk]),
+    'the central response decision must be persisted with the detection visible in history');
   const quarantined = await call('quarantineDownloadedFile', { eventId: matchingDownloadedEvent.id, path: downloadedFixture });
   assert.equal(quarantined.ok, true, quarantined.error);
   assert.equal(quarantined.result.state, 'Quarantined');
@@ -277,6 +288,10 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
     assert.ok(matchedTcpEvent,
       'enabled monitor must persist the controlled non-loopback TCP connection with its remote IP');
     assert.equal(matchedTcpEvent.risk, 'High', 'new TCP connection matching the imported feed must raise a local high-risk alert');
+    assert.ok(matchedTcpEvent.recommendation.includes('response.high-review'),
+      'a high-risk network detection must carry the central urgent-review response decision');
+    assert.match(matchedTcpEvent.recommendation, /proces lub ruch nie zostały zablokowane/,
+      'response guidance must not claim an automatic block that did not occur');
     assert.ok(matchedTcpEvent.evidenceCodes.includes('reputation.ip-feed.match'));
     tcpMonitorClient.end(); await new Promise(resolve => tcpMonitorServer.close(resolve)); tcpMonitorClient = null; tcpMonitorServer = null;
     console.log('PASS: opt-in TCP monitor matched the controlled non-loopback connection against the imported local IP feed');
@@ -373,7 +388,7 @@ const timeout = setTimeout(() => { child.kill(); process.exitCode = 1; console.e
   const historyCsvPath = path.join(backups, 'history.csv');
   const csvExportResult = await call('historyExportCsv', { path: historyCsvPath }); assert.equal(csvExportResult.ok, true, csvExportResult.error);
   const exportedCsv = readFileSync(historyCsvPath, 'utf8');
-  assert.ok(exportedCsv.includes('timestamp_utc,processed_at_utc,risk,category') && exportedCsv.includes('analysis_limitations'));
+  assert.ok(exportedCsv.includes('timestamp_utc,processed_at_utc,risk,risk_score,category') && exportedCsv.includes('analysis_limitations'));
   assert.ok(exportedCsv.includes(history[0].id));
   assert.ok(!exportedCsv.includes('https://paypal.com.evil.test/login'));
   assert.ok(!exportedCsv.includes('Pilnie zaloguj się i podaj hasło'));

@@ -76,9 +76,8 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
         if (!urgency && priorUrgency && indicators.Any(s => s.Id == "text.credentials"))
             Add("context.urgency", "W tym samym oknie niedawno wystąpiła presja czasu, a teraz prośba o logowanie.", 2, ThreatCategory.CredentialPhishing);
         indicators = indicators.DistinctBy(i => i.Id).ToList();
-        int score = indicators.Sum(i => i.Weight);
-        // Explicit aggregation, not a calibrated probability. A single weak signal is never a high alert.
-        var risk = score == 0 ? RiskLevel.Information : score <= 2 ? RiskLevel.Low : score < 7 || indicators.Count < 2 ? RiskLevel.Moderate : score < 12 || indicators.Count < 3 ? RiskLevel.High : RiskLevel.Critical;
+        var riskAssessment = RiskEngine.Evaluate(indicators);
+        var risk = riskAssessment.Level;
         var category = indicators.OrderByDescending(i => i.Weight).Select(i => i.Category).FirstOrDefault();
         if (indicators.Any(i => i.Id == "text.payment") && !indicators.Any(i => i.Id == "text.credentials") && !indicators.Any(i => i.Weight >= 4)) category = ThreatCategory.PaymentFraud;
         if (indicators.Any(i => i.Id == "text.credentials") && indicators.Any(i => i.Id.StartsWith("url.", StringComparison.Ordinal) && i.Weight >= 3)) category = ThreatCategory.CredentialPhishing;
@@ -100,7 +99,7 @@ public sealed class ThreatAnalysisEngine(UrlAnalyzer urls)
             ["Nie podawaj danych, nie wykonuj przelewu ani polecenia przed weryfikacją.", "Otwórz usługę ze znanego adresu i skontaktuj się z nadawcą niezależnym kanałem."];
         var explanation = indicators.Count == 0 ? "Nie wykryto sygnałów obsługiwanych przez reguły. To nie jest potwierdzenie bezpieczeństwa." :
             string.Join(" ", indicators.Select(i => i.Description)) + " Możliwe konsekwencje obejmują utratę danych, pieniędzy lub kontroli nad urządzeniem.";
-        return new(category, risk, indicators, uncertainty, recommendations, explanation);
+        return new(category, risk, indicators, uncertainty, recommendations, explanation, riskAssessment.Score);
     }
 
     public static (IReadOnlyList<string> Urls, bool Truncated, bool ContainsDefanged) ExtractEmbeddedUrls(string text)

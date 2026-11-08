@@ -8,9 +8,12 @@ const continueButton = document.getElementById("continue");
 const stopDownloadButton = document.getElementById('stop-download');
 const downloadActionStatus = document.getElementById('download-action-status');
 chrome.runtime.sendMessage({ type: "details", token }).then((details) => {
+  const localUrlListMatch = (details?.indicators ?? []).some(signal => signal.id === 'reputation.url-feed');
   if (details?.kind === 'download') {
-    title.textContent = 'Podejrzane źródło pobierania';
-    description.textContent = 'Pobieranie mogło już się rozpocząć. Nie otwieraj pliku. Sprawdź go lokalnym skanem Sentinel lub usuń; możesz też zatrzymać pobieranie w przeglądarce.';
+    title.textContent = localUrlListMatch ? 'Adres jest na lokalnej liście' : 'Podejrzane źródło pobierania';
+    description.textContent = localUrlListMatch
+      ? 'Adres pasuje do ręcznie zaimportowanej listy, której źródło Sentinel nie zweryfikował. To nie potwierdza malware. Nie otwieraj pliku przed sprawdzeniem; możesz zatrzymać transfer.'
+      : 'Pobieranie mogło już się rozpocząć. Nie otwieraj pliku. Sprawdź go lokalnym skanem Sentinel lub usuń; możesz też zatrzymać pobieranie w przeglądarce.';
     footnote.textContent = 'Rozszerzenie sprawdza adres źródła, nie zawartość pobranego pliku.';
     continueButton.hidden = true;
     stopDownloadButton.hidden = !details.canStopDownload;
