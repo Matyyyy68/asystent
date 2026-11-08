@@ -17,6 +17,16 @@ public sealed class ServiceEventPipeProtocolTests
             item => Assert.Equal(new SystemServiceEvent(42, "Critical", "Reviewed"), item));
     }
 
+    [Fact]
+    public void ParsesStableEventIdentityAndSourceForCrossProcessNotificationDeduplication()
+    {
+        var eventId = Guid.Parse("ca8ca7a2-c708-43b2-9c35-619f541dd54d");
+        var parsed = ServiceEventPipeProtocol.ParseResponse(
+            """{"id":"agent-events","version":1,"ok":true,"result":{"latestEventId":8,"events":[{"id":8,"risk":"High","status":"New","eventId":"ca8ca7a2-c708-43b2-9c35-619f541dd54d","source":"windows-defender-operational"}]}}""");
+
+        Assert.Equal(new SystemServiceEvent(8, "High", "New", eventId, "windows-defender-operational"), Assert.Single(parsed.Events));
+    }
+
     [Theory]
     [InlineData("{\"id\":7,\"version\":1,\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[]}}")]
     [InlineData("{\"id\":\"agent-events\",\"version\":\"1\",\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[]}}")]
@@ -24,6 +34,8 @@ public sealed class ServiceEventPipeProtocolTests
     [InlineData("{\"id\":\"agent-events\",\"version\":1,\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[{\"id\":1,\"risk\":\"Unknown\",\"status\":\"New\"}]}}")]
     [InlineData("{\"id\":\"agent-events\",\"version\":1,\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[{\"id\":1,\"risk\":\"Low\",\"status\":\"Unknown\"}]}}")]
     [InlineData("{\"id\":\"agent-events\",\"version\":1,\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[{\"id\":1,\"risk\":null,\"status\":\"New\"}]}}")]
+    [InlineData("{\"id\":\"agent-events\",\"version\":1,\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[{\"id\":1,\"risk\":\"Low\",\"status\":\"New\",\"eventId\":\"not-a-guid\"}]}}")]
+    [InlineData("{\"id\":\"agent-events\",\"version\":1,\"ok\":true,\"result\":{\"latestEventId\":0,\"events\":[{\"id\":1,\"risk\":\"Low\",\"status\":\"New\",\"source\":\"bad\\nsource\"}]}}")]
     [InlineData("[]")]
     public void RejectsMalformedOrUnknownResponses(string json)
         => Assert.Throws<InvalidDataException>(() => ServiceEventPipeProtocol.ParseResponse(json));
