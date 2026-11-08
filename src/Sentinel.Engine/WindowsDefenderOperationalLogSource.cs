@@ -6,7 +6,7 @@ using Sentinel.Core.Analysis;
 namespace Sentinel.Engine;
 
 /// <summary>Read-only collection of selected Microsoft Defender Antivirus Operational events.</summary>
-public sealed class WindowsDefenderOperationalLogSource
+public sealed class WindowsDefenderOperationalLogSource : IWindowsDefenderOperationalLogSource
 {
     public const string ChannelName = "Microsoft-Windows-Windows Defender/Operational";
     public const int MaximumBatchSize = 64;
