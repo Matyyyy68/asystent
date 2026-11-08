@@ -6,7 +6,7 @@ Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel n
 
 ## Aktualizacja 2026-11-08 — testowalna pętla Defender Operational
 
-Odczyt i trwałość zdarzeń Defendera zostały wydzielone z głównego pliku Engine do `WindowsDefenderOperationalCollector`, z wstrzykiwanym źródłem dziennika. Dodano testy kursora pierwszego uruchomienia, zapisu nowych zdarzeń, poziomu alertu, resetu dziennika, kanału wyłączonego i braku powtórnych wpisów po ponownym otwarciu SQLite. CI dla commita [`5e0f4c3`](https://github.com/Matyyyy68/asystent/commit/5e0f4c36443877417d863636ce45fa42bf97f7d5) jest uruchomione: [run 42431578342](https://github.com/Matyyyy68/asystent/actions/runs/42431578342). Poprzedni przebieg ujawnił dwa błędy kompilacji w integracji/testach; zostały poprawione przed bieżącym przebiegiem. Wynik całego CI pozostaje **niepotwierdzony**.
+Odczyt i trwałość zdarzeń Defendera zostały wydzielone z głównego pliku Engine do `WindowsDefenderOperationalCollector`, z wstrzykiwanym źródłem dziennika. Dodano testy kursora pierwszego uruchomienia, zapisu nowych zdarzeń, poziomu alertu, resetu dziennika, kanału wyłączonego i braku powtórnych wpisów po ponownym otwarciu SQLite. Pełny Windows CI dla headu [`6e9c258`](https://github.com/Matyyyy68/asystent/commit/6e9c258281b4668a4f425b33246e64339fb91023) zakończył się PASS w [run 42432350838](https://github.com/Matyyyy68/asystent/actions/runs/42432350838): .NET 575/575, Enterprise API 23/23 oraz wszystkie 23 kroki workflow, w tym wymuszony odbiór WMI, benchmark, test usługi SCM/ACL, soak Downloads, przeglądarki i instalator headless/GUI. Dwa wcześniejsze błędy kompilacji zostały naprawione przed tym przebiegiem. To nadal izolowany Windows CI, nie test na fizycznie czystym komputerze.
 
 ## Dowody wykonania
 
