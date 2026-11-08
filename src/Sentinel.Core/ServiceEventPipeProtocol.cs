@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Sentinel.Core;
 
-public sealed record SystemServiceEvent(long Id, string Risk, string Status);
+public sealed record SystemServiceEvent(long Id, string Risk, string Status, Guid? EventId = null, string? Source = null);
 
 public sealed record SystemServiceEventBatch(long LatestEventId, IReadOnlyList<SystemServiceEvent> Events);
 
@@ -47,7 +47,24 @@ public static class ServiceEventPipeProtocol
             if (status is not ("New" or "Reviewed" or "FalsePositive"))
                 throw new InvalidDataException("System service returned an unknown event status.");
 
-            parsed.Add(new SystemServiceEvent(value, risk, status));
+            Guid? stableEventId = null;
+            if (item.TryGetProperty("eventId", out var stableIdElement) && stableIdElement.ValueKind != JsonValueKind.Null)
+            {
+                if (stableIdElement.ValueKind != JsonValueKind.String ||
+                    !Guid.TryParse(stableIdElement.GetString(), out var parsedEventId) || parsedEventId == Guid.Empty)
+                    throw new InvalidDataException("System service returned an invalid event identity.");
+                stableEventId = parsedEventId;
+            }
+            string? source = null;
+            if (item.TryGetProperty("source", out var sourceElement) && sourceElement.ValueKind != JsonValueKind.Null)
+            {
+                if (sourceElement.ValueKind != JsonValueKind.String || sourceElement.GetString() is not { Length: > 0 and <= 64 } sourceText ||
+                    sourceText.Any(char.IsControl))
+                    throw new InvalidDataException("System service returned an invalid event source.");
+                source = sourceText;
+            }
+
+            parsed.Add(new SystemServiceEvent(value, risk, status, stableEventId, source));
         }
 
         return new SystemServiceEventBatch(latestId, parsed);
