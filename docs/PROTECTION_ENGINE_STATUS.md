@@ -3,6 +3,11 @@
 Data audytu: 2026-11-08  
 Zakres: bieżący stan gałęzi `codex/sentinel-wmi-process-events`. Cały cel nadal **IN PROGRESS**.
 
+
+## Aktualizacja 2026-11-08 — testowalna pętla Defender Operational
+
+Odczyt i trwałość zdarzeń Defendera zostały wydzielone z głównego pliku Engine do `WindowsDefenderOperationalCollector`, z wstrzykiwanym źródłem dziennika. Dodano testy kursora pierwszego uruchomienia, zapisu nowych zdarzeń, poziomu alertu, resetu dziennika, kanału wyłączonego i braku powtórnych wpisów po ponownym otwarciu SQLite. CI dla commita [`5e0f4c3`](https://github.com/Matyyyy68/asystent/commit/5e0f4c36443877417d863636ce45fa42bf97f7d5) jest uruchomione: [run 42431578342](https://github.com/Matyyyy68/asystent/actions/runs/42431578342). Poprzedni przebieg ujawnił dwa błędy kompilacji w integracji/testach; zostały poprawione przed bieżącym przebiegiem. Wynik całego CI pozostaje **niepotwierdzony**.
+
 ## Dowody wykonania
 
 Pełny Windows CI dla commita [`605ed33`](https://github.com/Matyyyy68/asystent/commit/605ed338cadb67108a5bbfd656c6b049c78b7dd7) zakończył się PASS w [run 42426389929](https://github.com/Matyyyy68/asystent/actions/runs/42426389929). Przeszły kompilacja i testy .NET, pomiar Engine, kontrola zasobów, testy usługi SCM, aplikacji Electron, przekierowanego katalogu Downloads i jego 120-sekundowy soak, E2E rozszerzenia, instalator headless i widoczny kreator oraz Enterprise API. Nowe testy pokrywają parser zdarzeń Defendera, ochronę prywatności pól i trwałość kursora po ponownym otwarciu bazy. To testy syntetycznego XML i izolowanego runnera; nie wymuszano rzeczywistego wykrycia Defendera, a fizyczny restart czystego Windows nadal nie był sprawdzony.
