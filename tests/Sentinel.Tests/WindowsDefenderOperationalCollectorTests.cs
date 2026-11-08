@@ -1,4 +1,5 @@
 using Sentinel.Core;
+using Sentinel.Core.Analysis;
 using Sentinel.Engine;
 using Xunit;
 using System.Globalization;
